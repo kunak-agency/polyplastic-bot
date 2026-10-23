@@ -62,6 +62,14 @@ def test_routed_topics_skip_rag_and_llm(make_pipeline, question, topic):
     assert spy.calls == 0
 
 
+@pytest.mark.parametrize("question", ["Что делать при конфликте интересов?",
+                                      "Подарок от поставщика создаёт конфликт интересов?"])
+def test_conflict_of_interest_is_not_routed(question):
+    from routing import route_question
+    assert route_question(question) is None  # тема антикоррупционной политики, не ссора
+    assert route_question("У нас конфликт в бригаде") is not None
+
+
 @pytest.mark.parametrize("question", ["Когда зарплата?", "Когда выплачивают аванс?"])
 def test_generic_salary_question_is_not_routed(make_pipeline, question):
     res = make_pipeline().ask(question)

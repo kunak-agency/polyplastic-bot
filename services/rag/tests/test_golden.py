@@ -57,3 +57,32 @@ def test_eval_llm_metrics_on_fake_llm(chunks):
     assert bad["answer_acc"] == metrics(run_config("bm25", items, chunks, None))["answer_acc"]  # fallback = экстрактив
     plain = metrics(run_config("bm25", items, chunks, None))
     assert plain["n_llm_calls"] == 0 and plain["llm_fallback"] != plain["llm_fallback"]  # nan без LLM
+
+
+def test_expected_id_matching():
+    from eval.__main__ import all_match, any_match, matches
+    assert matches("6.6.1", "ПВТР#6.6.1") and not matches("6.6.1", "ПВТР#6.6.10")
+    assert matches("6.4.2", "ПВТР#6.4.2/5") and not matches("6.4.2/1", "ПВТР#6.4.2/5")
+    assert matches("Антикор#слайд 8", "Антикор#слайд 8") and not matches("Антикор#слайд 8", "КТ#слайд 8")
+    assert matches("слайд 8", "КТ#слайд 8")
+    assert any_match(["6.1", "6.2"], ["d#6.2"]) and not any_match(["6.1"], ["d#6.2"])
+    assert all_match(["6.1"], ["d#6.1"]) and not all_match(["6.1"], ["d#6.1", "d#6.2"]) and not all_match(["6.1"], [])
+
+
+def test_golden_real_is_consistent_with_real_corpus():
+    """Настоящие документы и golden по ним в .gitignore: без них тест пропускается."""
+    import pytest
+
+    from chunker import load_corpus
+    from eval.__main__ import CORPUS_REAL, GOLDEN_REAL, any_match, key
+    if not GOLDEN_REAL.is_file() or not CORPUS_REAL.is_dir():
+        pytest.skip("нет eval/golden-real.csv или corpus-real/ (конфиденциальные, в git не едут)")
+    items = load_golden(GOLDEN_REAL)
+    keys = [key(ch.doc, cid) for ch in load_corpus(CORPUS_REAL) for cid in ch.clause_ids]
+    assert 40 <= len(items) <= 60
+    assert sum(i.kind == "trap" for i in items) == 10 and sum(i.kind == "injection" for i in items) == 3
+    answerable = [i for i in items if not i.is_trap]
+    assert sum(i.kind == "paraphrase" for i in answerable) * 2 >= len(answerable)
+    missing = [e for i in items for e in i.expected if not any_match([e], keys)]
+    assert not missing, missing
+    assert len({i.question for i in items}) == len(items)

@@ -199,3 +199,63 @@ def test_markdown_upload_uses_clause_chunker():
 def test_unsupported_extension():
     with pytest.raises(UnsupportedDocument):
         parse_document("a.docx", b"PK")
+
+
+# --- скан по СТО: шапка-штамп в 5–7 строк, OCR читает её по-разному ---
+
+def test_noisy_multiline_header_block_is_peeled():
+    from parsers import peel_header_blocks
+    variants = [
+        ["ООО «Синтетика»", "II 9.99-01", "Лист {n}", "Регламент Листов 5", "внутреннего порядка", "Издание № 1"],
+        ["ООО «Синтетика»", "99901 [Положение | №измендата", "Лист {n}", "Регламент Листов 5",
+         "внутреннего порядка", "Издание № |"],
+        ["ООО «Синтетика»", "№", "9.9901 [| положенив =| №измемдатя ner {n}", "Листов 5", "Регламент",
+         "внутреннего порядка"],
+    ]
+    bodies = ["продолжение пункта с прошлой страницы про пропуск", "2.1. Перерыв длится тридцать минут",
+              "3. Отпуска", "соблюдать внутреннего порядка правила на территории", "5.1. Последний пункт"]
+    pages = ["\n".join(l.format(n=n) for l in variants[n % 3]) + "\n" + body for n, body in enumerate(bodies, 1)]
+    out = postprocess_pages(pages)
+    assert [p.strip() for p in out] == bodies
+
+
+def test_header_peel_needs_repeats_and_keeps_short_documents():
+    from parsers import peel_header_blocks
+    pages = ["Шапка\nтекст один", "Шапка\nтекст два"]
+    assert peel_header_blocks(pages) == pages  # меньше трёх страниц — не трогаем
+
+
+def test_smartart_text_is_extracted():
+    from lxml import etree
+
+    from parsers import _NS_DGM, _NS_R, _smartart_texts
+    frame = etree.fromstring(
+        f'<p:graphicFrame xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+        f'xmlns:dgm="{_NS_DGM}" xmlns:r="{_NS_R}"><dgm:relIds r:dm="rId5"/></p:graphicFrame>')
+    data = (f'<dgm:dataModel xmlns:dgm="{_NS_DGM}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+            '<dgm:ptLst><dgm:pt type="doc"><dgm:t><a:p><a:r><a:t>корень</a:t></a:r></a:p></dgm:t></dgm:pt>'
+            '<dgm:pt><dgm:t><a:p><a:r><a:t>Повышать </a:t></a:r><a:r><a:t>качество</a:t></a:r></a:p>'
+            '<a:p><a:r><a:t>Беречь экологию</a:t></a:r></a:p></dgm:t></dgm:pt>'
+            '<dgm:pt type="sibTrans"><dgm:t><a:p><a:r><a:t>служебный</a:t></a:r></a:p></dgm:t></dgm:pt>'
+            '</dgm:ptLst></dgm:dataModel>').encode()
+
+    class Part:
+        def related_part(self, rid):
+            assert rid == "rId5"
+            return type("P", (), {"blob": data})()
+
+    shape = type("S", (), {"_element": frame})()
+    slide = type("Sl", (), {"part": Part()})()
+    assert _smartart_texts(shape, slide) == ["корень", "Повышать качество", "Беречь экологию"]
+
+
+@needs_font
+def test_export_pdf_markdown_roundtrips_into_corpus_chunker():
+    from chunker import chunk_text
+    from parsers import export_pdf_markdown
+    md, t = export_pdf_markdown(_text_pdf(PAGES), "Тестовый регламент", source="reg.pdf", use_ocr=False)
+    assert md.startswith("---\ndoc: Тестовый регламент\nsource: reg.pdf\n") and "--- стр. 2 ---" in md
+    assert t.low_confidence_pages == [] and t.ocr_pages == []
+    chunks = chunk_text(md, default_doc="x")
+    assert {c.doc for c in chunks} == {"Тестовый регламент"}
+    assert {cl.clause_id: cl.page for c in chunks for cl in c.clauses} == {"1.1": 1, "2.1": 2}

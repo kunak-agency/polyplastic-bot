@@ -23,12 +23,13 @@ from verify import (MAX_ANSWER_CHARS, VerifiedSource, fit_length, foreign_number
 log = logging.getLogger("rag.pipeline")
 
 # Пороги gate: покрытие вопроса по IDF (BM25-режим) и sigmoid реранкера по лучшему пункту.
-# Реранкер: стартовый 0.3 из ресерча снижен до 0.1 калибровкой на eval/golden.csv — у всех
-# ловушек sigmoid ≤ 0.039, у 0.1 запас ~1 логит над худшей ловушкой (README, «Оценка»).
-DEFAULT_GATE = {"lexical": 0.5, "reranker": 0.1}
+# Реранкер: 0.2 — калибровка на настоящих документах ПОЛИПЛАСТИК (eval/golden-real.csv, 10 ловушек):
+# худшая ловушка 0.102, ближайшие верные ответы 0.143 и 0.241; 0.15 и 0.2 дают одинаково, у 0.2
+# запас ~0.8 логита над ловушкой. На синтетике 0.1 → 0.2 стоит одного ответа (README, «Реальный корпус»).
+DEFAULT_GATE = {"lexical": 0.5, "reranker": 0.2}
 RRF_K = 60
 FUSE_TOP = 20  # кандидатов после RRF
-RERANK_TOP = 20  # из них → в реранкер (RAG_RERANK_TOP); README, «Скорость»
+RERANK_TOP = 8  # из них → в реранкер (RAG_RERANK_TOP); на реальном корпусе 8 ≡ 20 по качеству, p50 −40%
 WARMUP_QUESTION = "Как устроен первый рабочий день?"
 
 

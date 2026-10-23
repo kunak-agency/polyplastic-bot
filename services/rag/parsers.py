@@ -7,7 +7,8 @@
   сканом и идёт в Tesseract `rus+eng --psm 4` при 300 dpi, если tesseract есть в системе.
   Затем пост-обработка (омоглифы, переносы, колонтитулы, номера пунктов) и обычный
   клаузный чанкинг `chunker.chunk_text`. Если пунктов `N.N` нет, чанк = страница.
-- PPTX: слайд = чанк (заголовок, текст фигур, таблицы строками `a | b`, заметки докладчика).
+- PPTX: слайд = чанк (заголовок, текст фигур, таблицы строками `a | b`, текст SmartArt, заметки
+  докладчика).
 - XLSX: строка = чанк «Заголовок: значение | …»; первая непустая строка листа — заголовки.
 """
 
@@ -129,6 +130,57 @@ def strip_headers_footers(pages: list[str], edge_lines: int = 2) -> list[str]:
         kept = [l for i, l in enumerate(lines)
                 if not (i in edge_idx and _is_furniture(l, furniture))]
         out.append("\n".join(kept))
+    return peel_header_blocks(out)
+
+
+_WORD = re.compile(rf"[{_CYR}A-Za-z]{{3,}}")
+HEADER_BLOCK_LINES = 8      # шапка скана (штамп СТО: организация, шифр, «Лист N», «Листов M», название)
+HEADER_LINE_MAX_WORDS = 8
+
+
+def _header_words(line: str) -> list[str]:
+    return [w.lower() for w in _WORD.findall(line)]
+
+
+def peel_header_blocks(pages: list[str], block_lines: int = HEADER_BLOCK_LINES) -> list[str]:
+    """Срезает многострочную шапку-штамп в начале страницы скана.
+
+    У сканов по СТО шапка — 5–8 коротких строк («ООО …», шифр «П 3.11-07», «Лист 7», «Листов 23»,
+    название документа), и OCR каждый раз читает её по-разному («II 3.11-07», «13,1107 [Г положниЕ»),
+    поэтому точное совпадение строк из `strip_headers_footers` её не ловит. Здесь словарь шапки —
+    слова, которые встречаются в первых `block_lines` строках на половине страниц и больше. На каждой
+    странице находим последнюю «шапочную» строку в верхнем блоке (короткая, ≥ половины слов из
+    словаря) и срезаем всё до неё включительно: мусор OCR между строками шапки уходит вместе с ней.
+    Блок кончается на первом пункте или разделе — их не трогаем никогда.
+    """
+    if len(pages) < 3:
+        return pages
+    split = [p.split("\n") for p in pages]
+    tops: list[list[tuple[int, str]]] = []
+    df: Counter[str] = Counter()
+    for lines in split:
+        top: list[tuple[int, str]] = []
+        for i, l in enumerate(lines):
+            s = l.strip()
+            if not s:
+                continue
+            if CLAUSE_RE.match(s) or SECTION_RE.match(s) or len(top) >= block_lines:
+                break
+            top.append((i, s))
+        tops.append(top)
+        df.update(set(w for _, s in top for w in _header_words(s)))
+    vocab = {w for w, n in df.items() if n >= max(3, (len(pages) + 1) // 2)}
+    if not vocab:
+        return pages
+    out = []
+    for lines, top in zip(split, tops):
+        cut = -1
+        for i, s in top:
+            words = _header_words(s)
+            if words and len(s.split()) <= HEADER_LINE_MAX_WORDS and \
+                    sum(w in vocab for w in words) * 2 >= len(words):
+                cut = i
+        out.append("\n".join(lines[cut + 1:]) if cut >= 0 else "\n".join(lines))
     return out
 
 
@@ -186,7 +238,16 @@ def _page_marked(pages: list[str]) -> str:
     return "\n".join(f"--- стр. {i} ---\n{t}" for i, t in enumerate(pages, start=1))
 
 
-def parse_pdf(data: bytes, doc: str, use_ocr: bool | None = None) -> ParsedDocument:
+@dataclass
+class PdfText:
+    pages: list[str]                 # текст страниц после пост-обработки
+    low_confidence_pages: list[int]
+    ocr_pages: list[int]
+    ocr_conf: dict[int, float]       # страница → средняя уверенность Tesseract по словам
+
+
+def pdf_text(data: bytes, doc: str, use_ocr: bool | None = None) -> PdfText:
+    """PDF → постраничный текст: текстовый слой или OCR, затем пост-обработка."""
     import pypdfium2 as pdfium  # noqa: PLC0415
 
     try:
@@ -197,6 +258,7 @@ def parse_pdf(data: bytes, doc: str, use_ocr: bool | None = None) -> ParsedDocum
     raw_pages: list[str] = []
     low_conf: list[int] = []
     ocr_pages: list[int] = []
+    confs: dict[int, float] = {}
     try:
         for i in range(len(pdf)):
             page = pdf[i]
@@ -210,6 +272,7 @@ def parse_pdf(data: bytes, doc: str, use_ocr: bool | None = None) -> ParsedDocum
                     bitmap.to_pil().save(buf, format="PNG")
                     text, conf = ocr_image(buf.getvalue())
                     ocr_pages.append(i + 1)
+                    confs[i + 1] = conf
                     if conf < OCR_LOW_CONF or not text.strip():
                         low_conf.append(i + 1)
                 else:
@@ -222,15 +285,32 @@ def parse_pdf(data: bytes, doc: str, use_ocr: bool | None = None) -> ParsedDocum
         log.info("%s: OCR на %d стр., низкая уверенность: %s", doc, len(ocr_pages), low_conf)
     elif low_conf and not ocr_ok:
         log.warning("%s: %d стр. без текстового слоя, tesseract недоступен", doc, len(low_conf))
+    return PdfText(postprocess_pages(raw_pages), low_conf, ocr_pages, confs)
 
-    pages = postprocess_pages(raw_pages)
+
+def parse_pdf(data: bytes, doc: str, use_ocr: bool | None = None) -> ParsedDocument:
+    t = pdf_text(data, doc, use_ocr)
+    pages = t.pages
     chunks = chunk_text(_page_marked(pages), default_doc=doc)
     if not chunks:  # нет нумерованных пунктов — чанк = страница
-        chunks = [Chunk(doc=doc, section=None, clauses=[Clause(f"стр. {i}", " ".join(t.split()), i)])
-                  for i, t in enumerate(pages, start=1) if t.strip()]
+        chunks = [Chunk(doc=doc, section=None, clauses=[Clause(f"стр. {i}", " ".join(p.split()), i)])
+                  for i, p in enumerate(pages, start=1) if p.strip()]
     for ch in chunks:
         ch.doc = doc
-    return ParsedDocument(doc=doc, kind="pdf", chunks=chunks, low_confidence_pages=low_conf, ocr_pages=ocr_pages)
+    return ParsedDocument(doc=doc, kind="pdf", chunks=chunks, low_confidence_pages=t.low_confidence_pages,
+                          ocr_pages=t.ocr_pages)
+
+
+def export_pdf_markdown(data: bytes, doc: str, source: str | None = None,
+                        use_ocr: bool | None = None) -> tuple[str, PdfText]:
+    """PDF → markdown корпуса (front-matter + `--- стр. N ---`), чтобы один раз сделать OCR,
+    вычитать текст глазами и класть его в RAG_CORPUS_DIR вместо скана."""
+    t = pdf_text(data, doc, use_ocr)
+    meta = [f"doc: {doc}"] + ([f"source: {source}"] if source else [])
+    if t.ocr_pages:
+        meta.append(f"ocr: tesseract {OCR_LANG} {OCR_DPI} dpi, стр. {len(t.ocr_pages)}")
+    meta.append("low_confidence_pages: " + (", ".join(map(str, t.low_confidence_pages)) or "-"))
+    return "---\n" + "\n".join(meta) + "\n---\n" + _page_marked(t.pages) + "\n", t
 
 
 # --- PPTX ---
@@ -252,6 +332,37 @@ def _shape_texts(shape) -> list[str]:
     return out
 
 
+_NS_DGM = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+_NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def _smartart_texts(shape, slide) -> list[str]:
+    """Текст SmartArt-диаграммы: python-pptx его не отдаёт, он лежит в части diagramData.
+
+    Абзацы узлов (`dgm:pt`, кроме служебных переходов и узлов представления) по порядку
+    документа, по строке на абзац. Битая или отсутствующая часть — пустой список.
+    """
+    from lxml import etree  # noqa: PLC0415 — зависимость python-pptx
+
+    out: list[str] = []
+    for rel in shape._element.iter(f"{{{_NS_DGM}}}relIds"):
+        rid = rel.get(f"{{{_NS_R}}}dm")
+        try:
+            root = etree.fromstring(slide.part.related_part(rid).blob)
+        except Exception:  # noqa: BLE001 — нет части или не XML: просто без текста диаграммы
+            log.warning("SmartArt без данных: rId=%s", rid)
+            continue
+        for pt in root.iter(f"{{{_NS_DGM}}}pt"):
+            if pt.get("type") in ("parTrans", "sibTrans", "pres"):
+                continue
+            for para in pt.iter(f"{{{_NS_A}}}p"):
+                t = " ".join("".join(para.itertext()).split())
+                if t:
+                    out.append(t)
+    return out
+
+
 def parse_pptx(data: bytes, doc: str) -> ParsedDocument:
     from pptx import Presentation  # noqa: PLC0415
 
@@ -269,6 +380,7 @@ def parse_pptx(data: bytes, doc: str) -> ParsedDocument:
             if title_shape is not None and shape.shape_id == title_shape.shape_id:
                 continue
             parts.extend(_shape_texts(shape))
+            parts.extend(_smartart_texts(shape, slide))
         if slide.has_notes_slide:
             notes = slide.notes_slide.notes_text_frame.text if slide.notes_slide.notes_text_frame else ""
             if notes.strip():
@@ -344,3 +456,31 @@ def parse_document(filename: str, data: bytes, doc: str | None = None) -> Parsed
         return ParsedDocument(doc=chunks[0].doc if chunks else name, kind="text", chunks=chunks)
     raise UnsupportedDocument(f"формат {suffix or '(без расширения)'} не поддерживается; "
                               f"ожидается {', '.join(sorted(SUPPORTED))}")
+
+
+def _main(argv: list[str] | None = None) -> int:
+    """`python parsers.py export файл.pdf --doc ПВТР -o corpus/pvtr.md` — OCR в markdown корпуса.
+    В stdout — только сводка по страницам (номер, уверенность), текст документа не печатается."""
+    import argparse  # noqa: PLC0415
+
+    ap = argparse.ArgumentParser(prog="python parsers.py")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    ex = sub.add_parser("export", help="PDF → markdown корпуса")
+    ex.add_argument("pdf", type=Path)
+    ex.add_argument("--doc", required=True, help="имя документа для sources[].doc")
+    ex.add_argument("-o", "--out", type=Path, required=True)
+    args = ap.parse_args(argv)
+    md, t = export_pdf_markdown(args.pdf.read_bytes(), args.doc, source=args.pdf.name)
+    args.out.write_text(md, encoding="utf-8")
+    for n in range(1, len(t.pages) + 1):
+        conf = f"{t.ocr_conf[n]:.1f}" if n in t.ocr_conf else "текст"
+        print(f"стр. {n}: {conf}{'  LOW' if n in t.low_confidence_pages else ''}")
+    chunks = chunk_text(md, default_doc=args.doc)
+    print(f"страниц {len(t.pages)}, OCR {len(t.ocr_pages)}, low_confidence {t.low_confidence_pages}, "
+          f"чанков {len(chunks)}, пунктов {sum(len(c.clauses) for c in chunks)} → {args.out}")
+    return 0
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    raise SystemExit(_main())

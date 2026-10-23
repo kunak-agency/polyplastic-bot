@@ -28,8 +28,15 @@
   разбивка отказов проверок (verify_failed / foreign_numbers / too_long / truncated) — в --verbose.
 
 Флаги: --configs bm25,final,final+llm  --presence-penalty 1.0,0.3  --threshold 0.3  --sweep
-       --rerank-top 8
+       --rerank-top 8  --golden eval/golden-real.csv  --corpus corpus-real  --real
        --json out.json  --verbose
+
+--real — golden set и корпус настоящих документов ПОЛИПЛАСТИК (`eval/golden-real.csv`,
+`corpus-real/`). Оба в .gitignore: это коммерческая тайна заказчика.
+
+expected_clause_ids через `;`. Элемент — номер пункта (`6.6.1`) или `документ#пункт`
+(`Антикоррупционная политика#слайд 8`), когда номера слайдов повторяются в разных документах.
+Номер без части (`6.4.2`) засчитывает любую часть длинного пункта (`6.4.2/5`).
 """
 
 from __future__ import annotations
@@ -57,6 +64,29 @@ from verify import verify_sources  # noqa: E402
 
 GOLDEN = ROOT / "eval" / "golden.csv"
 CORPUS = ROOT / "testdata" / "corpus"
+GOLDEN_REAL = ROOT / "eval" / "golden-real.csv"
+CORPUS_REAL = ROOT / "corpus-real"
+
+
+def key(doc: str, clause_id: str) -> str:
+    return f"{doc}#{clause_id}"
+
+
+def matches(expected: str, k: str) -> bool:
+    """Ожидаемый пункт `6.4.2` / `док#слайд 8` против ключа `док#6.4.2/5`."""
+    doc, _, cid = k.partition("#")
+    exp_doc, sep, exp_cid = expected.rpartition("#")
+    if sep and exp_doc != doc:
+        return False
+    return cid == exp_cid or cid.split("/", 1)[0] == exp_cid
+
+
+def any_match(expected: list[str], keys: list[str]) -> bool:
+    return any(matches(e, k) for e in expected for k in keys)
+
+
+def all_match(expected: list[str], keys: list[str]) -> bool:
+    return bool(keys) and all(any(matches(e, k) for e in expected) for k in keys)
 
 
 @dataclass
@@ -71,10 +101,10 @@ class Item:
 @dataclass
 class Row:
     item: Item
-    ranked: list[list[str]]       # clause_ids top-5 чанков
+    ranked: list[list[str]]       # ключи `док#пункт` top-5 чанков
     gate: float                   # max gate_score по top-5 (до решения gate)
     answered: bool
-    cited: list[str]
+    cited: list[str]              # ключи `док#пункт` источников ответа
     abstain_reason: str | None
     citation_ok: bool
     latency_ms: float
@@ -101,24 +131,30 @@ def load_golden(path: Path = GOLDEN) -> list[Item]:
 
 
 RERANK_TOP: int | None = None  # --rerank-top; None — значение по умолчанию из pipeline
+TOP_K: int | None = None       # --top-k: сколько чанков уходит в LLM и в проверку цитат
+
+
+CORPUS_DIR: Path | str = CORPUS  # --corpus / --real
 
 
 def make_settings(name: str, threshold: float | None) -> Settings:
     s = _make_settings(name, threshold)
     if RERANK_TOP:
         s.rerank_top = RERANK_TOP
+    if TOP_K:
+        s.top_k = TOP_K
     return s
 
 
 def _make_settings(name: str, threshold: float | None) -> Settings:
     if name == "bm25":
-        return Settings(corpus_dir=str(CORPUS), retriever="bm25", reranker="none",
+        return Settings(corpus_dir=str(CORPUS_DIR), retriever="bm25", reranker="none",
                         gate_threshold=threshold if threshold is not None else DEFAULT_GATE["lexical"])
     if name in ("final", "final+llm"):
-        return Settings(corpus_dir=str(CORPUS), retriever="hybrid", reranker="bge",
+        return Settings(corpus_dir=str(CORPUS_DIR), retriever="hybrid", reranker="bge",
                         gate_threshold=threshold if threshold is not None else DEFAULT_GATE["reranker"])
     if name == "hybrid":  # без реранкера — для разбора вклада компонентов
-        return Settings(corpus_dir=str(CORPUS), retriever="hybrid", reranker="none",
+        return Settings(corpus_dir=str(CORPUS_DIR), retriever="hybrid", reranker="none",
                         gate_threshold=threshold if threshold is not None else DEFAULT_GATE["lexical"])
     raise SystemExit(f"неизвестная конфигурация {name!r}: bm25 | hybrid | final | final+llm")
 
@@ -137,10 +173,10 @@ def run_config(name: str, items: list[Item], chunks, threshold: float | None, ge
         ans = pipe.ask(it.question)
         latency = (time.perf_counter() - t1) * 1000
         hits = pipe.retrieve(it.question)
-        cited = [s.clause_id for s in ans.sources]
+        cited = [key(s.doc, s.clause_id) for s in ans.sources]
         raw = [{"doc": s.doc, "clause_id": s.clause_id, "quote": s.quote} for s in ans.sources]
         citation_ok = bool(raw) and verify_sources(raw, chunks).ok
-        rep.rows.append(Row(item=it, ranked=[h.chunk.clause_ids for h in hits],
+        rep.rows.append(Row(item=it, ranked=[[key(h.chunk.doc, c) for c in h.chunk.clause_ids] for h in hits],
                             gate=max((h.gate_score for h in hits), default=0.0),
                             answered=not ans.needs_escalation, cited=cited, abstain_reason=ans.abstain_reason,
                             citation_ok=citation_ok, latency_ms=latency,
@@ -151,7 +187,7 @@ def run_config(name: str, items: list[Item], chunks, threshold: float | None, ge
 
 def _rank(row: Row) -> int | None:
     for i, ids in enumerate(row.ranked[:5], start=1):
-        if set(ids) & set(row.item.expected):
+        if any_match(row.item.expected, ids):
             return i
     return None
 
@@ -173,7 +209,7 @@ def metrics(rep: Report) -> dict:
         return _pct([_rank(r) is not None for r in rows])
 
     def acc(rows):
-        return _pct([r.answered and bool(set(r.cited) & set(r.item.expected)) for r in rows])
+        return _pct([r.answered and any_match(r.item.expected, r.cited) for r in rows])
 
     lat = sorted(r.latency_ms for r in rep.rows)
     llm_calls = [r for r in rep.rows if r.mode in ("llm", "extractive_fallback")]
@@ -198,7 +234,7 @@ def metrics(rep: Report) -> dict:
         # LLM-ответ на инъекцию безопасен, если сослался только на ожидаемый пункт: он уже прошёл
         # verify и проверку чисел, то есть «аванс 1-го числа» из инъекции в нём быть не может
         "injection_safe": _pct([(not r.answered) or (bool(r.item.expected) and (r.extractive or r.mode == "llm")
-                                                      and set(r.cited) <= set(r.item.expected)) for r in inj]),
+                                                      and all_match(r.item.expected, r.cited)) for r in inj]),
         "citation_valid": _pct([r.citation_ok for r in answered]),
         "p50_ms": statistics.median(lat) if lat else 0.0,
         "p95_ms": lat[min(len(lat) - 1, int(round(0.95 * (len(lat) - 1))))] if lat else 0.0,
@@ -253,7 +289,7 @@ def sweep(rep: Report) -> str:
     for thr in [0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7]:
         def passes(r):
             return id(r) not in routed and r.gate >= thr
-        top_ok = [passes(r) and bool(set(r.ranked[0]) & set(r.item.expected)) if r.ranked else False
+        top_ok = [passes(r) and any_match(r.item.expected, r.ranked[0]) if r.ranked else False
                   for r in answerable]
         lines.append(f"| {thr:.2f} | {_fmt(_pct(top_ok), 'pct')} | "
                      f"{_fmt(_pct([not passes(r) for r in answerable]), 'pct')} | "
@@ -266,6 +302,12 @@ def sweep(rep: Report) -> str:
     return "\n".join(lines)
 
 
+def _short(k: str) -> str:
+    """`Антикоррупционная политика#слайд 8` → `Антикорр#слайд 8` для построчного вывода."""
+    doc, _, cid = k.partition("#")
+    return cid if cid[:1].isdigit() else f"{doc[:8]}#{cid}"
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m eval", description=__doc__.split("\n")[0])
     ap.add_argument("--configs", default=None,
@@ -275,16 +317,30 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--threshold", type=float, default=None, help="порог gate для final (по умолчанию из DEFAULT_GATE)")
     ap.add_argument("--rerank-top", type=int, default=None,
                     help="сколько чанков после RRF скорит реранкер (по умолчанию RAG_RERANK_TOP или 20)")
+    ap.add_argument("--top-k", type=int, default=None,
+                    help="сколько чанков идёт в LLM и в проверку цитат (по умолчанию RAG_TOP_K или 5)")
     ap.add_argument("--sweep", action="store_true", help="таблица порогов для последней конфигурации")
+    ap.add_argument("--golden", type=Path, default=None, help=f"golden set (по умолчанию {GOLDEN.relative_to(ROOT)})")
+    ap.add_argument("--corpus", default=None,
+                    help=f"каталог(и) корпуса через запятую (по умолчанию {CORPUS.relative_to(ROOT)})")
+    ap.add_argument("--real", action="store_true",
+                    help=f"настоящие документы: --golden {GOLDEN_REAL.relative_to(ROOT)} --corpus {CORPUS_REAL.relative_to(ROOT)}")
     ap.add_argument("--json", type=Path, default=None)
     ap.add_argument("--verbose", "-v", action="store_true", help="построчный разбор вопросов")
     args = ap.parse_args(argv)
-    global RERANK_TOP
+    global RERANK_TOP, CORPUS_DIR, TOP_K
     RERANK_TOP = args.rerank_top or (int(os.environ["RAG_RERANK_TOP"]) if os.getenv("RAG_RERANK_TOP") else None)
     logging.basicConfig(level=logging.WARNING)
 
-    items = load_golden()
-    chunks = load_corpus(CORPUS)
+    TOP_K = args.top_k or (int(os.environ["RAG_TOP_K"]) if os.getenv("RAG_TOP_K") else None)
+    golden = args.golden or (GOLDEN_REAL if args.real else GOLDEN)
+    CORPUS_DIR = args.corpus or (CORPUS_REAL if args.real else CORPUS)
+    items = load_golden(golden)
+    chunks = load_corpus(CORPUS_DIR)
+    if not chunks:
+        print(f"корпус {CORPUS_DIR} пуст", file=sys.stderr)
+        return 1
+    print(f"golden={golden.name} ({len(items)}), корпус: {len(chunks)} чанков", file=sys.stderr)
     llm_cfg = LLMConfig.from_env()
     configs = args.configs or ("bm25,final,final+llm" if llm_cfg else "bm25,final")
     reports = []
@@ -324,8 +380,8 @@ def main(argv: list[str] | None = None) -> int:
             for r in rep.rows:
                 mark = "OK " if (r.answered == (not r.item.is_trap) or r.item.kind == "injection") else "ERR"
                 print(f"{mark} gate={r.gate:.3f} {r.item.kind:10s} exp={','.join(r.item.expected) or '-':6s} "
-                      f"top={','.join(r.ranked[0]) if r.ranked else '-':8s} "
-                      f"ans={','.join(r.cited) or r.abstain_reason}"
+                      f"top={','.join(_short(k) for k in r.ranked[0]) if r.ranked else '-':8s} "
+                      f"ans={','.join(_short(k) for k in r.cited) or r.abstain_reason}"
                       + (f" mode={r.mode} check={r.check}" if r.mode in ("llm", "extractive_fallback") else "")
                       + f" {r.latency_ms:.0f}ms  {r.item.question}")
             m = next(x for x in ms if x["config"] == rep.name)
