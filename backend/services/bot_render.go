@@ -64,23 +64,32 @@ const (
 		"Я храню ваши ответы на кнопки и сообщения, чтобы HR мог помочь с адаптацией. Опросы " +
 		"необязательны: можно отказаться, и я буду только напоминать о важном и отвечать на вопросы. " +
 		"Передумаете — нажмите кнопку согласия в сообщении выше."
-	textConsentGiven    = "✅ Спасибо, согласие записано. Дальше — немного полезного перед первым днём."
-	textConsentDeclined = "Понял. Опросы присылать не буду — только напоминания и ответы на вопросы. " +
-		"Если передумаете, напишите HR-команде."
-	// Варианты на «ты»: новичок уже выбрал форму обращения в сообщении 1.
-	textConsentGivenTy    = textConsentGiven
-	textConsentDeclinedTy = "Понял. Опросы присылать не буду — только напоминания и ответы на вопросы. " +
-		"Если передумаешь, напиши HR-команде."
-	textInviteBroken  = "Ссылка не сработала. Напишите рекрутеру — он пришлёт новую."
-	btnCheckPhone     = "Проверить по телефону"
-	textHumanNoted    = "Записал: передам ваш запрос HR-команде, с вами свяжутся."
-	textWelcomeBack   = "С возвращением! Я на связи 🐾"
-	textContactNoted  = "Спасибо! Передам рекрутеру, он проверит и пришлёт новую ссылку."
-	textSurveyDone    = "✅ Спасибо! Ответы записаны."
-	textRemindLater   = "🕓 Хорошо, напомню завтра."
-	textRemindStopped = "Хорошо, не буду напоминать. Если захотите вернуться к опросу — напишите HR-команде."
-	textWriteOwn      = "Напишите одним сообщением, что не так. Я привяжу ответ к этому вопросу."
-	testPrefix        = "[ТЕСТ] "
+	textConsentGiven = "✅ Спасибо, согласие записано. Дальше — немного полезного перед первым днём."
+	// Ближайший шаг уйдёт не сразу (ночь, выходные, до D−3 далеко): говорим, когда (%s —
+	// sendWhenPhrase), и что пока можно спрашивать.
+	textConsentGivenLaterVy = "✅ Спасибо, согласие записано. Первые материалы пришлю %s. А пока можете " +
+		"спросить меня о пропуске, графике или зарплате — отвечу по документам."
+	textConsentGivenLaterTy = "✅ Спасибо, согласие записано. Первые материалы пришлю %s. А пока можешь " +
+		"спросить меня о пропуске, графике или зарплате — отвечу по документам."
+	// Неотправленных шагов не осталось (сценарий пройден).
+	textConsentGivenNoneVy = "✅ Спасибо, согласие записано. Если появятся вопросы о пропуске, графике или " +
+		"зарплате — пишите, отвечу по документам."
+	textConsentGivenNoneTy = "✅ Спасибо, согласие записано. Если появятся вопросы о пропуске, графике или " +
+		"зарплате — пиши, отвечу по документам."
+	textConsentDeclinedHead = "Понял. Опросы присылать не буду — только напоминания и ответы на вопросы."
+	textConsentDeclinedNext = " Первое напоминание пришлю %s."
+	textConsentDeclinedVy   = " Если передумаете, напишите HR-команде."
+	textConsentDeclinedTy   = " Если передумаешь, напиши HR-команде."
+	textInviteBroken        = "Ссылка не сработала. Напишите рекрутеру — он пришлёт новую."
+	btnCheckPhone           = "Проверить по телефону"
+	textHumanNoted          = "Записал: передам ваш запрос HR-команде, с вами свяжутся."
+	textWelcomeBack         = "С возвращением! Я на связи 🐾"
+	textContactNoted        = "Спасибо! Передам рекрутеру, он проверит и пришлёт новую ссылку."
+	textSurveyDone          = "✅ Спасибо! Ответы записаны."
+	textRemindLater         = "🕓 Хорошо, напомню завтра."
+	textRemindStopped       = "Хорошо, не буду напоминать. Если захотите вернуться к опросу — напишите HR-команде."
+	textWriteOwn            = "Напишите одним сообщением, что не так. Я привяжу ответ к этому вопросу."
+	testPrefix              = "[ТЕСТ] "
 )
 
 // maxReminders — «Напомнить завтра» не более двух раз (UX-спецификация п. 2.3).
@@ -164,6 +173,51 @@ func consentMessage(to recipient) max.OutMessage {
 // inviteBrokenMessage — неизвестный или просроченный токен: текст спецификации и запрос контакта.
 func inviteBrokenMessage(to recipient) max.OutMessage {
 	return to.msg(textInviteBroken, "", [][]max.Button{{{Text: btnCheckPhone, Contact: true}}})
+}
+
+// soonWindow — ближайший шаг уходит «сейчас», если созреет не позже чем через столько.
+const soonWindow = 5 * time.Minute
+
+// consentAnsweredText — итог сообщения согласия. next — fire_at ближайшего неотправленного
+// события (nil — их нет), now — момент ответа. Если ближайший шаг уйдёт не в ближайшие минуты
+// (ночь, выходные — UX п. 0, правило 7), обещаем точное время по часам площадки, а не
+// «дальше — немного полезного».
+func consentAnsweredText(e *domain.Employee, given bool, next *time.Time, now time.Time) string {
+	later := next != nil && next.Sub(now) > soonWindow
+	when := ""
+	if later {
+		when = sendWhenPhrase(*next, now, domain.SiteOf(e.Site))
+	}
+	if !given {
+		s := textConsentDeclinedHead
+		if later {
+			s += fmt.Sprintf(textConsentDeclinedNext, when)
+		}
+		return s + byForm(e, textConsentDeclinedTy, textConsentDeclinedVy)
+	}
+	switch {
+	case next == nil:
+		return byForm(e, textConsentGivenNoneTy, textConsentGivenNoneVy)
+	case later:
+		return fmt.Sprintf(byForm(e, textConsentGivenLaterTy, textConsentGivenLaterVy), when)
+	}
+	return textConsentGiven
+}
+
+// sendWhenPhrase — когда уйдёт сообщение, по часам площадки: «сегодня в 15:00», «завтра в
+// 10:00», «в понедельник в 10:00» (в пределах недели), дальше — «в понедельник, 2 ноября, в 10:00».
+func sendWhenPhrase(at, now time.Time, site domain.Site) string {
+	local := at.In(site.Loc)
+	clock := fmt.Sprintf("в %d:%02d", local.Hour(), local.Minute())
+	switch days := DayNumber(now.In(site.Loc), at, site); {
+	case days <= 0:
+		return "сегодня " + clock
+	case days == 1:
+		return "завтра " + clock
+	case days < 7:
+		return weekdayIn[local.Weekday()] + " " + clock
+	}
+	return fmt.Sprintf("%s, %d %s, %s", weekdayIn[local.Weekday()], local.Day(), monthGen[local.Month()-1], clock)
 }
 
 // recipient — адресат: чат, если известен, иначе пользователь.

@@ -109,6 +109,9 @@ func (b *BotService) touch(ctx context.Context, empID uuid.UUID, codes []string)
 // напишет детали (UX 2.7 даёт ему выбор).
 // via — откуда сигнал: flagViaRegex или LLM-разметка /flags (для сводки обращения).
 func (b *BotService) flagSignal(ctx context.Context, to recipient, emp *domain.Employee, q *domain.BotQuestion, codes []string, via string) error {
+	if done, err := b.quitAlreadyOffered(ctx, to, emp, codes, via); done || err != nil {
+		return err
+	}
 	q.Kind, q.Flags = domain.QuestionFlag, codes
 	cat := b.flagCategory(q.Flags)
 	immediate := cat.SecurityChat
@@ -158,6 +161,69 @@ func (b *BotService) flagSignal(ctx context.Context, to recipient, emp *domain.E
 	}
 	b.sendQuestion(ctx, to, emp, q)
 	return nil
+}
+
+// quitOfferWindow — сколько предложение F7 «Передать рекрутеру?» считается открытым, если
+// новичок на него не ответил (UX 2.3: непройденное — сутки).
+const quitOfferWindow = 24 * time.Hour
+
+const (
+	textQuitOfferedVy = "Слышу вас. Я уже предложил передать это рекрутеру — выберите вариант в сообщении выше: " +
+		"передать, сначала написать подробнее или пока не надо."
+	textQuitOfferedTy = "Слышу тебя. Я уже предложил передать это рекрутеру — выбери вариант в сообщении выше: " +
+		"передать, сначала написать подробнее или пока не надо."
+	textQuitTicketVy = "Слышу вас. Я уже передал это рекрутеру — обращение #%d, ответ придёт сюда же. Если хотите " +
+		"что-то добавить, нажмите «Добавить детали» в сообщении об обращении."
+	textQuitTicketTy = "Слышу тебя. Я уже передал это рекрутеру — обращение #%d, ответ придёт сюда же. Если хочешь " +
+		"что-то добавить, нажми «Добавить детали» в сообщении об обращении."
+)
+
+// quitAlreadyOffered — сигнал только F7 (без F5/F9), а у новичка уже есть открытое предложение
+// F7 (не отвечено, не старше суток) или незакрытое обращение F7: второе предложение не
+// показываем. Риск всё равно отмечается. Новичку, который сам написал «уволюсь» (regex), —
+// короткое напоминание, где уже идёт дело; на LLM-сигнал — тишина: ответ rag уже ушёл.
+func (b *BotService) quitAlreadyOffered(ctx context.Context, to recipient, emp *domain.Employee, codes []string, via string) (bool, error) {
+	list := domain.StringList(codes)
+	if !list.Has(flags.CodeQuit) || list.Has(flags.CodeViolence) || list.Has(flags.CodeCorruption) {
+		return false, nil
+	}
+	t, offered, err := b.quitPending(ctx, emp.ID)
+	if err != nil || (t == nil && !offered) {
+		return false, err
+	}
+	if err := b.touch(ctx, emp.ID, codes); err != nil {
+		return true, err
+	}
+	logger.Info("бот: сигнал F7 от новичка %s (%s) — предложение уже открыто, повтор не показан", emp.ID, via)
+	if via != flagViaRegex {
+		return true, nil
+	}
+	text := byForm(emp, textQuitOfferedTy, textQuitOfferedVy)
+	if t != nil {
+		text = fmt.Sprintf(byForm(emp, textQuitTicketTy, textQuitTicketVy), t.Number)
+	}
+	b.send(ctx, to.msg(text, "", nil))
+	return true, nil
+}
+
+// quitPending — незакрытое обращение F7 новичка или открытое предложение F7: запись сигнала
+// F7 за последние сутки, на которую новичок ещё не ответил (не передано, не «Пока не надо»).
+func (b *BotService) quitPending(ctx context.Context, empID uuid.UUID) (*domain.Ticket, bool, error) {
+	t, err := b.repos.Tickets.Active(ctx, empID, flags.CodeQuit)
+	if err != nil || t != nil {
+		return t, false, err
+	}
+	qs, err := b.repos.Questions.Recent(ctx, empID, b.now().Add(-quitOfferWindow), 50)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, q := range qs {
+		if q.Kind == domain.QuestionFlag && q.Flags.Has(flags.CodeQuit) && flagCopyFor(q.Flags).code == flags.CodeQuit &&
+			q.HumanAt == nil && q.TicketID == nil && q.Outcome == "" {
+			return nil, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 // ask — POST /ask и ответ новичку. Ошибка rag не ошибка обработки: новичок получает честное

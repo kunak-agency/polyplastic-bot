@@ -270,12 +270,13 @@ func (b *BotService) chooseAddress(ctx context.Context, u max.Update, id uuid.UU
 // отказе — без опросов.
 func (b *BotService) consent(ctx context.Context, u max.Update, id uuid.UUID, given bool) error {
 	var emp *domain.Employee
+	var next *time.Time // ближайшее неотправленное событие после пропусков
+	now := b.now()
 	err := b.repos.Transaction(ctx, func(tx *repositories.Repos) error {
 		e, err := tx.Employees.ByIDForUpdate(ctx, id)
 		if err != nil || e == nil {
 			return err
 		}
-		now := b.now()
 		first := e.Consent == nil
 		v := domain.ConsentDeclined
 		if given {
@@ -292,17 +293,21 @@ func (b *BotService) consent(ctx context.Context, u max.Update, id uuid.UUID, gi
 			}
 		}
 		if first {
-			return b.scheduler.SkipMissed(ctx, tx, e)
+			if err := b.scheduler.SkipMissed(ctx, tx, e); err != nil {
+				return err
+			}
 		}
+		evs, err := tx.Events.ScheduledOf(ctx, e.ID) // по fire_at
+		if err != nil || len(evs) == 0 {
+			return err
+		}
+		next = &evs[0].FireAt
 		return nil
 	})
 	if err != nil || emp == nil {
 		return err
 	}
-	text := byForm(emp, textConsentDeclinedTy, textConsentDeclined)
-	if given {
-		text = byForm(emp, textConsentGivenTy, textConsentGiven)
-	}
+	text := consentAnsweredText(emp, given, next, now)
 	done := recipientOf(emp).msg(text, "", nil)
 	b.answer(ctx, u.CallbackID, max.Answer{Notification: "Записал", Message: &done})
 

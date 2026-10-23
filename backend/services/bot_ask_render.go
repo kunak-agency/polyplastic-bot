@@ -159,6 +159,37 @@ func escapeFit(s string, limit int) string {
 	return escapeMarkdown(strings.TrimRightFunc(head, unicode.IsSpace)) + "…"
 }
 
+// quoteFit — дословная цитата пункта для «Подробнее» и «Другой пункт», не длиннее limit. rag
+// отдаёт чанк, и он бывает обрывком предложения («работник обязан …» с маленькой буквы).
+// Текст не меняем (правило 9: цитаты дословно), а показываем, что начало опущено: «…» впереди.
+func quoteFit(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	if !midSentence(s) {
+		return escapeFit(s, limit)
+	}
+	return "…" + escapeFit(s, limit-1)
+}
+
+// midSentence — цитата начинается с середины предложения: первая буква строчная. Пункт списка
+// «а) …» и начало с цифры («1. …», «6.7.8 …») — не обрывок.
+func midSentence(s string) bool {
+	runes := []rune(s)
+	for i, r := range runes {
+		switch {
+		case unicode.IsDigit(r):
+			return false
+		case unicode.IsLetter(r):
+			if i+1 < len(runes) && runes[i+1] == ')' {
+				return false
+			}
+			return unicode.IsLower(r)
+		case r == '…':
+			return false // начало уже помечено
+		}
+	}
+	return false
+}
+
 // sourceLine — «📄 Источник: ПВТР, п. 6.7.8».
 func sourceLine(s domain.QuestionSource) string {
 	line := "📄 Источник: " + escapeMarkdown(s.Doc)
@@ -212,7 +243,7 @@ func answerText(q *domain.BotQuestion, expanded bool) string {
 				break
 			}
 		}
-		block := "\n\n«" + escapeFit(s.Quote, budget) + "»\n" + line
+		block := "\n\n«" + quoteFit(s.Quote, budget) + "»\n" + line
 		b.WriteString(block)
 		used += utf8.RuneCountInString(block)
 	}
@@ -237,7 +268,7 @@ func answerMessage(to recipient, q *domain.BotQuestion, expanded bool) max.OutMe
 func altMessage(to recipient, q *domain.BotQuestion, s domain.QuestionSource) max.OutMessage {
 	line := sourceLine(s)
 	budget := maxTextLen - utf8.RuneCountInString(textAltLead+line) - 4
-	text := textAltLead + "\n«" + escapeFit(s.Quote, budget) + "»\n" + line
+	text := textAltLead + "\n«" + quoteFit(s.Quote, budget) + "»\n" + line
 	return to.msg(text, formatMarkdown, [][]max.Button{
 		{{Text: btnHelpful, Payload: qPayload(preQHelpful, q.ID)}, {Text: btnNotThat, Payload: qPayload(preQNotThat, q.ID)}},
 		{{Text: btnHuman, Payload: qPayload(preQHR, q.ID)}},
