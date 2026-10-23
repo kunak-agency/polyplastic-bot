@@ -1,0 +1,46 @@
+/* ============================================================================
+   Self-hosted fonts (INV-8: zero external origins).
+
+   Основной текст интерфейса — СИСТЕМНЫЙ шрифт (--font-sans / --font-mono в
+   tokens.css). Шаблон ждал здесь Geist, но файлы Geist в репозиторий так и не
+   попали: браузер шесть раз получал 404 на каждой странице, а интерфейс всё
+   равно рисовался системным шрифтом. Все экраны проверены именно с ним, так что
+   ссылки на несуществующие файлы убраны — вид от этого не изменился.
+
+   Свой шрифт здесь один — Golos Text для логотипа (ниже).
+   ============================================================================ */
+
+/* Golos Text — face of the wordmark (AppLogo).
+   Self-hosted like every other font here: the CSP allows exactly one external
+   origin (the API), so a Google Fonts <link> would be blocked and the wordmark
+   would silently fall back to the system stack.
+   Subset: Cyrillic only — the wordmark is Russian, and the Latin subset would
+   double the payload for nothing. */
+@font-face {
+  font-family: 'Golos Text';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/golos-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Golos Text';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/golos-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Golos Text';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/golos-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Golos Text';
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url('/fonts/golos-900.woff2') format('woff2');
+}

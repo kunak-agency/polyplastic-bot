@@ -1,0 +1,51 @@
+# Локальная разработка: Postgres и rag-сервис. API и фронт запускаются с хоста (`make run`,
+# `pnpm dev`) — так быстрее цикл правок. Модель живёт на поде RunPod.
+#
+# Имя проекта задано ЯВНО: каталоги backend/ повторяются у соседних проектов агентства,
+# и без name compose может принять чужой контейнер за свой (наступали в hack-kosmos).
+name: polyplastic
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: polyplastic
+      # Только для локальной разработки, не для эксплуатации.
+      POSTGRES_PASSWORD: polyplastic
+      POSTGRES_DB: polyplastic
+    # 5437: 5432 — системный postgres, 5433–5436 — соседние проекты. Только loopback: пароль
+    # здесь локальный, и база не должна быть видна в сети.
+    ports: ["127.0.0.1:5437:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Только при первом создании тома: заводит polyplastic_test для интеграционных тестов.
+      - ./deploy/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polyplastic -d polyplastic"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Поиск по базе знаний с цитатами (services/rag/README.md). Внутри слушает 0.0.0.0:8093,
+  # наружу — только loopback. Модель — та же, что у бэкенда: LLM_* берутся из корневого .env
+  # (compose читает его сам для подстановки); пусто — rag отвечает без LLM.
+  rag:
+    build: ./services/rag
+    ports: ["127.0.0.1:8093:8093"]
+    environment:
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-tlite}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.2}
+      LLM_PRESENCE_PENALTY: ${LLM_PRESENCE_PENALTY:-1.0}
+      # hybrid + bge — рабочая конфигурация (services/rag/README.md, «Оценка»). Веса bge-m3 и
+      # реранкера (~6 ГБ) лежат в кэше на хосте, в образ не запекаются; офлайн — без сети к HF.
+      RAG_RETRIEVER: ${RAG_RETRIEVER:-hybrid}
+      RAG_RERANKER: ${RAG_RERANKER:-bge}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+    volumes:
+      - ./services/rag/.cache:/app/.cache
+    restart: unless-stopped
+
+volumes:
+  pgdata:

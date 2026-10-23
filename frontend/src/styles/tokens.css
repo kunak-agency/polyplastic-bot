@@ -1,0 +1,265 @@
+/* ============================================================================
+   Design System — Tokens
+   Based on shadcn-vue token architecture, extended for product UI.
+   Font: the system UI stack (see fonts.css for why); Golos Text only for the wordmark.
+   The families are declared with a full system fallback stack so the UI stays
+   usable before the .woff2 files land in public/fonts (see its README).
+   ============================================================================ */
+
+:root {
+  /* ── Brand & accent ─────────────────────────────────────────────────────── */
+  /* The primary is BLACK, not green. Green is the "норма" status and nothing
+     else: a green «Сформировать отчёт» reads as "everything
+     is fine", which is the opposite of why the report is being made. */
+  --accent: #09090b;
+  --accent-hover: #27272a;
+  --accent-active: #3f3f46;
+  --accent-fg: #ffffff;
+  --accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
+  --accent-border: color-mix(in oklab, var(--accent) 35%, transparent);
+
+  /* ── Status (semantic) ──────────────────────────────────────────────────── */
+  --success: #10b981;
+  --success-soft: color-mix(in oklab, var(--success) 14%, transparent);
+  --warning: #f59e0b;
+  --warning-soft: color-mix(in oklab, var(--warning) 14%, transparent);
+  --danger: #ef4444;
+  --danger-soft: color-mix(in oklab, var(--danger) 14%, transparent);
+  --info: #06b6d4;
+  --info-soft: color-mix(in oklab, var(--info) 14%, transparent);
+
+  /* Ticket priority edge (ux-spec 3.4): P0 red, P1 orange, P2 grey. */
+  --priority-p0: var(--danger);
+  --priority-p1: #ea580c;
+  --priority-p2: #a1a1aa;
+  /* Internal note ground: yellow, never sent to MAX. */
+  --note-bg: #fefce8;
+  --note-border: #fde68a;
+
+  /* ── Parameter provenance (steps/10) ────────────────────────────────────── */
+  /* Field ground by who owns the value: grey — the organiser's data
+     (CASE_INPUT, not editable), blue — the team's decision, yellow — the
+     team's assumption. Always paired with the status written out in words:
+     colour is never the only marker. */
+  --param-case-bg: #f4f4f5;
+  --param-case-border: #e4e4e7;
+  --param-case-fg: #52525b;
+  --param-decision-bg: #eff6ff;
+  --param-decision-border: #bfdbfe;
+  --param-decision-fg: #1d4ed8;
+  --param-assumption-bg: #fefce8;
+  --param-assumption-border: #fde68a;
+  --param-assumption-fg: #a16207;
+
+  /* ── Type scale ─────────────────────────────────────────────────────────── */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'JetBrains Mono', monospace;
+
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 19px;
+  --text-2xl: 24px;
+  --text-3xl: 30px;
+  --text-4xl: 40px;
+
+  --leading-tight: 1.2;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+
+  --tracking-tight: -0.02em;
+  --tracking-snug: -0.01em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+
+  /* ── Radii ──────────────────────────────────────────────────────────────── */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  /* ── Spacing density ────────────────────────────────────────────────────── */
+  --density: 1;
+  --space-1: calc(4px * var(--density));
+  --space-2: calc(8px * var(--density));
+  --space-3: calc(12px * var(--density));
+  --space-4: calc(16px * var(--density));
+  --space-5: calc(20px * var(--density));
+  --space-6: calc(24px * var(--density));
+  --space-8: calc(32px * var(--density));
+  --space-10: calc(40px * var(--density));
+  --space-12: calc(48px * var(--density));
+
+  /* heights for inputs / rows */
+  --h-input: calc(34px * var(--density));
+  --h-input-sm: calc(28px * var(--density));
+  --h-input-lg: calc(40px * var(--density));
+  --h-row: calc(40px * var(--density));
+
+  /* ── Shadows (dark-tuned) ───────────────────────────────────────────────── */
+  --shadow-xs: 0 1px 0 0 rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.18);
+  --shadow-lg: 0 12px 32px -6px rgba(0, 0, 0, 0.28);
+  --shadow-popover: 0 8px 24px -4px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border);
+}
+
+/* ── DARK (default) ───────────────────────────────────────────────────────── */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #0a0a0a;
+  --bg-elevated: #0f0f10;
+  --bg-subtle: #111113;
+  --bg-muted: #161618;
+  --bg-strong: #1c1c20;
+
+  --surface: #0f0f10;
+  --surface-hover: #161618;
+  --surface-active: #1c1c20;
+
+  --border: #1f1f23;
+  --border-strong: #2a2a30;
+  --border-subtle: #18181b;
+
+  --fg: #fafafa;
+  --fg-muted: #a1a1aa;
+  --fg-subtle: #71717a;
+  --fg-faint: #52525b;
+
+  --ring: color-mix(in oklab, var(--accent) 55%, transparent);
+  /* Ink flips with the ground; the rule "primary is the text colour" does not. */
+  --accent: #fafafa;
+  --accent-hover: #e4e4e7;
+  --accent-active: #d4d4d8;
+  --accent-fg: #09090b;
+
+  --chart-grid: #1c1c20;
+  --chart-axis: #3f3f46;
+
+  --code-bg: #131316;
+  --kbd-bg: #1c1c20;
+}
+
+/* ── LIGHT ────────────────────────────────────────────────────────────────── */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-subtle: #fafafa;
+  --bg-muted: #f4f4f5;
+  --bg-strong: #e4e4e7;
+
+  --surface: #ffffff;
+  --surface-hover: #fafafa;
+  --surface-active: #f4f4f5;
+
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --border-subtle: #ededef;
+
+  --fg: #09090b;
+  --fg-muted: #52525b;
+  --fg-subtle: #71717a;
+  --fg-faint: #a1a1aa;
+
+  /* Restated here, not only in the brand block: the dark block above is plain
+     `:root` too and would otherwise win the cascade on the light theme. */
+  --accent: #09090b;
+  --accent-hover: #27272a;
+  --accent-active: #3f3f46;
+  --accent-fg: #ffffff;
+
+  --ring: color-mix(in oklab, var(--accent) 35%, transparent);
+
+  --chart-grid: #f1f1f4;
+  --chart-axis: #d4d4d8;
+
+  --code-bg: #f4f4f5;
+  --kbd-bg: #f4f4f5;
+
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 32px -6px rgba(0, 0, 0, 0.12);
+}
+
+/* ── Density modes ────────────────────────────────────────────────────────── */
+:root[data-density='compact'] {
+  --density: 0.85;
+  --text-base: 12px;
+  --text-md: 13px;
+}
+:root[data-density='comfortable'] {
+  --density: 1.1;
+}
+
+/* ── Base reset ───────────────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-snug);
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-width: 1320px;
+}
+button {
+  font: inherit;
+  color: inherit;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+/* Scrollbar — minimal */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-faint);
+}
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}

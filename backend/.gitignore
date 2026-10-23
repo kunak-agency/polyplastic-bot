@@ -1,0 +1,6 @@
+# Бинарник `go build` (модуль main даёт файл main) и локальное окружение.
+/main
+*.exe
+.env
+.env.local
+*.log

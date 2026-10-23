@@ -1,0 +1,115 @@
+/* ============================================================================
+   Motion — restrained motion for the authed app.
+   Imported LAST in global.css (after tokens.css + components.css) so equal-
+   specificity overrides win. Token-driven only; no literal colors.
+   All motion is disabled under prefers-reduced-motion (authoritative block
+   at the bottom of this file).
+   ============================================================================ */
+
+/* Shared expo easing for the premium feel. */
+:root {
+  --motion-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── 1. Page transition (default layout only — gated in App.vue) ─────────────
+   Enter: fade + lift up from 8px + de-blur (~0.42s).
+   Leave: fade + lift to -4px + light blur (~0.2s). */
+.page-fade-enter-active {
+  transition:
+    opacity 0.42s var(--motion-expo),
+    transform 0.42s var(--motion-expo),
+    filter 0.42s var(--motion-expo);
+}
+.page-fade-leave-active {
+  transition:
+    opacity 0.2s var(--motion-expo),
+    transform 0.2s var(--motion-expo),
+    filter 0.2s var(--motion-expo);
+}
+.page-fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+  filter: blur(6px);
+}
+.page-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+  filter: blur(4px);
+}
+
+/* ── 2. Staggered reveal on mount (pure CSS, runs on element creation) ────────
+   Bound to @keyframes so it plays only when nodes are created (mount / route
+   remount via :key), never on reactive data updates within the same instance. */
+@keyframes pageReveal {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+.page > *,
+.grid > [class*='span-'] {
+  animation: pageReveal 0.5s var(--motion-expo) both;
+}
+
+/* Stagger step ~60ms, capped after 8 children to avoid long waits. */
+.page > *:nth-child(1),
+.grid > [class*='span-']:nth-child(1) {
+  animation-delay: 0ms;
+}
+.page > *:nth-child(2),
+.grid > [class*='span-']:nth-child(2) {
+  animation-delay: 60ms;
+}
+.page > *:nth-child(3),
+.grid > [class*='span-']:nth-child(3) {
+  animation-delay: 120ms;
+}
+.page > *:nth-child(4),
+.grid > [class*='span-']:nth-child(4) {
+  animation-delay: 180ms;
+}
+.page > *:nth-child(5),
+.grid > [class*='span-']:nth-child(5) {
+  animation-delay: 240ms;
+}
+.page > *:nth-child(6),
+.grid > [class*='span-']:nth-child(6) {
+  animation-delay: 300ms;
+}
+.page > *:nth-child(7),
+.grid > [class*='span-']:nth-child(7) {
+  animation-delay: 360ms;
+}
+.page > *:nth-child(n + 8),
+.grid > [class*='span-']:nth-child(n + 8) {
+  animation-delay: 420ms;
+}
+
+/* ── Accessibility: prefers-reduced-motion (authoritative) ────────────────────
+   Disable all new motion. Catch-all neutralizes any stuck transform/blur. */
+@media (prefers-reduced-motion: reduce) {
+  .page-fade-enter-active,
+  .page-fade-leave-active {
+    transition: none !important;
+  }
+  .page-fade-enter-from,
+  .page-fade-leave-to {
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+  .page > *,
+  .grid > [class*='span-'] {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+}

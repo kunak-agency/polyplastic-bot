@@ -1,0 +1,23 @@
+fastapi==0.162.0
+httpx==0.28.1
+numpy==2.5.4
+pydantic==2.14.1
+pymorphy3==2.0.6
+pymorphy3-dicts-ru==2.4.417150.4580142
+rank-bm25==0.2.2
+starlette==1.9.0
+uvicorn==0.54.0
+# загрузка документов
+python-multipart==0.0.32
+pypdfium2==5.14.0
+pillow==13.0.0
+python-pptx==1.0.2
+openpyxl==3.1.5
+# dense + реранкер (RAG_RETRIEVER=hybrid, RAG_RERANKER=bge). В Dockerfile torch ставится
+# заранее из CPU-индекса PyTorch, чтобы не тянуть CUDA-колёса.
+torch==2.14.1
+sentence-transformers==6.2.0
+transformers==5.20.2
+huggingface-hub==2.3.0
+tokenizers==0.23.3
+safetensors==0.8.0

@@ -1,0 +1,876 @@
+# СИНТЕТИЧЕСКИЕ ПЕРСОНЫ. Все люди вымышлены. Совпадения имён с реальными людьми случайны.
+# Телефонов, e-mail, адресов, дат рождения здесь нет и быть не должно.
+# Назначение: генерация синтетических ответов на пульсы и проверка разметки /flags и индекса W.
+# Спецификация генерации: data/generator-spec.yaml; промпт: agency/prompts/synthetic-pulse-generate.md.
+# Пропорции скрытых флагов — ресерч 2026-10-23, блок C (калибровка по hh.ru 2025). Фактические — в summary.
+# Собран детерминированно (без LLM). hidden_flags модель-классификатор видеть НЕ должна.
+
+synthetic: true
+version: 1
+generated: 2026-10-23
+count: 50
+summary:
+  sites: {GTP: 22, GrPP: 16, Luzhniki: 12}
+  trajectories: {critical_incident: 6, dip_recover: 13, rising_risk: 7, stable: 24}
+  no_flags: {n: 24, pct: 48}
+  red_zone: {n: 7, pct: 14}
+  flags_personas_pct:   # доля персон с флагом; цель из ресерча в комментарии
+    F1: {n: 12, pct: 24}   # цель, %: ≈25
+    F2: {n: 8, pct: 16}   # цель, %: ≈15 (выше на GTP)
+    F3: {n: 3, pct: 6}   # цель, %: F3+F4 ≈10
+    F4: {n: 2, pct: 4}   # цель, %: F3+F4 ≈10
+    F5: {n: 2, pct: 4}   # цель, %: ≈3
+    F6: {n: 7, pct: 14}   # цель, %: ≈15
+    F7: {n: 4, pct: 8}   # цель, %: ≈8
+    F8: {n: 4, pct: 8}   # цель, %: ≈8
+    F9: {n: 1, pct: 2}   # цель, %: ≈2
+    F10: {n: 2, pct: 4}   # цель, %: ≈4
+  f2_by_site: {GTP: 6, GrPP: 1, Luzhniki: 1}
+  f0_note: "F0 в персоны не закладываем (в ресерче нет пропорции). F0 и идиомы проверяются отдельным ручным набором, см. generator-spec.yaml → edge_cases"
+
+personas:
+  - id: P01
+    synthetic: true
+    full_name: "Соколов Артём (синтетика)"
+    gender: m
+    age_band: "46-55"
+    site: GTP
+    department: "Цех экструзии"
+    position: "Оператор линии экструзии"
+    shift: 1
+    prior_experience_years: 1
+    address_form: vy
+    speech_style: "коротко, без заглавных и точек"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F2, severity_peak: 2, onset: "D0", resolved: "D+30"}
+  - id: P02
+    synthetic: true
+    full_name: "Белова Марина (синтетика)"
+    gender: f
+    age_band: "36-45"
+    site: GTP
+    department: "Цех экструзии"
+    position: "Наладчик оборудования"
+    shift: 2
+    prior_experience_years: 3
+    address_form: vy
+    speech_style: "сухо, по делу, производственная лексика (смена, линия, бригадир)"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: rising_risk
+    expected_worst_zone: yellow
+    hidden_flags:
+      - {code: F2, severity_peak: 2, onset: "D0", resolved: null}
+      - {code: F1, severity_peak: 2, onset: "D+14", resolved: null}
+  - id: P03
+    synthetic: true
+    full_name: "Кузнецов Денис (синтетика)"
+    gender: m
+    age_band: "26-35"
+    site: GTP
+    department: "Цех литья фитингов"
+    position: "Оператор термопластавтомата"
+    shift: 3
+    prior_experience_years: 5
+    address_form: ty
+    speech_style: "голосовыми; транскрипт без знаков препинания"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F2, severity_peak: 1, onset: "D0", resolved: "D+5"}
+  - id: P04
+    synthetic: true
+    full_name: "Орлова Юлия (синтетика)"
+    gender: f
+    age_band: "20-25"
+    site: GTP
+    department: "Склад готовой продукции"
+    position: "Кладовщик"
+    shift: 1
+    prior_experience_years: 8
+    address_form: ty
+    speech_style: "эмоционально, с восклицаниями"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F2, severity_peak: 2, onset: "D0", resolved: "D+14"}
+      - {code: F6, severity_peak: 2, onset: "D+14", resolved: "D+52"}
+  - id: P05
+    synthetic: true
+    full_name: "Морозов Илья (синтетика)"
+    gender: m
+    age_band: "46-55"
+    site: GTP
+    department: "ОТК"
+    position: "Контролёр ОТК"
+    shift: 2
+    prior_experience_years: 12
+    address_form: vy
+    speech_style: "вежливо, развёрнуто"
+    laconic: true   # чаще пустые и односложные ответы
+    trajectory: critical_incident
+    expected_worst_zone: red
+    hidden_flags:
+      - {code: F6, severity_peak: 2, onset: "D+14", resolved: null}
+      - {code: F7, severity_peak: 3, onset: "D+30", resolved: null}
+  - id: P06
+    synthetic: true
+    full_name: "Зайцев Роман (синтетика)"
+    gender: m
+    age_band: "36-45"
+    site: GTP
+    department: "Ремонтно-механический участок"
+    position: "Слесарь-ремонтник"
+    shift: 3
+    prior_experience_years: 0
+    address_form: ty
+    speech_style: "коротко, без заглавных и точек"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: critical_incident
+    expected_worst_zone: red
+    hidden_flags:
+      - {code: F5, severity_peak: 3, onset: "D+5", resolved: null}
+  - id: P07
+    synthetic: true
+    full_name: "Ветров Павел (синтетика)"
+    gender: m
+    age_band: "26-35"
+    site: GTP
+    department: "Энергослужба"
+    position: "Электромонтёр"
+    shift: 1
+    prior_experience_years: 1
+    address_form: vy
+    speech_style: "сухо, по делу, производственная лексика (смена, линия, бригадир)"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: critical_incident
+    expected_worst_zone: red
+    hidden_flags:
+      - {code: F9, severity_peak: 3, onset: "D+2", resolved: null}
+  - id: P08
+    synthetic: true
+    full_name: "Громова Алина (синтетика)"
+    gender: f
+    age_band: "20-25"
+    site: GTP
+    department: "Цех экструзии"
+    position: "Мастер смены"
+    shift: 2
+    prior_experience_years: 3
+    address_form: ty
+    speech_style: "голосовыми; транскрипт без знаков препинания"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: rising_risk
+    expected_worst_zone: yellow
+    hidden_flags:
+      - {code: F1, severity_peak: 2, onset: "D+5", resolved: null}
+      - {code: F4, severity_peak: 2, onset: "D+14", resolved: null}
+  - id: P09
+    synthetic: true
+    full_name: "Лебедев Кирилл (синтетика)"
+    gender: m
+    age_band: "46-55"
+    site: GTP
+    department: "Склад сырья"
+    position: "Водитель погрузчика"
+    shift: 3
+    prior_experience_years: 5
+    address_form: ty
+    speech_style: "эмоционально, с восклицаниями"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: rising_risk
+    expected_worst_zone: yellow
+    hidden_flags:
+      - {code: F8, severity_peak: 2, onset: "D+14", resolved: null}
+      - {code: F6, severity_peak: 2, onset: "D+30", resolved: null}
+  - id: P10
+    synthetic: true
+    full_name: "Фомин Сергей (синтетика)"
+    gender: m
+    age_band: "36-45"
+    site: GTP
+    department: "Цех литья фитингов"
+    position: "Укладчик-упаковщик"
+    shift: 1
+    prior_experience_years: 8
+    address_form: vy
+    speech_style: "вежливо, развёрнуто"
+    laconic: true   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F2, severity_peak: 2, onset: "D0", resolved: "D+14"}
+  - id: P11
+    synthetic: true
+    full_name: "Тихонов Максим (синтетика)"
+    gender: m
+    age_band: "26-35"
+    site: GTP
+    department: "Цех экструзии"
+    position: "Оператор линии экструзии"
+    shift: 2
+    prior_experience_years: 12
+    address_form: vy
+    speech_style: "коротко, без заглавных и точек"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F1, severity_peak: 2, onset: "D+14", resolved: "D+52"}
+      - {code: F6, severity_peak: 1, onset: "D+30", resolved: "D+52"}
+  - id: P12
+    synthetic: true
+    full_name: "Ларина Ольга (синтетика)"
+    gender: f
+    age_band: "20-25"
+    site: GTP
+    department: "Цех экструзии"
+    position: "Наладчик оборудования"
+    shift: 3
+    prior_experience_years: 0
+    address_form: ty
+    speech_style: "сухо, по делу, производственная лексика (смена, линия, бригадир)"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F10, severity_peak: 1, onset: "D+30", resolved: "D+52"}
+  - id: P13
+    synthetic: true
+    full_name: "Савельев Антон (синтетика)"
+    gender: m
+    age_band: "46-55"
+    site: GTP
+    department: "Цех литья фитингов"
+    position: "Оператор термопластавтомата"
+    shift: 1
+    prior_experience_years: 1
+    address_form: vy
+    speech_style: "голосовыми; транскрипт без знаков препинания"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: rising_risk
+    expected_worst_zone: yellow
+    hidden_flags:
+      - {code: F2, severity_peak: 2, onset: "D0", resolved: null}
+      - {code: F3, severity_peak: 2, onset: "D+14", resolved: null}
+  - id: P14
+    synthetic: true
+    full_name: "Чернов Глеб (синтетика)"
+    gender: m
+    age_band: "36-45"
+    site: GTP
+    department: "Склад готовой продукции"
+    position: "Кладовщик"
+    shift: 2
+    prior_experience_years: 3
+    address_form: vy
+    speech_style: "эмоционально, с восклицаниями"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P15
+    synthetic: true
+    full_name: "Егорова Дарья (синтетика)"
+    gender: f
+    age_band: "26-35"
+    site: GTP
+    department: "ОТК"
+    position: "Контролёр ОТК"
+    shift: 3
+    prior_experience_years: 5
+    address_form: ty
+    speech_style: "вежливо, развёрнуто"
+    laconic: true   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P16
+    synthetic: true
+    full_name: "Панов Виталий (синтетика)"
+    gender: m
+    age_band: "20-25"
+    site: GTP
+    department: "Ремонтно-механический участок"
+    position: "Слесарь-ремонтник"
+    shift: 1
+    prior_experience_years: 8
+    address_form: ty
+    speech_style: "коротко, без заглавных и точек"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P17
+    synthetic: true
+    full_name: "Котова Елена (синтетика)"
+    gender: f
+    age_band: "46-55"
+    site: GTP
+    department: "Энергослужба"
+    position: "Электромонтёр"
+    shift: 2
+    prior_experience_years: 12
+    address_form: vy
+    speech_style: "сухо, по делу, производственная лексика (смена, линия, бригадир)"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P18
+    synthetic: true
+    full_name: "Рябов Никита (синтетика)"
+    gender: m
+    age_band: "36-45"
+    site: GTP
+    department: "Цех экструзии"
+    position: "Мастер смены"
+    shift: 3
+    prior_experience_years: 0
+    address_form: ty
+    speech_style: "голосовыми; транскрипт без знаков препинания"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P19
+    synthetic: true
+    full_name: "Мельников Олег (синтетика)"
+    gender: m
+    age_band: "26-35"
+    site: GTP
+    department: "Склад сырья"
+    position: "Водитель погрузчика"
+    shift: 1
+    prior_experience_years: 1
+    address_form: vy
+    speech_style: "эмоционально, с восклицаниями"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P20
+    synthetic: true
+    full_name: "Гусева Наталья (синтетика)"
+    gender: f
+    age_band: "20-25"
+    site: GTP
+    department: "Цех литья фитингов"
+    position: "Укладчик-упаковщик"
+    shift: 2
+    prior_experience_years: 3
+    address_form: ty
+    speech_style: "вежливо, развёрнуто"
+    laconic: true   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P21
+    synthetic: true
+    full_name: "Дроздов Евгений (синтетика)"
+    gender: m
+    age_band: "46-55"
+    site: GTP
+    department: "Цех экструзии"
+    position: "Оператор линии экструзии"
+    shift: 3
+    prior_experience_years: 5
+    address_form: ty
+    speech_style: "коротко, без заглавных и точек"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P22
+    synthetic: true
+    full_name: "Комаров Степан (синтетика)"
+    gender: m
+    age_band: "36-45"
+    site: GTP
+    department: "Цех экструзии"
+    position: "Наладчик оборудования"
+    shift: 1
+    prior_experience_years: 8
+    address_form: vy
+    speech_style: "сухо, по делу, производственная лексика (смена, линия, бригадир)"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P23
+    synthetic: true
+    full_name: "Полякова Анна (синтетика)"
+    gender: f
+    age_band: "26-35"
+    site: GrPP
+    department: "Бухгалтерия"
+    position: "Бухгалтер"
+    shift: null
+    prior_experience_years: 12
+    address_form: vy
+    speech_style: "офисный, с англицизмами (созвон, дедлайн, апрув)"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F1, severity_peak: 2, onset: "D+14", resolved: "D+52"}
+  - id: P24
+    synthetic: true
+    full_name: "Сорокин Тимур (синтетика)"
+    gender: m
+    age_band: "20-25"
+    site: GrPP
+    department: "Отдел продаж"
+    position: "Менеджер по продажам"
+    shift: null
+    prior_experience_years: 0
+    address_form: ty
+    speech_style: "вежливо, развёрнуто"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: rising_risk
+    expected_worst_zone: yellow
+    hidden_flags:
+      - {code: F1, severity_peak: 2, onset: "D+5", resolved: null}
+      - {code: F3, severity_peak: 2, onset: "D+14", resolved: null}
+  - id: P25
+    synthetic: true
+    full_name: "Киселёва Вера (синтетика)"
+    gender: f
+    age_band: "46-55"
+    site: GrPP
+    department: "ИТ-департамент"
+    position: "Специалист техподдержки"
+    shift: null
+    prior_experience_years: 1
+    address_form: vy
+    speech_style: "коротко, по делу"
+    laconic: true   # чаще пустые и односложные ответы
+    trajectory: critical_incident
+    expected_worst_zone: red
+    hidden_flags:
+      - {code: F1, severity_peak: 2, onset: "D+14", resolved: null}
+      - {code: F8, severity_peak: 2, onset: "D+14", resolved: null}
+      - {code: F7, severity_peak: 3, onset: "D+30", resolved: null}
+  - id: P26
+    synthetic: true
+    full_name: "Носов Андрей (синтетика)"
+    gender: m
+    age_band: "36-45"
+    site: GrPP
+    department: "Закупки"
+    position: "Специалист по закупкам"
+    shift: null
+    prior_experience_years: 3
+    address_form: vy
+    speech_style: "с эмодзи и скобочками"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F6, severity_peak: 2, onset: "D+14", resolved: "D+52"}
+      - {code: F8, severity_peak: 1, onset: "D+14", resolved: null}
+  - id: P27
+    synthetic: true
+    full_name: "Жукова Ксения (синтетика)"
+    gender: f
+    age_band: "26-35"
+    site: GrPP
+    department: "Логистика"
+    position: "Логист"
+    shift: null
+    prior_experience_years: 5
+    address_form: ty
+    speech_style: "сухо, официально"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F2, severity_peak: 2, onset: "D0", resolved: "D+5"}
+  - id: P28
+    synthetic: true
+    full_name: "Баранов Игорь (синтетика)"
+    gender: m
+    age_band: "20-25"
+    site: GrPP
+    department: "Маркетинг"
+    position: "Маркетолог"
+    shift: null
+    prior_experience_years: 8
+    address_form: ty
+    speech_style: "офисный, с англицизмами (созвон, дедлайн, апрув)"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F1, severity_peak: 1, onset: "D+5", resolved: "D+14"}
+  - id: P29
+    synthetic: true
+    full_name: "Медведева Софья (синтетика)"
+    gender: f
+    age_band: "46-55"
+    site: GrPP
+    department: "HR"
+    position: "Специалист по кадрам"
+    shift: null
+    prior_experience_years: 12
+    address_form: vy
+    speech_style: "вежливо, развёрнуто"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: critical_incident
+    expected_worst_zone: red
+    hidden_flags:
+      - {code: F5, severity_peak: 3, onset: "D+14", resolved: null}
+  - id: P30
+    synthetic: true
+    full_name: "Крылов Михаил (синтетика)"
+    gender: m
+    age_band: "36-45"
+    site: GrPP
+    department: "Финансы"
+    position: "Финансовый аналитик"
+    shift: null
+    prior_experience_years: 0
+    address_form: ty
+    speech_style: "коротко, по делу"
+    laconic: true   # чаще пустые и односложные ответы
+    trajectory: rising_risk
+    expected_worst_zone: yellow
+    hidden_flags:
+      - {code: F1, severity_peak: 2, onset: "D+14", resolved: null}
+      - {code: F6, severity_peak: 2, onset: "D+30", resolved: null}
+  - id: P31
+    synthetic: true
+    full_name: "Яковлева Полина (синтетика)"
+    gender: f
+    age_band: "26-35"
+    site: GrPP
+    department: "Юридический отдел"
+    position: "Юрист"
+    shift: null
+    prior_experience_years: 1
+    address_form: vy
+    speech_style: "с эмодзи и скобочками"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P32
+    synthetic: true
+    full_name: "Борисов Вадим (синтетика)"
+    gender: m
+    age_band: "20-25"
+    site: GrPP
+    department: "Отдел продаж"
+    position: "Менеджер по работе с ключевыми клиентами"
+    shift: null
+    prior_experience_years: 3
+    address_form: ty
+    speech_style: "сухо, официально"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P33
+    synthetic: true
+    full_name: "Ершова Татьяна (синтетика)"
+    gender: f
+    age_band: "46-55"
+    site: GrPP
+    department: "Бухгалтерия"
+    position: "Бухгалтер"
+    shift: null
+    prior_experience_years: 5
+    address_form: ty
+    speech_style: "офисный, с англицизмами (созвон, дедлайн, апрув)"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P34
+    synthetic: true
+    full_name: "Субботин Лев (синтетика)"
+    gender: m
+    age_band: "36-45"
+    site: GrPP
+    department: "Отдел продаж"
+    position: "Менеджер по продажам"
+    shift: null
+    prior_experience_years: 8
+    address_form: vy
+    speech_style: "вежливо, развёрнуто"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P35
+    synthetic: true
+    full_name: "Карпова Ирина (синтетика)"
+    gender: f
+    age_band: "26-35"
+    site: GrPP
+    department: "ИТ-департамент"
+    position: "Специалист техподдержки"
+    shift: null
+    prior_experience_years: 12
+    address_form: vy
+    speech_style: "коротко, по делу"
+    laconic: true   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P36
+    synthetic: true
+    full_name: "Голубев Даниил (синтетика)"
+    gender: m
+    age_band: "20-25"
+    site: GrPP
+    department: "Закупки"
+    position: "Специалист по закупкам"
+    shift: null
+    prior_experience_years: 0
+    address_form: ty
+    speech_style: "с эмодзи и скобочками"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P37
+    synthetic: true
+    full_name: "Тарасова Валерия (синтетика)"
+    gender: f
+    age_band: "46-55"
+    site: GrPP
+    department: "Логистика"
+    position: "Логист"
+    shift: null
+    prior_experience_years: 1
+    address_form: vy
+    speech_style: "сухо, официально"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P38
+    synthetic: true
+    full_name: "Щербаков Фёдор (синтетика)"
+    gender: m
+    age_band: "36-45"
+    site: GrPP
+    department: "Маркетинг"
+    position: "Маркетолог"
+    shift: null
+    prior_experience_years: 3
+    address_form: vy
+    speech_style: "офисный, с англицизмами (созвон, дедлайн, апрув)"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P39
+    synthetic: true
+    full_name: "Максимова Алиса (синтетика)"
+    gender: f
+    age_band: "26-35"
+    site: Luzhniki
+    department: "HR"
+    position: "Специалист по кадрам"
+    shift: null
+    prior_experience_years: 5
+    address_form: ty
+    speech_style: "вежливо, развёрнуто"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: critical_incident
+    expected_worst_zone: red
+    hidden_flags:
+      - {code: F1, severity_peak: 2, onset: "D+5", resolved: null}
+      - {code: F4, severity_peak: 2, onset: "D+14", resolved: null}
+      - {code: F7, severity_peak: 3, onset: "D+30", resolved: null}
+  - id: P40
+    synthetic: true
+    full_name: "Власов Егор (синтетика)"
+    gender: m
+    age_band: "20-25"
+    site: Luzhniki
+    department: "Финансы"
+    position: "Финансовый аналитик"
+    shift: null
+    prior_experience_years: 8
+    address_form: ty
+    speech_style: "коротко, по делу"
+    laconic: true   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F1, severity_peak: 2, onset: "D+5", resolved: "D+30"}
+      - {code: F3, severity_peak: 1, onset: "D+14", resolved: "D+30"}
+  - id: P41
+    synthetic: true
+    full_name: "Королёва Яна (синтетика)"
+    gender: f
+    age_band: "46-55"
+    site: Luzhniki
+    department: "Юридический отдел"
+    position: "Юрист"
+    shift: null
+    prior_experience_years: 12
+    address_form: vy
+    speech_style: "с эмодзи и скобочками"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F2, severity_peak: 2, onset: "D0", resolved: "D+5"}
+      - {code: F1, severity_peak: 1, onset: "D+5", resolved: "D+14"}
+  - id: P42
+    synthetic: true
+    full_name: "Абрамов Константин (синтетика)"
+    gender: m
+    age_band: "36-45"
+    site: Luzhniki
+    department: "Отдел продаж"
+    position: "Менеджер по работе с ключевыми клиентами"
+    shift: null
+    prior_experience_years: 0
+    address_form: ty
+    speech_style: "сухо, официально"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: rising_risk
+    expected_worst_zone: red
+    hidden_flags:
+      - {code: F1, severity_peak: 2, onset: "D+14", resolved: null}
+      - {code: F8, severity_peak: 2, onset: "D+30", resolved: null}
+      - {code: F7, severity_peak: 2, onset: "D+52", resolved: null}
+  - id: P43
+    synthetic: true
+    full_name: "Сафонова Лилия (синтетика)"
+    gender: f
+    age_band: "26-35"
+    site: Luzhniki
+    department: "Бухгалтерия"
+    position: "Бухгалтер"
+    shift: null
+    prior_experience_years: 1
+    address_form: vy
+    speech_style: "офисный, с англицизмами (созвон, дедлайн, апрув)"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags:
+      - {code: F10, severity_peak: 2, onset: "D+14", resolved: "D+52"}
+      - {code: F6, severity_peak: 1, onset: "D+14", resolved: "D+30"}
+  - id: P44
+    synthetic: true
+    full_name: "Новиков Матвей (синтетика)"
+    gender: m
+    age_band: "20-25"
+    site: Luzhniki
+    department: "Отдел продаж"
+    position: "Менеджер по продажам"
+    shift: null
+    prior_experience_years: 3
+    address_form: ty
+    speech_style: "вежливо, развёрнуто"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: dip_recover
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P45
+    synthetic: true
+    full_name: "Ильина Милана (синтетика)"
+    gender: f
+    age_band: "46-55"
+    site: Luzhniki
+    department: "ИТ-департамент"
+    position: "Специалист техподдержки"
+    shift: null
+    prior_experience_years: 5
+    address_form: ty
+    speech_style: "коротко, по делу"
+    laconic: true   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P46
+    synthetic: true
+    full_name: "Филиппов Арсений (синтетика)"
+    gender: m
+    age_band: "36-45"
+    site: Luzhniki
+    department: "Закупки"
+    position: "Специалист по закупкам"
+    shift: null
+    prior_experience_years: 8
+    address_form: vy
+    speech_style: "с эмодзи и скобочками"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P47
+    synthetic: true
+    full_name: "Широкова Эльвира (синтетика)"
+    gender: f
+    age_band: "26-35"
+    site: Luzhniki
+    department: "Логистика"
+    position: "Логист"
+    shift: null
+    prior_experience_years: 12
+    address_form: vy
+    speech_style: "сухо, официально"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P48
+    synthetic: true
+    full_name: "Гаврилов Ян (синтетика)"
+    gender: m
+    age_band: "20-25"
+    site: Luzhniki
+    department: "Маркетинг"
+    position: "Маркетолог"
+    shift: null
+    prior_experience_years: 0
+    address_form: ty
+    speech_style: "офисный, с англицизмами (созвон, дедлайн, апрув)"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P49
+    synthetic: true
+    full_name: "Афанасьева Злата (синтетика)"
+    gender: f
+    age_band: "46-55"
+    site: Luzhniki
+    department: "HR"
+    position: "Специалист по кадрам"
+    shift: null
+    prior_experience_years: 1
+    address_form: vy
+    speech_style: "вежливо, развёрнуто"
+    laconic: false   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
+  - id: P50
+    synthetic: true
+    full_name: "Мухина Василиса (синтетика)"
+    gender: f
+    age_band: "36-45"
+    site: Luzhniki
+    department: "Финансы"
+    position: "Финансовый аналитик"
+    shift: null
+    prior_experience_years: 3
+    address_form: vy
+    speech_style: "коротко, по делу"
+    laconic: true   # чаще пустые и односложные ответы
+    trajectory: stable
+    expected_worst_zone: green
+    hidden_flags: []
