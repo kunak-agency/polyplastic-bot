@@ -7,7 +7,7 @@ import SectionCard from '@/components/common/SectionCard.vue'
 import { Button } from '@/components/ui/button'
 import ActionRow from '@/components/scenarios/ActionRow.vue'
 import MediaField from '@/components/scenarios/MediaField.vue'
-import { LABEL_MAX, defaultAction, labelLength } from '@/lib/scenarioBranches'
+import { defaultAction, labelIsLong, labelLength } from '@/lib/scenarioBranches'
 import type {
   ActionType,
   BranchAction,
@@ -249,11 +249,12 @@ function save(): void {
             <div class="row">
               <input
                 v-model="b.label"
-                :class="['input', { err: !b.label.trim() || labelLength(b.label) > LABEL_MAX }]"
+                :class="['input', { err: !b.label.trim(), warn: labelIsLong(b.label) }]"
+                :title="labelIsLong(b.label) ? t('scenarios.issue.labelTooLong') : undefined"
                 :placeholder="t('scenarios.rules.buttonN', { n: bi + 1 })"
                 :aria-label="t('scenarios.rules.buttonN', { n: bi + 1 })"
               />
-              <span class="txt-sm muted tabular">{{ labelLength(b.label) }}/{{ LABEL_MAX }}</span>
+              <span class="txt-sm muted tabular">{{ labelLength(b.label) }}</span>
             </div>
             <label class="field-col">
               <span class="txt-sm muted">{{ t('scenarios.rules.buttonDoes') }}</span>

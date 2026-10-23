@@ -20,7 +20,7 @@ import { SITES } from '@/stores/site'
 import { formatDayOffset } from '@/lib/calendar'
 import { STAGES, STEP_KINDS, defaultSurvey } from '@/lib/scenarioSteps'
 import {
-  LABEL_MAX,
+  labelIsLong,
   asksSomething,
   branchFor,
   branchHasContent,
@@ -348,14 +348,15 @@ function minutes(s: number | null): string {
         <div v-for="(b, i) in step.buttons" :key="i" class="btnrow">
           <div class="btnrow__main">
             <input
-              :class="['input', { err: !b.label.trim() || labelLength(b.label) > LABEL_MAX }]"
+              :class="['input', { err: !b.label.trim(), warn: labelIsLong(b.label) }]"
+              :title="labelIsLong(b.label) ? t('scenarios.issue.labelTooLong') : undefined"
               :aria-label="t('scenarios.panel.buttonLabel')"
               :placeholder="t('scenarios.panel.buttonLabel')"
               :value="b.label"
               @input="setButton(i, { label: ($event.target as HTMLInputElement).value })"
             />
-            <span :class="['count', { 'count--over': labelLength(b.label) > LABEL_MAX }]">
-              {{ labelLength(b.label) }}/{{ LABEL_MAX }}
+            <span :class="['count', { 'count--over': labelIsLong(b.label) }]">
+              {{ labelLength(b.label) }}
             </span>
             <Button
               variant="ghost"
@@ -593,8 +594,6 @@ function minutes(s: number | null): string {
   border-radius: var(--radius-lg);
   background: var(--surface);
   max-height: calc(100vh - 84px);
-  position: sticky;
-  top: 68px;
   min-width: 0;
 }
 .panel__head {
@@ -721,11 +720,11 @@ function minutes(s: number | null): string {
   font-size: var(--text-xs);
   color: var(--fg-subtle);
   font-variant-numeric: tabular-nums;
-  width: 38px;
+  width: 24px;
   text-align: right;
 }
 .count--over {
-  color: var(--danger);
+  color: var(--warning);
   font-weight: 600;
 }
 .statbadge {

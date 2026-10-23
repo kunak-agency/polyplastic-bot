@@ -9,7 +9,6 @@ import {
   effectiveAdvance,
   groupBlocks,
   statsBadge,
-  truncateLabel,
   type Issue,
 } from '@/lib/scenarioBranches'
 import type { ScenarioStep, StepStats } from '@/types/api'
@@ -145,9 +144,9 @@ function badge(s: ScenarioStep, label: string) {
                 :class="['chip', { 'chip--branch': !!branchFor(s, bi) }]"
                 :title="btn.label"
               >
-                <GitBranch v-if="branchFor(s, bi)" :size="10" />{{
-                  truncateLabel(btn.label || '…')
-                }}
+                <GitBranch v-if="branchFor(s, bi)" :size="10" /><span class="chip__label">{{
+                  btn.label || '…'
+                }}</span>
                 <span v-if="badge(s, btn.label)" class="chip__stat tabular">
                   {{ badge(s, btn.label)!.percent }}% ({{ badge(s, btn.label)!.picked }})
                 </span>
@@ -268,6 +267,22 @@ function badge(s: ScenarioStep, label: string) {
   border: 1px solid var(--border);
   font-size: var(--text-xs);
   white-space: nowrap;
+}
+.chip {
+  max-width: 220px;
+}
+.steps--compact .chip {
+  max-width: 160px;
+}
+/* A long label is cut on screen with an ellipsis; the full one is in the title. */
+.chip > svg,
+.chip__stat {
+  flex: none;
+}
+.chip__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .chip--branch {
   border-color: var(--accent-border);

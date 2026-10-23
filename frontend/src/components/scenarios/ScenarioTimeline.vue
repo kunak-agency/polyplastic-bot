@@ -1,0 +1,200 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { CircleAlert, Flag, GitBranch, ListChecks, Mail, TriangleAlert } from 'lucide-vue-next'
+import { formatDayOffset } from '@/lib/calendar'
+import { branchCount, groupBlocks, type Issue, type StepBlock } from '@/lib/scenarioBranches'
+import type { ScenarioStep } from '@/types/api'
+
+// The "Timeline" view (ux-spec v1, Enboarder): the same steps as the table,
+// laid out by day — a column per day, the blocks of the day by time, a card per
+// step with its kind, sites, branches and status. A click opens the step panel.
+const props = defineProps<{
+  steps: ScenarioStep[]
+  selectedId: string | null
+  issues: Map<string, Issue[]>
+  legacy: Map<string, string[]>
+}>()
+const emit = defineEmits<{ select: [id: string] }>()
+const { t } = useI18n()
+
+const days = computed(() => {
+  const out: { day: number; blocks: StepBlock[] }[] = []
+  for (const b of groupBlocks(props.steps)) {
+    const last = out[out.length - 1]
+    if (last && last.day === b.day_offset) last.blocks.push(b)
+    else out.push({ day: b.day_offset, blocks: [b] })
+  }
+  return out
+})
+
+function level(id: string): 'error' | 'warning' | 'ok' {
+  const list = props.issues.get(id) ?? []
+  if (list.some((i) => i.level === 'error')) return 'error'
+  if (list.length > 0 || (props.legacy.get(id) ?? []).length > 0) return 'warning'
+  return 'ok'
+}
+function sitesShort(s: ScenarioStep): string {
+  return s.sites.length === 0 ? t('scenarios.allSites') : s.sites.join(' · ')
+}
+</script>
+
+<template>
+  <div class="tl" role="list" :aria-label="t('scenarios.editor.views.timeline')">
+    <section v-for="d in days" :key="d.day" class="tl__day" role="listitem">
+      <header :class="['tl__head', { 'tl__head--zero': d.day === 0 }]">
+        <span class="tabular fw-semi">{{ formatDayOffset(d.day) }}</span>
+        <span v-if="d.day === 0" class="tl__mark">{{ t('scenarios.timeline.firstDay') }}</span>
+        <span class="tl__n">{{
+          t('scenarios.editor.stepsCount', d.blocks.flatMap((b) => b.steps).length)
+        }}</span>
+      </header>
+      <div v-for="b in d.blocks" :key="`${b.day_offset}|${b.time}`" class="tl__block">
+        <div class="tl__time tabular">{{ b.time }}</div>
+        <button
+          v-for="s in b.steps"
+          :key="s.id"
+          type="button"
+          :class="[
+            'tl__card',
+            `tl__card--${level(s.id)}`,
+            { 'tl__card--on': s.id === selectedId, 'tl__card--hr': !!s.hr_task },
+          ]"
+          :aria-pressed="s.id === selectedId"
+          :title="s.title || t('scenarios.editor.untitled')"
+          @click="emit('select', s.id)"
+        >
+          <span class="tl__title">
+            <Mail v-if="s.hr_task" :size="12" class="tl__ico" />
+            <ListChecks v-else-if="s.kind === 'survey'" :size="12" class="tl__ico" />
+            <span class="tl__text">{{ s.title || t('scenarios.editor.untitled') }}</span>
+          </span>
+          <span class="tl__meta">
+            <span>{{ t(`common.stepKind.${s.kind}`) }}</span>
+            <span>{{ sitesShort(s) }}</span>
+            <span v-if="s.buttons.length > 0" class="tl__br">
+              <GitBranch :size="10" />{{ branchCount(s).withBranch }}/{{ branchCount(s).total }}
+            </span>
+            <Flag v-if="s.flag_required" :size="10" />
+            <CircleAlert v-if="level(s.id) === 'error'" :size="11" class="tl__err" />
+            <TriangleAlert v-else-if="level(s.id) === 'warning'" :size="11" class="tl__warn" />
+          </span>
+        </button>
+      </div>
+    </section>
+  </div>
+</template>
+
+<style scoped>
+.tl {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 12px;
+  align-items: flex-start;
+}
+.tl__day {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.tl__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--border);
+}
+.tl__head--zero {
+  border-bottom-color: var(--accent);
+}
+.tl__mark {
+  font-size: var(--text-xs);
+  color: var(--accent);
+}
+.tl__n {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+.tl__block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tl__time {
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+.tl__card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+.tl__card:hover {
+  border-color: var(--border-strong);
+}
+.tl__card--warning {
+  border-left-color: var(--warning);
+}
+.tl__card--error {
+  border-left-color: var(--danger);
+}
+.tl__card--ok {
+  border-left-color: var(--success);
+}
+.tl__card--hr {
+  background: var(--bg-subtle);
+  border-style: dashed;
+}
+.tl__card--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.tl__title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.tl__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl__ico {
+  flex: none;
+  color: var(--fg-muted);
+}
+.tl__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+.tl__br {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.tl__err {
+  color: var(--danger);
+}
+.tl__warn {
+  color: var(--warning);
+}
+</style>

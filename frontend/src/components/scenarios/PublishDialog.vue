@@ -35,6 +35,7 @@ watch(open, (v) => {
   comment.value = ''
   apply.value = 'new'
   touched.value = false
+  showAdded.value = false
 })
 // The server's recommendation sets the default once the numbers arrive.
 watch(
@@ -47,6 +48,22 @@ watch(
 const active = computed(() => props.preview?.active_newcomers ?? props.activeNewcomers)
 const buttonsRemoved = computed(
   () => props.preview?.changes.some((c) => c.buttons_removed.length > 0) ?? false,
+)
+
+// The first version (or a big import) adds every step: dozens of "new step"
+// lines say nothing, so added steps fold into one summary line.
+const FOLD_ADDED_OVER = 10
+const added = computed(() => props.preview?.changes.filter((c) => c.change === 'added') ?? [])
+const others = computed(() => props.preview?.changes.filter((c) => c.change !== 'added') ?? [])
+const foldAdded = computed(
+  () => added.value.length > 0 && (props.nextVersion === 1 || added.value.length > FOLD_ADDED_OVER),
+)
+const addedBlocks = computed(
+  () => new Set(added.value.map((c) => `${c.day_offset}|${c.time}`)).size,
+)
+const showAdded = ref(false)
+const listed = computed(() =>
+  !foldAdded.value || showAdded.value ? (props.preview?.changes ?? []) : others.value,
 )
 
 function submit(): void {
@@ -81,8 +98,23 @@ function submit(): void {
           <p v-if="preview.changes.length === 0" class="muted txt-sm">
             {{ t('scenarios.publish.noChanges') }}
           </p>
-          <ul v-else class="diff">
-            <li v-for="c in preview.changes" :key="c.step_id" :class="`diff--${c.change}`">
+          <div v-if="foldAdded" class="diff__summary txt-sm">
+            <Plus :size="12" />
+            <span
+              >{{ t('scenarios.publish.addedSteps', added.length) }}
+              {{ t('scenarios.publish.inBlocks', addedBlocks) }}</span
+            >
+            <button
+              type="button"
+              class="diff__toggle"
+              :aria-expanded="showAdded"
+              @click="showAdded = !showAdded"
+            >
+              {{ showAdded ? t('scenarios.publish.hideAll') : t('scenarios.publish.showAll') }}
+            </button>
+          </div>
+          <ul v-if="listed.length > 0" class="diff">
+            <li v-for="c in listed" :key="c.step_id" :class="`diff--${c.change}`">
               <Plus v-if="c.change === 'added'" :size="12" />
               <Minus v-else-if="c.change === 'removed'" :size="12" />
               <Pencil v-else :size="12" />
@@ -180,6 +212,27 @@ function submit(): void {
 </template>
 
 <style scoped>
+.diff__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--success);
+}
+.diff__summary span {
+  color: var(--fg);
+}
+.diff__toggle {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.diff__toggle:hover {
+  text-decoration: underline;
+}
 .publish {
   display: flex;
   flex-direction: column;

@@ -7,7 +7,7 @@ import ActionRow from '@/components/scenarios/ActionRow.vue'
 import MediaField from '@/components/scenarios/MediaField.vue'
 import {
   BRANCH_MESSAGES_MAX,
-  LABEL_MAX,
+  labelIsLong,
   ROW_MAX,
   branchHasContent,
   defaultAction,
@@ -171,20 +171,22 @@ const gotoInvalid = computed(() => props.issues.some((i) => i.code === 'gotoNowh
             <X :size="14" />
           </Button>
         </div>
-        <textarea
-          class="textarea br__text"
-          :aria-label="t('scenarios.panel.textVy')"
-          :placeholder="t('scenarios.panel.textVy')"
-          :value="m.text_vy"
-          @input="setMessage(mi, { text_vy: ($event.target as HTMLTextAreaElement).value })"
-        />
-        <textarea
-          class="textarea br__text"
-          :aria-label="t('scenarios.panel.textTy')"
-          :placeholder="t('scenarios.panel.textTy')"
-          :value="m.text_ty"
-          @input="setMessage(mi, { text_ty: ($event.target as HTMLTextAreaElement).value })"
-        />
+        <label class="br__field">
+          <span class="txt-sm muted">{{ t('scenarios.panel.textVy') }}</span>
+          <textarea
+            class="textarea br__text"
+            :value="m.text_vy"
+            @input="setMessage(mi, { text_vy: ($event.target as HTMLTextAreaElement).value })"
+          />
+        </label>
+        <label class="br__field">
+          <span class="txt-sm muted">{{ t('scenarios.panel.textTy') }}</span>
+          <textarea
+            class="textarea br__text"
+            :value="m.text_ty"
+            @input="setMessage(mi, { text_ty: ($event.target as HTMLTextAreaElement).value })"
+          />
+        </label>
         <MediaField
           :model-value="m.media"
           :names="mediaNames"
@@ -194,15 +196,16 @@ const gotoInvalid = computed(() => props.issues.some((i) => i.code === 'gotoNowh
           <span class="txt-sm muted">{{ t('scenarios.branch.terminal') }}</span>
           <div v-for="(b, bi) in m.buttons" :key="bi" class="br__row">
             <input
-              :class="['input', { err: !b.label.trim() || labelLength(b.label) > LABEL_MAX }]"
+              :class="['input', { err: !b.label.trim(), warn: labelIsLong(b.label) }]"
+              :title="labelIsLong(b.label) ? t('scenarios.issue.labelTooLong') : undefined"
               :value="b.label"
               :placeholder="t('scenarios.panel.buttonLabel')"
               :aria-label="t('scenarios.panel.buttonLabel')"
               @input="setTerminal(mi, bi, ($event.target as HTMLInputElement).value)"
             />
-            <span :class="['br__count', { 'br__count--over': labelLength(b.label) > LABEL_MAX }]"
-              >{{ labelLength(b.label) }}/{{ LABEL_MAX }}</span
-            >
+            <span :class="['br__count', { 'br__count--over': labelIsLong(b.label) }]">{{
+              labelLength(b.label)
+            }}</span>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -371,13 +374,18 @@ const gotoInvalid = computed(() => props.issues.some((i) => i.code === 'gotoNowh
 .br__add {
   align-self: flex-start;
 }
+.br__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .br__count {
   font-size: var(--text-xs);
   color: var(--fg-subtle);
   font-variant-numeric: tabular-nums;
 }
 .br__count--over {
-  color: var(--danger);
+  color: var(--warning);
   font-weight: 600;
 }
 .br__share {

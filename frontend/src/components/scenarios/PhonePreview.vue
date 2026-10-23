@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Paperclip } from 'lucide-vue-next'
-import { branchFor, effectiveAdvance, optionKeys, truncateLabel } from '@/lib/scenarioBranches'
+import { branchFor, effectiveAdvance, optionKeys } from '@/lib/scenarioBranches'
 import type { BranchAction, BranchMessage, ScenarioStep, StepButton } from '@/types/api'
 
 // Schematic chat preview (verdict §Q3, Should): the block up to the selected
@@ -104,8 +104,13 @@ function keyLabel(key: string, label: string | null): string {
             <div v-if="s.kind === 'survey' && firstQuestion" class="survey">
               <div class="bubble">{{ firstQuestion.text }}</div>
               <div class="kb kb--grid">
-                <span v-for="k in surveyKeys" :key="k.key" class="kb__btn">
-                  {{ truncateLabel(keyLabel(k.key, k.label)) }}
+                <span
+                  v-for="k in surveyKeys"
+                  :key="k.key"
+                  class="kb__btn"
+                  :title="keyLabel(k.key, k.label)"
+                >
+                  {{ keyLabel(k.key, k.label) }}
                 </span>
               </div>
             </div>
@@ -116,7 +121,7 @@ function keyLabel(key: string, label: string | null): string {
                 :class="['kb__btn', { 'kb__btn--on': tab === bi }]"
                 :title="b.label"
               >
-                {{ truncateLabel(b.label || '…') }}
+                {{ b.label || '…' }}
               </span>
             </div>
             <div v-if="s.kind === 'input'" class="note">{{ t('scenarios.preview.input') }}</div>
@@ -145,7 +150,7 @@ function keyLabel(key: string, label: string | null): string {
             </div>
             <div v-if="m.buttons.length > 0" class="kb">
               <span v-for="(b, bi) in m.buttons" :key="bi" class="kb__btn" :title="b.label">
-                {{ truncateLabel(b.label || '…') }}
+                {{ b.label || '…' }}
               </span>
             </div>
           </template>
@@ -177,8 +182,6 @@ function keyLabel(key: string, label: string | null): string {
   border-radius: 22px;
   background: var(--bg-subtle);
   overflow: hidden;
-  position: sticky;
-  top: 68px;
   max-height: calc(100vh - 84px);
   min-width: 0;
 }
@@ -271,6 +274,11 @@ function keyLabel(key: string, label: string | null): string {
   font-size: var(--text-sm);
   text-align: center;
   white-space: nowrap;
+  /* A long label is cut on screen, as the MAX client does on a narrow phone. */
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .kb--grid .kb__btn {
   min-width: 28px;

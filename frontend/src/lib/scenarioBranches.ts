@@ -9,12 +9,15 @@ import type {
   ScenarioStep,
   SiteCode,
   StepButton,
+  StepSurvey,
   SurveyQuestion,
   SurveyScale,
 } from '@/types/api'
 
-// MAX shows about 18 characters of a button; a row holds at most 7 buttons.
-export const LABEL_MAX = 18
+// MAX has no label limit: the client itself cuts a long label on a narrow
+// phone, so past LABEL_WARN characters HR only gets a warning. A row holds at
+// most 7 buttons.
+export const LABEL_WARN = 24
 export const ROW_MAX = 7
 export const BRANCH_MESSAGES_MAX = 2
 // Three "send right away" steps in a row reach the newcomer as one burst.
@@ -125,14 +128,13 @@ export function branchHasContent(b: Branch | null | undefined): boolean {
   return !!b && !isBranchEmpty(b)
 }
 
-// What the phone preview draws on a button: MAX cuts it at 18 characters.
-export function truncateLabel(label: string, max = LABEL_MAX): string {
-  const chars = [...label]
-  return chars.length <= max ? label : chars.slice(0, max - 1).join('') + '…'
-}
-
 export function labelLength(label: string): number {
   return [...label].length
+}
+
+// A label long enough that a phone may cut it (a warning, not an error).
+export function labelIsLong(label: string): boolean {
+  return labelLength(label) > LABEL_WARN
 }
 
 // ── "Next" between steps of a block ─────────────────────────────────────────
@@ -158,11 +160,11 @@ export type IssueLevel = 'error' | 'warning'
 export type IssueCode =
   // errors: block publishing
   | 'labelEmpty'
-  | 'labelTooLong'
   | 'tooManyButtons'
   | 'handoffNoTarget'
   | 'gotoNowhere'
   // warnings: shown, publishing allowed
+  | 'labelTooLong'
   | 'mediaMissing'
   | 'siteVariantMissing'
   | 'branchEmpty'
@@ -181,7 +183,6 @@ export interface Issue {
 
 export const ERROR_CODES: readonly IssueCode[] = [
   'labelEmpty',
-  'labelTooLong',
   'tooManyButtons',
   'handoffNoTarget',
   'gotoNowhere',
@@ -214,7 +215,7 @@ function checkButtons(buttons: StepButton[], out: Issue[], at?: number): void {
   buttons.forEach((b, i) => {
     const where = at ?? i
     if (!b.label.trim()) out.push(issue('labelEmpty', where))
-    else if (labelLength(b.label) > LABEL_MAX) out.push(issue('labelTooLong', where, b.label))
+    else if (labelIsLong(b.label)) out.push(issue('labelTooLong', where, b.label))
   })
 }
 
@@ -348,4 +349,73 @@ export function optionKeys(
     return Array.from({ length: max }, (_, i) => ({ key: String(i + 1), label: String(i + 1) }))
   }
   return []
+}
+
+// ── Editing survey options ──────────────────────────────────────────────────
+
+// Do the options of this question name answer keys? choice/multi — yes (option
+// number from 1); a scale lists reason buttons, which are not keys.
+export function optionsAreKeys(q: Pick<SurveyQuestion, 'type'>, surveyScale: SurveyScale): boolean {
+  const type =
+    q.type ?? (surveyScale === 'yesno' ? 'yesno' : surveyScale === 'choice' ? 'choice' : 'scale')
+  return type === 'choice' || type === 'multi'
+}
+
+// Rebuilds a question for a new option list: `order[n]` is the old index of
+// the option now at n, or -1 for a new one. Branches and flags keyed by the
+// option number follow their option; those of removed options go. Rules after
+// the survey that name the option (`in`, `contains` of question `qNumber`)
+// follow it too.
+export function reorderOptions(
+  survey: StepSurvey,
+  qi: number,
+  options: string[],
+  order: number[],
+): StepSurvey {
+  const q = survey.questions[qi]
+  if (!q) return survey
+  const keyed = optionsAreKeys(q, survey.scale)
+  const next: SurveyQuestion = { ...q, options }
+  if (!keyed) return { ...survey, questions: survey.questions.map((x, j) => (j === qi ? next : x)) }
+
+  // Old option number (from 1) → new one; removed options are absent.
+  const moved = new Map<number, number>()
+  order.forEach((old, n) => {
+    if (old >= 0) moved.set(old + 1, n + 1)
+  })
+  const remapKeys = <T>(rec: Record<string, T> | undefined): Record<string, T> | undefined => {
+    if (!rec) return undefined
+    const out: Record<string, T> = {}
+    for (const [k, v] of Object.entries(rec)) {
+      const to = moved.get(Number(k))
+      if (to !== undefined) out[String(to)] = v
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+  }
+  next.branches = remapKeys(q.branches)
+  next.option_flags = remapKeys(q.option_flags)
+  if (!next.branches) delete next.branches
+  if (!next.option_flags) delete next.option_flags
+
+  const qNumber = qi + 1
+  const remapList = (list: number[] | undefined): number[] | undefined =>
+    list?.flatMap((n) => {
+      const to = moved.get(n)
+      return to === undefined ? [] : [to]
+    })
+  const outcomes = survey.outcomes?.map((o) => ({
+    ...o,
+    if: o.if.map((c) => {
+      if (c.q !== qNumber) return c
+      const r = { ...c }
+      if (c.in) r.in = remapList(c.in)
+      if (c.contains) r.contains = remapList(c.contains)
+      return r
+    }),
+  }))
+  return {
+    ...survey,
+    questions: survey.questions.map((x, j) => (j === qi ? next : x)),
+    ...(outcomes ? { outcomes } : {}),
+  }
 }

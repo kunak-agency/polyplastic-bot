@@ -23,6 +23,7 @@ import LoadingState from '@/components/common/LoadingState.vue'
 import ScenarioStatus from '@/components/scenarios/ScenarioStatus.vue'
 import StepPanel from '@/components/scenarios/StepPanel.vue'
 import StepsTable from '@/components/scenarios/StepsTable.vue'
+import ScenarioTimeline from '@/components/scenarios/ScenarioTimeline.vue'
 import PhonePreview from '@/components/scenarios/PhonePreview.vue'
 import PublishDialog from '@/components/scenarios/PublishDialog.vue'
 import ScenarioRules from '@/components/scenarios/ScenarioRules.vue'
@@ -147,8 +148,9 @@ async function onFile(e: Event): Promise<void> {
 }
 
 const selected = computed(() => steps.value.find((s) => s.id === selectedId.value) ?? null)
-// Steps table or the scenario's commands and rules.
-const view = ref<'table' | 'rules'>('table')
+// Steps as a table or a timeline (one source, the same step panel), or the
+// scenario's commands and rules.
+const view = ref<'table' | 'timeline' | 'rules'>('table')
 const savingRules = ref(false)
 // Only commands and rules are taken from the answer: unsaved step edits stay.
 async function onSaveRules(body: ScenarioPatch): Promise<void> {
@@ -506,6 +508,15 @@ async function onPublish(body: PublishRequest): Promise<void> {
           </button>
           <button
             type="button"
+            :class="['tab', { active: view === 'timeline' }]"
+            role="tab"
+            :aria-selected="view === 'timeline'"
+            @click="view = 'timeline'"
+          >
+            {{ t('scenarios.editor.views.timeline') }}
+          </button>
+          <button
+            type="button"
             :class="['tab', { active: view === 'rules' }]"
             role="tab"
             :aria-selected="view === 'rules'"
@@ -513,15 +524,6 @@ async function onPublish(body: PublishRequest): Promise<void> {
           >
             {{ t('scenarios.editor.views.rules') }}
           </button>
-          <span
-            class="tab tab--disabled"
-            role="tab"
-            aria-selected="false"
-            aria-disabled="true"
-            :title="t('scenarios.editor.views.timelineSoon')"
-          >
-            {{ t('scenarios.editor.views.timeline') }}
-          </span>
         </span>
       </div>
 
@@ -575,6 +577,14 @@ async function onPublish(body: PublishRequest): Promise<void> {
               </div>
             </template>
           </EmptyState>
+          <ScenarioTimeline
+            v-else-if="view === 'timeline'"
+            :steps="steps"
+            :selected-id="selectedId"
+            :issues="issues"
+            :legacy="legacy"
+            @select="selectedId = $event"
+          />
           <StepsTable
             v-else
             :steps="steps"
@@ -659,10 +669,6 @@ async function onPublish(body: PublishRequest): Promise<void> {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-.tab--disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
 .head-meta__err {
   display: inline-flex;
   align-items: center;
@@ -678,12 +684,20 @@ async function onPublish(body: PublishRequest): Promise<void> {
 .editor--with-panel {
   grid-template-columns: minmax(0, 1fr) minmax(0, 700px);
 }
-/* Panel and phone side by side; the phone drops under the panel when narrow. */
+/* Panel and phone side by side; the phone drops under the panel when narrow.
+   The whole side sticks under the top bar: a step clicked at the bottom of a
+   long table opens in view, and the side scrolls inside itself. */
 .side {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;
   gap: 12px;
   align-items: start;
+  align-self: start;
+  position: sticky;
+  top: 68px;
+  max-height: calc(100vh - 84px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 @media (max-width: 1500px) {
   .editor--with-panel {
@@ -696,6 +710,12 @@ async function onPublish(body: PublishRequest): Promise<void> {
 @media (max-width: 1100px) {
   .editor--with-panel {
     grid-template-columns: 1fr;
+  }
+  /* One column: the panel goes under the table, in the page flow. */
+  .side {
+    position: static;
+    max-height: none;
+    overflow: visible;
   }
 }
 </style>

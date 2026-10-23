@@ -10,7 +10,8 @@ import {
   groupBlocks,
   hasErrors,
   statsBadge,
-  truncateLabel,
+  labelIsLong,
+  LABEL_WARN,
   validateScenario,
   validateStep,
 } from '../src/lib/scenarioBranches.ts'
@@ -75,18 +76,35 @@ test('a clean step with a filled branch has no issues', () => {
   assert.deepEqual(branchCount(s), { withBranch: 1, total: 2 })
 })
 
-test('errors: empty label, label over 18, more than 7 buttons', () => {
+test('errors: empty label, more than 7 buttons', () => {
   const many = Array.from({ length: 8 }, (_, i) => ({ label: `B${i}`, action: '' }))
   assert.deepEqual(codes(step('a', 1, '10:00', { buttons: many })), ['error:tooManyButtons'])
-  const s = step('b', 1, '10:00', {
+  const seven = Array.from({ length: 7 }, (_, i) => ({ label: `B${i}`, action: '' }))
+  assert.deepEqual(codes(step('a', 1, '10:00', { buttons: seven })), [])
+  const s = step('b', 1, '10:00', { buttons: [{ label: ' ', action: '' }] })
+  assert.deepEqual(codes(s), ['error:labelEmpty'])
+})
+
+test('a label over 24 characters is a warning, not an error (MAX has no limit)', () => {
+  assert.equal(LABEL_WARN, 24)
+  // The old 18-character "limit" is gone: a 22-character label is clean.
+  const s = step('b', 1, '10:00', { buttons: [{ label: 'Передать через Корсика', action: '' }] })
+  assert.deepEqual(codes(s), [])
+  const exactly24 = 'а'.repeat(24)
+  const over = 'Да, расскажи про столовую' // 25
+  assert.equal(labelIsLong(exactly24), false)
+  assert.equal(labelIsLong(over), true)
+  // Characters, not UTF-16 units: an emoji counts once.
+  assert.equal(labelIsLong('😀'.repeat(24)), false)
+  const long = step('c', 1, '10:00', {
     buttons: [
-      { label: ' ', action: '' },
-      { label: 'Передать через Корсика', action: '' },
-      { label: 'ровно восемнадцать', action: '' },
+      { label: 'Да', action: '' },
+      { label: over, action: '' },
     ],
   })
-  assert.deepEqual(codes(s), ['error:labelEmpty', 'error:labelTooLong'])
-  assert.equal(validateStep(s, ctx)[1].button, 1)
+  assert.deepEqual(codes(long), ['warning:labelTooLong'])
+  assert.equal(validateStep(long, ctx)[0].button, 1)
+  assert.equal(hasErrors([validateStep(long, ctx)]), false)
 })
 
 test('errors: handoff without a recipient, goto nowhere; terminal buttons are checked too', () => {
@@ -97,7 +115,7 @@ test('errors: handoff without a recipient, goto nowhere; terminal buttons are ch
   b.then = 'goto_block'
   b.goto = 'blk-404'
   const s = step('a', 1, '10:00', { buttons: [{ label: 'Да', action: '', branch: b }] })
-  assert.deepEqual(codes(s), ['error:labelTooLong', 'error:handoffNoTarget', 'error:gotoNowhere'])
+  assert.deepEqual(codes(s), ['warning:labelTooLong', 'error:handoffNoTarget', 'error:gotoNowhere'])
   b.goto = 'blk-1'
   b.actions[0].to = 'recruiter'
   b.messages[0].buttons = []
@@ -158,10 +176,7 @@ test('"Next" is the default between steps without a question', () => {
   assert.equal(effectiveAdvance(asks, true), 'none')
 })
 
-test('labels are cut at 18 characters; badges respect the threshold', () => {
-  assert.equal(truncateLabel('Короткая'), 'Короткая')
-  assert.equal(truncateLabel('Передать через Корсика'), 'Передать через Ко…')
-  assert.equal([...truncateLabel('Передать через Корсика')].length, 18)
+test('badges respect the threshold', () => {
   assert.equal(statsBadge({ share: null, picked: 3 }), null)
   assert.deepEqual(statsBadge({ share: 0.3125, picked: 12 }), { percent: 31, picked: 12 })
 })

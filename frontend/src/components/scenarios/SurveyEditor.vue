@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Flag, GitBranch, Plus, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Flag, GitBranch, Plus, X } from 'lucide-vue-next'
 import FormField from '@/components/common/FormField.vue'
 import { Button } from '@/components/ui/button'
 import BranchEditor from '@/components/scenarios/BranchEditor.vue'
 import OutcomesEditor from '@/components/scenarios/OutcomesEditor.vue'
-import { branchHasContent, optionKeys, type Issue } from '@/lib/scenarioBranches'
+import {
+  branchHasContent,
+  optionKeys,
+  optionsAreKeys,
+  reorderOptions,
+  type Issue,
+} from '@/lib/scenarioBranches'
 import type {
   Branch,
   FlagSeverity,
@@ -93,11 +99,50 @@ function num(raw: string): number | null {
   const v = Number(raw)
   return raw.trim() === '' || !Number.isFinite(v) ? null : v
 }
-function parseOptions(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
+// Options are a list of fields: an option may hold a comma. Branches and
+// flags are keyed by the option number, so a move or a removal carries them
+// along (reorderOptions); the open option follows its option too.
+function setOptionText(qi: number, oi: number, text: string): void {
+  const q = props.survey.questions[qi]
+  setQ(qi, { options: q.options.map((o, j) => (j === oi ? text : o)) })
+}
+function applyOrder(qi: number, options: string[], order: number[]): void {
+  const keyed = optionsAreKeys(props.survey.questions[qi], props.survey.scale)
+  if (keyed && picked.value?.q === qi) {
+    const at = order.indexOf(Number(picked.value.key) - 1)
+    picked.value = at >= 0 ? { q: qi, key: String(at + 1) } : null
+  }
+  emit('update', reorderOptions(props.survey, qi, options, order))
+}
+function addOption(qi: number): void {
+  const q = props.survey.questions[qi]
+  applyOrder(qi, [...q.options, ''], [...q.options.map((_, j) => j), -1])
+}
+function removeOption(qi: number, oi: number): void {
+  const q = props.survey.questions[qi]
+  const key = String(oi + 1)
+  const keyed = optionsAreKeys(q, props.survey.scale)
+  const rich = keyed && (branchHasContent(q.branches?.[key]) || !!q.option_flags?.[key])
+  if (rich && !window.confirm(t('scenarios.survey.removeOptionConfirm', { label: q.options[oi] })))
+    return
+  const order = q.options.map((_, j) => j).filter((j) => j !== oi)
+  applyOrder(
+    qi,
+    order.map((j) => q.options[j]),
+    order,
+  )
+}
+function moveOption(qi: number, oi: number, by: -1 | 1): void {
+  const q = props.survey.questions[qi]
+  const to = oi + by
+  if (to < 0 || to >= q.options.length) return
+  const order = q.options.map((_, j) => j)
+  ;[order[oi], order[to]] = [order[to], order[oi]]
+  applyOrder(
+    qi,
+    order.map((j) => q.options[j]),
+    order,
+  )
 }
 function effType(q: SurveyQuestion): QuestionType {
   if (q.type) return q.type
@@ -219,16 +264,53 @@ function effType(q: SurveyQuestion): QuestionType {
             </select>
           </label>
         </div>
-        <input
+        <div
           v-if="effType(q) === 'choice' || effType(q) === 'multi' || effType(q) === 'scale'"
-          class="input"
-          :aria-label="t('scenarios.panel.options')"
-          :placeholder="
+          class="optlist"
+        >
+          <span class="txt-sm muted">{{
             effType(q) === 'scale' ? t('scenarios.survey.reasons') : t('scenarios.panel.options')
-          "
-          :value="q.options.join(', ')"
-          @change="setQ(i, { options: parseOptions(($event.target as HTMLInputElement).value) })"
-        />
+          }}</span>
+          <div v-for="(o, oi) in q.options" :key="oi" class="optlist__row">
+            <span class="q__n tabular">{{ oi + 1 }}</span>
+            <input
+              class="input"
+              :aria-label="t('scenarios.survey.optionN', { n: oi + 1 })"
+              :placeholder="t('scenarios.survey.optionN', { n: oi + 1 })"
+              :value="o"
+              @input="setOptionText(i, oi, ($event.target as HTMLInputElement).value)"
+            />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              :disabled="oi === 0"
+              :aria-label="t('scenarios.survey.moveUp', { n: oi + 1 })"
+              @click="moveOption(i, oi, -1)"
+            >
+              <ArrowUp :size="14" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              :disabled="oi === q.options.length - 1"
+              :aria-label="t('scenarios.survey.moveDown', { n: oi + 1 })"
+              @click="moveOption(i, oi, 1)"
+            >
+              <ArrowDown :size="14" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              :aria-label="t('scenarios.survey.removeOption', { n: oi + 1 })"
+              @click="removeOption(i, oi)"
+            >
+              <X :size="14" />
+            </Button>
+          </div>
+          <Button size="sm" variant="ghost" class="add" @click="addOption(i)">
+            <Plus :size="14" />{{ t('scenarios.survey.addOption') }}
+          </Button>
+        </div>
         <label v-if="effType(q) === 'choice' || effType(q) === 'multi'" class="check">
           <input
             type="checkbox"
@@ -418,6 +500,20 @@ function effType(q: SurveyQuestion): QuestionType {
 }
 .add {
   align-self: flex-start;
+}
+.optlist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.optlist__row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.optlist__row .input {
+  flex: 1;
+  min-width: 0;
 }
 .opts {
   display: flex;
