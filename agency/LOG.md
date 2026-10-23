@@ -650,3 +650,10 @@
 - README для жюри по 7 критериям, с честными пометками и списком ИИ-инструментов.
 - Правило для всех: в `backend/.env` живой токен, поэтому API запускать только с пустым
   `MAX_BOT_TOKEN`. Порты 8081 и 8093 занимает живой стек.
+
+### Зависимости фронта — готово (~01:40)
+- axios 1.19.0 → 1.20.0, vue 3.5.41 → 3.5.44, vue-router 5.2.0 → 5.4.0, vite 8.2.1 → 8.3.5 (без смены мажора).
+- `pnpm.overrides`: follow-redirects ≥1.16.1, source-map-js ≥1.2.2.
+- `audit:prod`: 0 high. Остался 1 moderate: XSS в echarts <6.1.0; исправление только в мажоре 6, не трогали.
+- Гейты зелёные: install, lint, format:check, type-check, build, check:cyrillic, check:build-output, test, audit:prod.
+- Моки в headless-браузере: Обзор, Новички, Обращения, База знаний открываются без ошибок консоли.
