@@ -523,3 +523,39 @@ production-сборке её нет, а сервер с `APP_ENV=production` о�
 rag (паузы до 30 с) и перезаливает текущие версии, которых нет в `GET /documents` (сверка по
 `doc_id`); то же в фоне, если список кабинета увидел пропажу. Не принял — `not_indexed` и
 `index_error`.
+
+### v4 — ветки, вложения, опросы по вопросам, импорт ТЗ (24.10)
+
+Источник истины по смыслу — `agency/playbook/steps/05-excel-tz-mapping.md` §3. Поля шага
+(`ScenarioStep`, в `steps` всех ответов сценариев и в снимке версии):
+- `trigger`: `null` или `{"type":"time"}` — по расписанию; `{"type":"answer","parent_id":"uuid",
+  "on":[0,1]}` — сразу после нажатия кнопок родителя с этими индексами; `{"type":"answer",
+  "parent_id":"uuid","on_survey":{"q":0,"options":[1,2]}}` или `{"…","on_survey":{"q":2,"below":8}}`
+  — по ответу в вопросе опроса родителя. У дочернего шага `day_offset` и `time` игнорируются,
+  площадки фильтруются как обычно. Порядок в цепочке — `position`. Глубина ≤ 3, циклы запрещены.
+- `required: bool` — «Обязательный этап».
+- `media: [{"media_id":"uuid|null","name":"Изображение 14"}]`, `gallery: bool`. Ссылка по имени
+  допустима без `media_id` — разрешается по медиатеке при отправке.
+- `buttons[].action`: прежние `""`, `link:<url>`, `human`, `skip` плюс `human:hr`,
+  `human:recruiter` (связаться с человеком, обращение v2, переписка через бота), `ticket:hr`,
+  `ticket:recruiter`, `ticket:<route>:<F-код>` (бот просит описать проблему → флаги → обращение).
+- `survey.questions[]`: `{"text","options","type":"scale|yesno|choice|multi|text","scale":"1-10|1-5",
+  "threshold":8,"anchors":["…","…"],"comment":"below|on_no","other":bool}`. Без `type` — как раньше.
+
+Медиатека:
+- `GET /api/media` → `{"items":[{"id","name","kind":"image|file","filename","mime","size",
+  "status":"missing|ready","used_in":N,"updated_at"}],"total"}`;
+- `POST /api/media` (multipart `file`, `name`) → запись; имя уникально (без учёта регистра);
+  загрузка в существующее имя со статусом `missing` его заполняет;
+- `PUT /api/media/{id}` (multipart `file`) — замена;
+- `GET /api/media/{id}/content` — файл для превью.
+
+Бот получает вложения через `MediaService.Attachments(ctx, refs []domain.MediaRef)
+([]max.Attachment, warnings)`: загрузка в MAX (`POST /uploads`), кэш токена, `missing` → без
+вложения и предупреждение в журнал.
+
+Импорт ТЗ: `POST /api/scenarios/import` и `POST /api/scenarios/{id}/import` отвечают сценарием и
+`import_report: {"rows":N,"steps":N,"branches":N,"media_missing":N,"warnings":[{"row","code",
+"message"}]}`. Коды: `media_missing`, `alt_variants`, `vy_copied`, `question_without_options`,
+`system_rule`, `email_task`, `unknown_when`, `label_truncated`, `survey_branch_skipped`. Мягкий
+импорт: неразобранная строка не валит файл.

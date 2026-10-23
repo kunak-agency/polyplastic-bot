@@ -117,7 +117,63 @@ type ScenarioStep struct {
 	Survey        *Survey    `gorm:"type:jsonb" json:"survey"`
 	Condition     *string    `json:"condition"`
 	WorkHoursOnly bool       `json:"work_hours_only"`
+	// Ветки и вложения (agency/playbook/steps/05-excel-tz-mapping.md §3.2–3.3, §3.7).
+	Trigger  *StepTrigger `gorm:"type:jsonb" json:"trigger"` // nil — шаг по времени
+	Required bool         `json:"required"`                  // «Обязательный этап» ТЗ
+	Media    MediaRefList `gorm:"type:jsonb" json:"media"`   // картинки/файлы из медиатеки по имени
+	Gallery  bool         `json:"gallery"`                   // «ФОТО»: несколько картинок одним сообщением
 }
+
+// StepTrigger — когда уходит шаг. type "time" (по умолчанию) — по day_offset/time; "answer" —
+// сразу после ответа на родительский шаг: on — индексы кнопок родителя, on_survey — вариант или
+// оценка ниже порога в вопросе опроса родителя.
+type StepTrigger struct {
+	Type     string         `json:"type"`
+	ParentID *uuid.UUID     `json:"parent_id,omitempty"`
+	On       []int          `json:"on,omitempty"`
+	OnSurvey *SurveyTrigger `json:"on_survey,omitempty"`
+}
+
+type SurveyTrigger struct {
+	Q       int   `json:"q"`
+	Options []int `json:"options,omitempty"`
+	Below   *int  `json:"below,omitempty"`
+}
+
+const (
+	TriggerTime   = "time"
+	TriggerAnswer = "answer"
+)
+
+// IsAnswer — дочерний шаг, уходит по ответу на родителя.
+func (s ScenarioStep) IsAnswer() bool { return s.Trigger != nil && s.Trigger.Type == TriggerAnswer }
+
+func (t *StepTrigger) Value() (driver.Value, error) {
+	if t == nil {
+		return nil, nil
+	}
+	return jsonValue(*t)
+}
+
+func (t *StepTrigger) Scan(src any) error { return jsonScan(src, t) }
+
+// MediaRef — ссылка шага на запись медиатеки. Name храним рядом с id: импорт ТЗ создаёт ссылку
+// по имени («Изображение 14») раньше, чем HR загрузит файл.
+type MediaRef struct {
+	MediaID *uuid.UUID `json:"media_id,omitempty"`
+	Name    string     `json:"name"`
+}
+
+type MediaRefList []MediaRef
+
+func (l MediaRefList) Value() (driver.Value, error) {
+	if l == nil {
+		l = MediaRefList{}
+	}
+	return jsonValue([]MediaRef(l))
+}
+
+func (l *MediaRefList) Scan(src any) error { return jsonScan(src, (*[]MediaRef)(l)) }
 
 // AppliesTo — шаг для площадки: без меток — для всех.
 func (s ScenarioStep) AppliesTo(site string) bool { return len(s.Sites) == 0 || s.Sites.Has(site) }
@@ -150,9 +206,19 @@ type Survey struct {
 	Questions []SurveyQuestion `json:"questions"`
 }
 
+// SurveyQuestion — вопрос опроса. Type пусто — как раньше: шкала/порог опроса целиком.
+// Повопросные поля (05-excel-tz-mapping.md §3.5): type scale|yesno|choice|multi|text,
+// своя шкала и порог, подписи краёв, comment below|on_no — когда просить комментарий, other —
+// «свой вариант».
 type SurveyQuestion struct {
-	Text    string   `json:"text"`
-	Options []string `json:"options"`
+	Text      string   `json:"text"`
+	Options   []string `json:"options"`
+	Type      string   `json:"type,omitempty"`
+	Scale     string   `json:"scale,omitempty"`
+	Threshold *int     `json:"threshold,omitempty"`
+	Anchors   []string `json:"anchors,omitempty"`
+	Comment   string   `json:"comment,omitempty"`
+	Other     bool     `json:"other,omitempty"`
 }
 
 func (s *Survey) Value() (driver.Value, error) {
