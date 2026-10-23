@@ -89,6 +89,22 @@ function activity(n: Newcomer): string {
 function onLaunched(created: Newcomer): void {
   void router.push({ name: 'newcomer-invite', params: { id: created.id } })
 }
+
+// The whole row opens the trajectory. The name stays a real link: it is the
+// keyboard stop and the target of middle-click, so the row itself adds no
+// second tab stop. Clicks on controls inside the row and text selection are
+// left alone; Ctrl/Cmd-click opens a new tab like the link would.
+function openRow(e: MouseEvent, id: string): void {
+  const target = e.target as HTMLElement | null
+  if (target?.closest('a, button, input, select, textarea, [role="button"]')) return
+  if (window.getSelection()?.toString()) return
+  const to = { name: 'newcomer', params: { id } }
+  if (e.metaKey || e.ctrlKey) {
+    window.open(router.resolve(to).href, '_blank', 'noopener')
+    return
+  }
+  void router.push(to)
+}
 </script>
 
 <template>
@@ -185,7 +201,7 @@ function onLaunched(created: Newcomer): void {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="n in rows" :key="n.id">
+            <tr v-for="n in rows" :key="n.id" class="row-link" @click="openRow($event, n.id)">
               <td>
                 <RouterLink class="cell-link" :to="{ name: 'newcomer', params: { id: n.id } }">
                   {{ n.full_name }}
@@ -297,6 +313,9 @@ function onLaunched(created: Newcomer): void {
 }
 .tbl-scroll.is-stale {
   opacity: 0.6;
+}
+.row-link {
+  cursor: pointer;
 }
 .cell-link {
   color: var(--fg);

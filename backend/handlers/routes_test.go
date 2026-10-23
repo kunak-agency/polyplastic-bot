@@ -430,3 +430,77 @@ func TestTicketsAPI(t *testing.T) {
 		t.Fatalf("open_tickets после закрытия: %v", c["open_tickets"])
 	}
 }
+
+// POST /api/scenarios: пустой черновик, копия опубликованной версии с новыми id шагов, 409 на
+// занятое имя; DELETE — только черновик без публикаций и новичков.
+func TestScenarioCreateDeleteAPI(t *testing.T) {
+	a := newAPI(t)
+
+	empty := a.json("POST", "/api/scenarios", map[string]any{"name": "  Офис (синтетика) ", "sites": []string{"GrPP", "GrPP"}}, 201)
+	if empty["name"] != "Офис (синтетика)" || empty["version"] != float64(0) || empty["status"] != "draft" ||
+		len(empty["steps"].([]any)) != 0 || len(empty["sites"].([]any)) != 1 {
+		t.Fatalf("пустой: %v", empty)
+	}
+	if r := a.json("POST", "/api/scenarios", map[string]any{"name": "офис (СИНТЕТИКА)"}, 409); errCode(r) != services.CodeScenarioNameTaken {
+		t.Fatalf("занятое имя: %v", r)
+	}
+	// Пустой редактор → «Загрузить Excel»: шаги файла ложатся в черновик этого сценария.
+	into := a.upload("/api/scenarios/"+empty["id"].(string)+"/import", "t.xlsx", timelineXLSX(t), "", 200)
+	if into["id"] != empty["id"] || len(into["steps"].([]any)) != 3 || into["name"] != "Офис (синтетика)" {
+		t.Fatalf("импорт в черновик: %v", into)
+	}
+	a.upload("/api/scenarios/"+empty["id"].(string)+"/import", "old.xls", []byte("x"), "", 422)
+	a.upload("/api/scenarios/0199a000-0000-7000-8000-00000000ffff/import", "t.xlsx", timelineXLSX(t), "", 404)
+	a.json("PUT", "/api/scenarios/"+empty["id"].(string)+"/steps", map[string]any{"steps": []any{}}, 200)
+	a.json("POST", "/api/scenarios", map[string]any{"name": " "}, 422)
+	a.json("POST", "/api/scenarios", map[string]any{"name": "X", "sites": []string{"Марс"}}, 422)
+	a.json("POST", "/api/scenarios", map[string]any{"name": "X", "from_scenario_id": "не-uuid"}, 422)
+	a.json("POST", "/api/scenarios", map[string]any{"name": "X", "from_scenario_id": "0199a000-0000-7000-8000-00000000ffff"}, 422)
+
+	// Источник: импорт → публикация v1 (3 шага) → правка черновика до 1 шага. Копия берёт v1.
+	src := a.upload("/api/scenarios/import", "t.xlsx", timelineXLSX(t), "Завод (синтетика)", 201)
+	sid := src["id"].(string)
+	a.json("POST", "/api/scenarios/"+sid+"/publish", map[string]any{"comment": "v1"}, 200)
+	a.json("PUT", "/api/scenarios/"+sid+"/steps", map[string]any{"steps": []any{
+		map[string]any{"day_offset": 1, "title": "Только в черновике", "text_vy": "…"},
+	}}, 200)
+	srcIDs := map[string]bool{}
+	for _, s := range src["steps"].([]any) {
+		srcIDs[s.(map[string]any)["id"].(string)] = true
+	}
+	cp := a.json("POST", "/api/scenarios", map[string]any{"name": "Завод — копия", "sites": []string{"GTP"}, "from_scenario_id": sid}, 201)
+	cs := cp["steps"].([]any)
+	if cp["version"] != float64(0) || cp["status"] != "draft" || len(cs) != 3 {
+		t.Fatalf("копия: %v", cp)
+	}
+	for i, s := range cs {
+		st := s.(map[string]any)
+		if srcIDs[st["id"].(string)] {
+			t.Fatalf("шаг %d копии с id источника: %v", i, st)
+		}
+		if want := src["steps"].([]any)[i].(map[string]any)["title"]; st["title"] != want {
+			t.Fatalf("шаг %d: %v, want %v", i, st["title"], want)
+		}
+	}
+	// Копия публикуется отдельно от источника.
+	pub := a.json("POST", "/api/scenarios/"+cp["id"].(string)+"/publish", map[string]any{"comment": "первая"}, 200)
+	if pub["version"] != float64(1) {
+		t.Fatalf("публикация копии: %v", pub)
+	}
+	// Копия неопубликованного: шаги черновика.
+	cp2 := a.json("POST", "/api/scenarios", map[string]any{"name": "Копия пустого", "from_scenario_id": empty["id"]}, 201)
+	if len(cp2["steps"].([]any)) != 0 {
+		t.Fatalf("копия пустого: %v", cp2)
+	}
+
+	// DELETE: опубликованный — 409 (новички бывают только у опубликованных); черновик — 204, потом 404.
+	if r := a.json("DELETE", "/api/scenarios/"+sid, nil, 409); errCode(r) != services.CodeScenarioNotDeletable {
+		t.Fatalf("удаление опубликованного: %v", r)
+	}
+	a.json("DELETE", "/api/scenarios/"+cp2["id"].(string), nil, 204)
+	a.json("GET", "/api/scenarios/"+cp2["id"].(string), nil, 404)
+	a.json("DELETE", "/api/scenarios/"+cp2["id"].(string), nil, 404)
+	if n := len(items(t, a.json("GET", "/api/scenarios", nil, 200))); n != 3 {
+		t.Fatalf("после удаления сценариев %d", n)
+	}
+}

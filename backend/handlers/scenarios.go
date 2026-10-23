@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -92,38 +93,95 @@ func (h *Handler) PublishScenario(c *fiber.Ctx) error {
 	return c.JSON(out.ScenarioDetailFrom(*d))
 }
 
-// ImportScenario — POST /api/scenarios/import (multipart: file, необязательно name) →
-// 201 + сценарий-черновик.
-func (h *Handler) ImportScenario(c *fiber.Ctx) error {
+// excelUpload — файл Excel из поля file: размер и расширение; закрыть — вызывающему.
+func excelUpload(c *fiber.Ctx) (*multipart.FileHeader, multipart.File, error) {
 	fh, err := c.FormFile("file")
 	if err != nil {
-		return errs.NewValidationError("Нужен файл Excel в поле file").
+		return nil, nil, errs.NewValidationError("Нужен файл Excel в поле file").
 			WithDetails(errs.FieldError{Field: "file", Code: errs.CodeRequired, Message: "Обязательное поле"})
 	}
 	if fh.Size > MaxImportSize {
-		return errs.NewValidationError("Файл больше 5 МБ")
+		return nil, nil, errs.NewValidationError("Файл больше 5 МБ")
 	}
 	switch strings.ToLower(filepath.Ext(fh.Filename)) {
 	case ".xlsx":
 	case ".xls":
 		// Контракт принимает .xls, но excelize читает только OOXML: старый двоичный формат
 		// Excel 97–2003 честно отказываем с подсказкой.
-		return fileFormatError(msgImportXLS)
+		return nil, nil, fileFormatError(msgImportXLS)
 	default:
-		return fileFormatError(msgImportNotExcel)
+		return nil, nil, fileFormatError(msgImportNotExcel)
 	}
+	f, err := fh.Open()
+	if err != nil {
+		return nil, nil, errs.NewValidationError("Файл не читается").WithCause(err)
+	}
+	return fh, f, nil
+}
+
+// ImportScenario — POST /api/scenarios/import (multipart: file, необязательно name) →
+// 201 + сценарий-черновик.
+func (h *Handler) ImportScenario(c *fiber.Ctx) error {
+	fh, f, err := excelUpload(c)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
 	name := strings.TrimSpace(c.FormValue("name"))
 	if name == "" {
 		name = strings.TrimSuffix(filepath.Base(fh.Filename), filepath.Ext(fh.Filename))
 	}
-	f, err := fh.Open()
-	if err != nil {
-		return errs.NewValidationError("Файл не читается").WithCause(err)
-	}
-	defer func() { _ = f.Close() }()
 	d, err := h.services.Scenarios.ImportExcel(c.UserContext(), name, f)
 	if err != nil {
 		return err
 	}
 	return c.Status(http.StatusCreated).JSON(out.ScenarioDetailFrom(*d))
+}
+
+// ImportSteps — POST /api/scenarios/{id}/import (multipart: file) → шаги из Excel заменяют
+// черновик сценария, как PUT …/steps; ответ — сценарий со steps.
+func (h *Handler) ImportSteps(c *fiber.Ctx) error {
+	id, err := pathID(c)
+	if err != nil {
+		return err
+	}
+	_, f, err := excelUpload(c)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	d, err := h.services.Scenarios.ImportExcelInto(c.UserContext(), id, f)
+	if err != nil {
+		return err
+	}
+	return c.JSON(out.ScenarioDetailFrom(*d))
+}
+
+// CreateScenario — POST /api/scenarios {"name","sites","from_scenario_id"} → 201 + черновик.
+func (h *Handler) CreateScenario(c *fiber.Ctx) error {
+	var body in.ScenarioCreate
+	if err := bindBody(c, &body); err != nil {
+		return err
+	}
+	name, sites, from, err := body.Validate()
+	if err != nil {
+		return err
+	}
+	d, err := h.services.Scenarios.CreateDraft(c.UserContext(), name, sites, from)
+	if err != nil {
+		return err
+	}
+	return c.Status(http.StatusCreated).JSON(out.ScenarioDetailFrom(*d))
+}
+
+// DeleteScenario — DELETE /api/scenarios/{id} → 204; только черновик без публикаций и новичков.
+func (h *Handler) DeleteScenario(c *fiber.Ctx) error {
+	id, err := pathID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.services.Scenarios.Delete(c.UserContext(), id); err != nil {
+		return err
+	}
+	return c.SendStatus(http.StatusNoContent)
 }

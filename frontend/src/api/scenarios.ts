@@ -3,6 +3,7 @@ import type {
   ListResponse,
   PublishRequest,
   Scenario,
+  ScenarioCreateRequest,
   ScenarioDetail,
   ScenarioStep,
 } from '@/types/api'
@@ -43,6 +44,28 @@ export async function apiImportScenario(file: File): Promise<ScenarioDetail> {
   const form = new FormData()
   form.append('file', file)
   const r = await http.post<ScenarioDetail>('/scenarios/import', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return r.data
+}
+
+// 201 + the new draft; 409 scenario_name_taken when the name is in use.
+export async function apiCreateScenario(body: ScenarioCreateRequest): Promise<ScenarioDetail> {
+  const r = await http.post<ScenarioDetail>('/scenarios', body)
+  return r.data
+}
+
+// 204; only a never-published draft without newcomers (409 otherwise).
+export async function apiDeleteScenario(id: string): Promise<void> {
+  await http.delete(`/scenarios/${encodeURIComponent(id)}`)
+}
+
+// Excel steps replace the draft of an existing scenario (the empty editor's
+// "Upload Excel"); the answer is the scenario with steps.
+export async function apiImportScenarioSteps(id: string, file: File): Promise<ScenarioDetail> {
+  const form = new FormData()
+  form.append('file', file)
+  const r = await http.post<ScenarioDetail>(`/scenarios/${encodeURIComponent(id)}/import`, form, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
   return r.data

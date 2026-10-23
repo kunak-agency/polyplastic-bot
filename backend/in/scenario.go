@@ -204,3 +204,33 @@ func (p Publish) Validate() (string, string, error) {
 	}
 	return comment, apply, f.err()
 }
+
+// ScenarioCreate — тело POST /api/scenarios: новый черновик пустым или копией шагов.
+type ScenarioCreate struct {
+	Name           string   `json:"name"`
+	Sites          []string `json:"sites"`
+	FromScenarioID *string  `json:"from_scenario_id"`
+}
+
+// Validate — имя, площадки (пусто — все) и необязательный источник копии.
+func (b ScenarioCreate) Validate() (string, []string, *uuid.UUID, error) {
+	var f fields
+	name := f.text("name", b.Name, true)
+	sites := []string{}
+	for _, code := range b.Sites {
+		code = strings.TrimSpace(code)
+		if _, ok := domain.Sites[code]; !ok {
+			f.add("sites", errs.CodeOutOfRange, "Площадки: GrPP, Luzhniki, GTP")
+			break
+		}
+		if !slices.Contains(sites, code) {
+			sites = append(sites, code)
+		}
+	}
+	var from *uuid.UUID
+	if b.FromScenarioID != nil && strings.TrimSpace(*b.FromScenarioID) != "" {
+		id := f.uuid("from_scenario_id", *b.FromScenarioID)
+		from = &id
+	}
+	return name, sites, from, f.err()
+}

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRoute } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Plus, Save, Send, TriangleAlert } from 'lucide-vue-next'
+import { FileSpreadsheet, ListPlus, Plus, Save, Send, Trash2, TriangleAlert } from 'lucide-vue-next'
 import PageContainer from '@/components/common/PageContainer.vue'
 import PageHead from '@/components/common/PageHead.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
@@ -13,7 +13,13 @@ import ScenarioStatus from '@/components/scenarios/ScenarioStatus.vue'
 import StepPanel from '@/components/scenarios/StepPanel.vue'
 import PublishDialog from '@/components/scenarios/PublishDialog.vue'
 import { Button } from '@/components/ui/button'
-import { apiGetScenario, apiPublishScenario, apiPutScenarioSteps } from '@/api/scenarios'
+import {
+  apiDeleteScenario,
+  apiGetScenario,
+  apiImportScenarioSteps,
+  apiPublishScenario,
+  apiPutScenarioSteps,
+} from '@/api/scenarios'
 import { useBreadcrumbTail } from '@/composables/useBreadcrumbs'
 import { useToast } from '@/composables/useToast'
 import { errorMessage, isApiError } from '@/lib/apiError'
@@ -24,6 +30,7 @@ import type { PublishRequest, ScenarioDetail, ScenarioStep } from '@/types/api'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const toast = useToast()
 const { setBreadcrumbTail } = useBreadcrumbTail()
 
@@ -60,7 +67,51 @@ async function load(): Promise<void> {
 }
 watch(id, load, { immediate: true })
 
-onBeforeRouteLeave(() => !dirty.value || window.confirm(t('common.unsavedLeave')))
+// Set after the draft is deleted: there is nothing left to lose on the way out.
+const gone = ref(false)
+onBeforeRouteLeave(() => gone.value || !dirty.value || window.confirm(t('common.unsavedLeave')))
+
+// Only a never-published draft nobody runs on can go (DELETE answers 409 otherwise).
+const deletable = computed(
+  () => !!scenario.value && scenario.value.version === 0 && scenario.value.active_newcomers === 0,
+)
+const deleting = ref(false)
+
+async function onDeleteDraft(): Promise<void> {
+  const s = scenario.value
+  if (!s || !window.confirm(t('scenarios.editor.deleteDraftConfirm', { name: s.name }))) return
+  deleting.value = true
+  try {
+    await apiDeleteScenario(s.id)
+    gone.value = true
+    toast.success(t('scenarios.editor.deleted'))
+    void router.push({ name: 'scenarios' })
+  } catch (e) {
+    toast.error(errorMessage(e, 'scenarios.editor.deleteFailed'))
+  } finally {
+    deleting.value = false
+  }
+}
+
+// The empty editor's "Upload Excel": the file's steps replace this draft.
+const fileInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+
+async function onFile(e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !scenario.value) return
+  importing.value = true
+  try {
+    adopt(await apiImportScenarioSteps(scenario.value.id, file))
+    toast.success(t('scenarios.editor.imported'))
+  } catch (err) {
+    toast.error(errorMessage(err, 'scenarios.import.failed'))
+  } finally {
+    importing.value = false
+  }
+}
 
 const selected = computed(() => steps.value.find((s) => s.id === selectedId.value) ?? null)
 const issues = computed(() => new Map(steps.value.map((s) => [s.id, stepIssues(s)])))
@@ -182,6 +233,15 @@ function sitesLabel(s: ScenarioStep): string {
           </span>
         </template>
         <template #actions>
+          <Button
+            v-if="deletable"
+            variant="ghost"
+            :disabled="deleting"
+            :title="t('scenarios.editor.deleteDraftHint')"
+            @click="onDeleteDraft"
+          >
+            <Trash2 :size="14" />{{ t('scenarios.editor.deleteDraft') }}
+          </Button>
           <Button @click="addStep"><Plus :size="14" />{{ t('scenarios.editor.addStep') }}</Button>
           <Button :disabled="!dirty || saving" @click="onSave">
             <Save :size="14" />{{
@@ -213,11 +273,36 @@ function sitesLabel(s: ScenarioStep): string {
 
       <div :class="['editor', { 'editor--with-panel': selected }]">
         <SectionCard body-padding="none">
-          <EmptyState v-if="steps.length === 0" :title="t('scenarios.editor.noSteps')">
+          <EmptyState
+            v-if="steps.length === 0"
+            :icon="ListPlus"
+            :title="t('scenarios.editor.noSteps')"
+            :subtitle="t('scenarios.editor.emptyHint')"
+          >
             <template #action>
-              <Button @click="addStep"
-                ><Plus :size="14" />{{ t('scenarios.editor.addStep') }}</Button
-              >
+              <div class="empty-actions">
+                <Button variant="primary" @click="addStep">
+                  <Plus :size="14" />{{ t('scenarios.editor.addStep') }}
+                </Button>
+                <input
+                  ref="fileInput"
+                  type="file"
+                  class="sr-only"
+                  accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                  tabindex="-1"
+                  aria-hidden="true"
+                  @change="onFile"
+                />
+                <Button
+                  :disabled="importing"
+                  :title="t('scenarios.import.hint')"
+                  @click="fileInput?.click()"
+                >
+                  <FileSpreadsheet :size="14" />{{
+                    importing ? t('scenarios.editor.importing') : t('scenarios.editor.importExcel')
+                  }}
+                </Button>
+              </div>
             </template>
           </EmptyState>
           <div v-else class="tbl-scroll">
@@ -316,6 +401,20 @@ function sitesLabel(s: ScenarioStep): string {
 }
 .views {
   margin-bottom: 12px;
+}
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 .tab--disabled {
   cursor: not-allowed;

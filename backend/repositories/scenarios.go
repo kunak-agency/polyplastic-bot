@@ -81,3 +81,39 @@ func (r *ScenarioRepo) StepIDsElsewhere(ctx context.Context, scenarioID uuid.UUI
 	}
 	return out, err
 }
+
+// ByNameFold — сценарий с тем же именем без учёта регистра и крайних пробелов.
+func (r *ScenarioRepo) ByNameFold(ctx context.Context, name string) (*domain.Scenario, error) {
+	var s domain.Scenario
+	err := r.db.WithContext(ctx).First(&s, "lower(btrim(name)) = lower(btrim(?))", name).Error
+	return ignoreNotFound(&s, err)
+}
+
+// CountVersions — сколько версий сценария опубликовано.
+func (r *ScenarioRepo) CountVersions(ctx context.Context, scenarioID uuid.UUID) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&domain.ScenarioVersion{}).Where("scenario_id = ?", scenarioID).Count(&n).Error
+	return n, err
+}
+
+// CountEmployees — сколько новичков (в любом статусе) запущено по сценарию.
+func (r *ScenarioRepo) CountEmployees(ctx context.Context, scenarioID uuid.UUID) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&domain.Employee{}).Where("scenario_id = ?", scenarioID).Count(&n).Error
+	return n, err
+}
+
+// Delete — сценарий вместе с шагами черновика. Версии и новичков проверяет сервис.
+func (r *ScenarioRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	db := r.db.WithContext(ctx)
+	if err := db.Where("scenario_id = ?", id).Delete(&domain.ScenarioStep{}).Error; err != nil {
+		return err
+	}
+	return db.Where("id = ?", id).Delete(&domain.Scenario{}).Error
+}
+
+// LockNames — замок транзакции на имена сценариев: две параллельные «Создать» с одним
+// именем не проскочат проверку уникальности обе.
+func (r *ScenarioRepo) LockNames(ctx context.Context) error {
+	return r.db.WithContext(ctx).Exec("SELECT pg_advisory_xact_lock(hashtext('scenario_names'))").Error
+}

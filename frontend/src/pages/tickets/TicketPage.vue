@@ -316,7 +316,10 @@ function when(iso: string): string {
             <div class="head__line">
               {{ ticket.newcomer_name }} · {{ t(`common.site.${ticket.site}`) }}
               <template v-if="newcomer"> · {{ newcomer.department }}</template>
-              · <span class="tabular">{{ formatDayOffset(ticket.day) }}</span>
+              ·
+              <span class="tabular" :title="t('tickets.detail.createdOnDayHint')">{{
+                t('tickets.detail.createdOnDay', { day: formatDayOffset(ticket.day) })
+              }}</span>
               <template v-if="newcomer">
                 ·
                 {{

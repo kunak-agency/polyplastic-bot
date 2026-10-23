@@ -25,11 +25,14 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 	api.Post("/newcomers/:id/time-travel", h.TimeTravel)
 
 	api.Get("/scenarios", h.ListScenarios)
+	api.Post("/scenarios", h.CreateScenario)
 	// import — до :id, иначе «import» разберётся как id сценария.
 	api.Post("/scenarios/import", h.ImportScenario)
 	api.Get("/scenarios/:id", h.GetScenario)
+	api.Delete("/scenarios/:id", h.DeleteScenario)
 	api.Put("/scenarios/:id/steps", h.PutSteps)
 	api.Post("/scenarios/:id/publish", h.PublishScenario)
+	api.Post("/scenarios/:id/import", h.ImportSteps)
 
 	// v2 — обращения (api_contract.md, «v2 — итерация 3» и «Уточнения v2»).
 	api.Get("/tickets", h.ListTickets)

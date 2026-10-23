@@ -1,7 +1,7 @@
 import type { MockRequest, MockResult, MockRoute } from '../adapter'
-import type { ScenarioDetail, ScenarioStep } from '@/types/api'
+import type { ScenarioDetail, ScenarioStep, SiteCode } from '@/types/api'
 import { importedScenario } from '../fixtures/scenarios'
-import { activeCount, ensureSeeded, newId, scenarios } from '../state'
+import { activeCount, ensureSeeded, newcomers, newId, scenarios } from '../state'
 
 // Mirrors backend/handlers/scenarios.go and in/scenario.go: 422
 // VALIDATION_FAILED with details[] naming steps[N].field, 404 NOT_FOUND.
@@ -84,6 +84,91 @@ function validateSteps(steps: ScenarioStep[]): FieldError[] {
   return out
 }
 
+// Steps of the last published version, per scenario: a copy starts from them
+// (services.CreateDraft). Seeded scenarios have no snapshot here; their draft
+// equals the published version, so the draft is copied instead.
+const publishedSteps = new Map<string, ScenarioStep[]>()
+
+const SITE_CODES: SiteCode[] = ['GrPP', 'Luzhniki', 'GTP']
+
+function createScenario(req: MockRequest): MockResult {
+  const name = String(req.body.name ?? '').trim()
+  if (!name)
+    return error(422, 'VALIDATION_FAILED', 'Проверьте данные запроса', [
+      { field: 'name', code: 'REQUIRED', message: 'Обязательное поле' },
+    ])
+  const rawSites = Array.isArray(req.body.sites) ? (req.body.sites as string[]) : []
+  if (rawSites.some((c) => !SITE_CODES.includes(c as SiteCode)))
+    return error(422, 'VALIDATION_FAILED', 'Проверьте данные запроса', [
+      { field: 'sites', code: 'OUT_OF_RANGE', message: 'Площадки: GrPP, Luzhniki, GTP' },
+    ])
+  const folded = name.toLowerCase()
+  for (const s of scenarios.values())
+    if (s.name.trim().toLowerCase() === folded)
+      return {
+        status: 409,
+        data: {
+          error: {
+            code: 'scenario_name_taken',
+            message: 'Сценарий с таким названием уже есть — выберите другое',
+            traceId: `mock-${Date.now()}`,
+          },
+        },
+      }
+  let steps: ScenarioStep[] = []
+  const fromId = req.body.from_scenario_id
+  if (typeof fromId === 'string' && fromId) {
+    const src = scenarios.get(fromId)
+    if (!src)
+      return error(422, 'VALIDATION_FAILED', 'Сценарий-источник не найден', [
+        {
+          field: 'from_scenario_id',
+          code: 'INVALID_FORMAT',
+          message: 'Сценарий-источник не найден',
+        },
+      ])
+    // New ids: the copy's steps must not be mistaken for the source's in timelines.
+    steps = structuredClone(publishedSteps.get(src.id) ?? src.steps).map((st) => ({
+      ...st,
+      id: newId(),
+    }))
+  }
+  const s: ScenarioDetail = {
+    id: newId(),
+    name,
+    sites: [...new Set(rawSites as SiteCode[])],
+    version: 0,
+    status: 'draft',
+    active_newcomers: 0,
+    updated_at: new Date().toISOString(),
+    steps,
+  }
+  scenarios.set(s.id, s)
+  return { status: 201, data: detail(s) }
+}
+
+function deleteScenario(req: MockRequest): MockResult {
+  const s = scenarios.get(req.params.id)
+  if (!s) return notFound()
+  const hasNewcomers = [...newcomers.values()].some((n) => n.scenario_id === s.id)
+  if (s.version > 0 || hasNewcomers)
+    return {
+      status: 409,
+      data: {
+        error: {
+          code: 'scenario_not_deletable',
+          message: hasNewcomers
+            ? 'По сценарию запущены новички — удалить его нельзя'
+            : 'Сценарий уже публиковался — удалить можно только черновик без публикаций',
+          traceId: `mock-${Date.now()}`,
+        },
+      },
+    }
+  scenarios.delete(s.id)
+  publishedSteps.delete(s.id)
+  return { status: 204 }
+}
+
 function putSteps(req: MockRequest): MockResult {
   const s = scenarios.get(req.params.id)
   if (!s) return notFound()
@@ -124,6 +209,7 @@ function publish(req: MockRequest): MockResult {
     return error(422, 'VALIDATION_FAILED', 'В сценарии нет шагов — публиковать нечего')
   s.version += 1
   s.status = 'published'
+  publishedSteps.set(s.id, structuredClone(s.steps))
   s.updated_at = new Date().toISOString()
   return { status: 200, data: detail(s) }
 }
@@ -134,7 +220,8 @@ function fileError(message: string): MockResult {
   ])
 }
 
-function importExcel(req: MockRequest): MockResult {
+// The Excel file of a multipart body, or the server's refusal.
+function excelFile(req: MockRequest): File | MockResult {
   // The adapter hands a FormData body through untouched.
   const form = req.body as unknown
   const file = form instanceof FormData ? form.get('file') : null
@@ -146,6 +233,25 @@ function importExcel(req: MockRequest): MockResult {
   if (/\.xls$/i.test(file.name))
     return fileError('Формат .xls (Excel 97–2003) пока не читается — сохраните файл как .xlsx')
   if (!/\.xlsx$/i.test(file.name)) return fileError('Нужен файл Excel: .xlsx')
+  return file
+}
+
+// POST /scenarios/:id/import: the file's steps replace the draft.
+function importInto(req: MockRequest): MockResult {
+  const s = scenarios.get(req.params.id)
+  if (!s) return notFound()
+  const file = excelFile(req)
+  if (!(file instanceof File)) return file
+  s.steps = importedScenario(s.id, file.name, new Date().toISOString()).steps
+  s.status = 'draft'
+  s.updated_at = new Date().toISOString()
+  return { status: 200, data: detail(s) }
+}
+
+function importExcel(req: MockRequest): MockResult {
+  const file = excelFile(req)
+  if (!(file instanceof File)) return file
+  const form = req.body as unknown
   const name = form instanceof FormData ? String(form.get('name') ?? '').trim() : ''
   const s = importedScenario(newId(), name || file.name, new Date().toISOString())
   scenarios.set(s.id, s)
@@ -173,7 +279,10 @@ const routes: MockRoute[] = [
       return s ? { status: 200, data: detail(s) } : notFound()
     },
   },
+  { method: 'POST', path: '/scenarios', handler: createScenario },
+  { method: 'DELETE', path: '/scenarios/:id', handler: deleteScenario },
   { method: 'PUT', path: '/scenarios/:id/steps', handler: putSteps },
+  { method: 'POST', path: '/scenarios/:id/import', handler: importInto },
   { method: 'POST', path: '/scenarios/:id/publish', handler: publish },
   { method: 'POST', path: '/scenarios/import', handler: importExcel },
 ]

@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { Route, FileSpreadsheet } from 'lucide-vue-next'
+import { Route, FileSpreadsheet, Plus } from 'lucide-vue-next'
 import PageContainer from '@/components/common/PageContainer.vue'
 import PageHead from '@/components/common/PageHead.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
@@ -11,9 +11,11 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import ErrorState from '@/components/common/ErrorState.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import ScenarioStatus from '@/components/scenarios/ScenarioStatus.vue'
+import CreateScenarioDialog from '@/components/scenarios/CreateScenarioDialog.vue'
 import { Button } from '@/components/ui/button'
 import { apiImportScenario } from '@/api/scenarios'
 import { useScenariosStore } from '@/stores/scenarios'
+import type { ScenarioDetail } from '@/types/api'
 import { useSiteStore } from '@/stores/site'
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/lib/apiError'
@@ -35,6 +37,12 @@ const rows = computed(() =>
       currentSite.value === 'all' || s.sites.length === 0 || s.sites.includes(currentSite.value),
   ),
 )
+
+const createOpen = ref(false)
+
+function onCreated(s: ScenarioDetail): void {
+  void router.push({ name: 'scenario', params: { id: s.id } })
+}
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
@@ -79,6 +87,10 @@ async function onFile(e: Event): Promise<void> {
           <FileSpreadsheet :size="14" />
           {{ importing ? t('scenarios.import.uploading') : t('scenarios.import.button') }}
         </Button>
+        <Button variant="primary" @click="createOpen = true">
+          <Plus :size="14" />
+          {{ t('scenarios.create.button') }}
+        </Button>
       </template>
     </PageHead>
 
@@ -97,7 +109,13 @@ async function onFile(e: Event): Promise<void> {
         :icon="Route"
         :title="t('scenarios.empty.title')"
         :subtitle="t('scenarios.empty.description')"
-      />
+      >
+        <template #action>
+          <Button variant="primary" @click="createOpen = true">
+            <Plus :size="14" />{{ t('scenarios.create.button') }}
+          </Button>
+        </template>
+      </EmptyState>
       <EmptyState v-else-if="rows.length === 0" :icon="Route" :title="t('scenarios.noMatches')" />
       <table v-else class="tbl">
         <thead>
@@ -131,6 +149,8 @@ async function onFile(e: Event): Promise<void> {
         </tbody>
       </table>
     </SectionCard>
+
+    <CreateScenarioDialog v-model:open="createOpen" :scenarios="items" @created="onCreated" />
   </PageContainer>
 </template>
 

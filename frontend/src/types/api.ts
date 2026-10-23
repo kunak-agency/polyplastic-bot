@@ -193,6 +193,14 @@ export interface ScenarioDetail extends Scenario {
   steps: ScenarioStep[]
 }
 
+// POST /api/scenarios: a draft (version 0), empty or a copy of another
+// scenario's last published steps under new step ids.
+export interface ScenarioCreateRequest {
+  name: string
+  sites: SiteCode[]
+  from_scenario_id: string | null
+}
+
 export interface PublishRequest {
   comment: string
   apply: PublishApply
