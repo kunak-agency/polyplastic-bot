@@ -526,36 +526,49 @@ rag (паузы до 30 с) и перезаливает текущие верс�
 
 ### v4 — ветки, вложения, опросы по вопросам, импорт ТЗ (24.10)
 
-Источник истины по смыслу — `agency/playbook/steps/05-excel-tz-mapping.md` §3. Поля шага
-(`ScenarioStep`, в `steps` всех ответов сценариев и в снимке версии):
-- `trigger`: `null` или `{"type":"time"}` — по расписанию; `{"type":"answer","parent_id":"uuid",
-  "on":[0,1]}` — сразу после нажатия кнопок родителя с этими индексами; `{"type":"answer",
-  "parent_id":"uuid","on_survey":{"q":0,"options":[1,2]}}` или `{"…","on_survey":{"q":2,"below":8}}`
-  — по ответу в вопросе опроса родителя. У дочернего шага `day_offset` и `time` игнорируются,
-  площадки фильтруются как обычно. Порядок в цепочке — `position`. Глубина ≤ 3, циклы запрещены.
-- `required: bool` — «Обязательный этап».
-- `media: [{"media_id":"uuid|null","name":"Изображение 14"}]`, `gallery: bool`. Ссылка по имени
-  допустима без `media_id` — разрешается по медиатеке при отправке.
-- `buttons[].action`: прежние `""`, `link:<url>`, `human`, `skip` плюс `human:hr`,
-  `human:recruiter` (связаться с человеком, обращение v2, переписка через бота), `ticket:hr`,
-  `ticket:recruiter`, `ticket:<route>:<F-код>` (бот просит описать проблему → флаги → обращение).
-- `survey.questions[]`: `{"text","options","type":"scale|yesno|choice|multi|text","scale":"1-10|1-5",
-  "threshold":8,"anchors":["…","…"],"comment":"below|on_no","other":bool}`. Без `type` — как раньше.
+Модель — по вердикту внешнего ресерчера `agency/playbook/artifacts/research/2026-10-24-branching-verdict.md`
+(файл ТЗ разобран построчно: 68 строк, глубина веток ≤ 2, ветки всегда сходятся, «иначе» не
+встречается, «Следующая реплика» = порядок сообщений, а не ветка). Детали ТЗ —
+`agency/playbook/steps/05-excel-tz-mapping.md` §1–2 (§3.2 «дочерний шаг» отменён вердиктом).
+
+**Блок** = шаги с одним днём и временем; **шаг** = сообщение блока. Новые поля шага:
+- `key` (стабильный ключ для повторного импорта и аналитики), `required`, `media:[{"media_id",
+  "name"}]`, `gallery`, `alt_text` (авторская альтернатива, ТЗ r8), `hr_task` (бот не шлёт, ТЗ r19),
+  `flag_required` (показ «по отмашке рекрутера»: флаг в карточке новичка, проверка при отправке),
+  `no_answer: {"remind_after_h":[24,48],"max":2} | null` (null — продолжать молча; обязательной
+  ветки «иначе» нет).
+- Кнопка: `{"label","action","branch":Branch|null,"opens_free_text":bool}`. `branch` null — просто
+  записать ответ. Подпись ≤ 18 символов, ≤ 7 кнопок в ряд — иначе ошибка публикации.
+- `Branch {"messages":[{"text_ty","text_vy","media":[…],"buttons":[терминальные, без branch]}] (≤ 2),
+  "actions":[Action], "then":"continue|end_block|goto_block", "goto":"<key блока>"}`. Ветка уходит
+  сразу по callback (исходное сообщение правится в «✅ …»), затем поток блока продолжается.
+- `Action.type`: `escalate {category F-код, route hr|recruiter|security, notify_manager}`,
+  `handoff {to recruiter|hr|security}` («связаться с человеком», обращение v2, переписка через бота),
+  `set_field {field: address_form, value}`, `set_flag {flag}`, `send_file {media, per_tag}`,
+  `open_free_text {prompt}` (бот ждёт текст → флаги → обращение). Пара «Передать через Корсика /
+  Связаться с рекрутером» из ТЗ = две терминальные кнопки с `open_free_text`+`escalate` и `handoff`.
+- `survey.questions[]`: `{"text","options","type":"scale|yesno|choice|multi|text","scale","threshold",
+  "anchors","comment":"below|on_no","other"}`; без `type` — как раньше. Правила после опроса
+  (`outcomes`, ТЗ r57) — Should.
+- Callback payload ссылается на версию: нажатие резолвится по снимку версии, в которой сообщение
+  ушло (удалённая в новой версии ветка у уже отправленного сообщения всё равно срабатывает).
 
 Медиатека:
-- `GET /api/media` → `{"items":[{"id","name","kind":"image|file","filename","mime","size",
-  "status":"missing|ready","used_in":N,"updated_at"}],"total"}`;
-- `POST /api/media` (multipart `file`, `name`) → запись; имя уникально (без учёта регистра);
-  загрузка в существующее имя со статусом `missing` его заполняет;
-- `PUT /api/media/{id}` (multipart `file`) — замена;
-- `GET /api/media/{id}/content` — файл для превью.
+- `GET /api/media` → `{"items":[{"id","name","kind":"image|file","files":[{"site":"GrPP|Luzhniki|GTP|null",
+  "filename","mime","size"}],"status":"missing|ready","used_in":N,"updated_at"}],"total"}` (до 3 файлов
+  по площадкам + общий, бот выбирает по площадке новичка);
+- `POST /api/media` (multipart `file`, `name`, `site?`), `PUT /api/media/{id}` (замена/добавление файла
+  площадки), `PATCH /api/media/{id}` `{"name"}` (переименование с автозаменой ссылок),
+  `DELETE /api/media/{id}` (только `used_in = 0`), `GET /api/media/{id}/content?site=`.
+- Бот получает вложения через `MediaService.Attachments(ctx, refs, site)`: загрузка в MAX
+  (`POST /uploads`), кэш токена, `missing` → без вложения + предупреждение в журнал.
 
-Бот получает вложения через `MediaService.Attachments(ctx, refs []domain.MediaRef)
-([]max.Attachment, warnings)`: загрузка в MAX (`POST /uploads`), кэш токена, `missing` → без
-вложения и предупреждение в журнал.
+Импорт ТЗ: `POST /api/scenarios/import` и `POST /api/scenarios/{id}/import` → сценарий +
+`import_report: {"blocks","messages","questions","branches","rules","media_names","warnings":
+[{"row","code","message","step_key"}]}`. Детерминированный парсер (правила — вердикт §1), мягкий
+режим: неразобранная строка не валит файл. Коды: `no_text`, `alt_text`, `columns_shifted`,
+`hr_task`, `media_missing`, `photo_unnamed`, `survey_outcomes`, `link_in_text`, `recruiter_flag`,
+`unknown_when`, `label_truncated`. Глобальные правила ТЗ (r69, r70) → `scenario.rules`.
 
-Импорт ТЗ: `POST /api/scenarios/import` и `POST /api/scenarios/{id}/import` отвечают сценарием и
-`import_report: {"rows":N,"steps":N,"branches":N,"media_missing":N,"warnings":[{"row","code",
-"message"}]}`. Коды: `media_missing`, `alt_variants`, `vy_copied`, `question_without_options`,
-`system_rule`, `email_task`, `unknown_when`, `label_truncated`, `survey_branch_skipped`. Мягкий
-импорт: неразобранная строка не валит файл.
+Статистика веток: `GET /api/scenarios/{id}/stats?site=` → по шагам `{sent, answered, no_answer,
+median_answer_s}` и по кнопкам `{label, picked, share, tickets}`; доли — только при ≥ 5 ответах.

@@ -117,45 +117,66 @@ type ScenarioStep struct {
 	Survey        *Survey    `gorm:"type:jsonb" json:"survey"`
 	Condition     *string    `json:"condition"`
 	WorkHoursOnly bool       `json:"work_hours_only"`
-	// Ветки и вложения (agency/playbook/steps/05-excel-tz-mapping.md §3.2–3.3, §3.7).
-	Trigger  *StepTrigger `gorm:"type:jsonb" json:"trigger"` // nil — шаг по времени
-	Required bool         `json:"required"`                  // «Обязательный этап» ТЗ
-	Media    MediaRefList `gorm:"type:jsonb" json:"media"`   // картинки/файлы из медиатеки по имени
-	Gallery  bool         `json:"gallery"`                   // «ФОТО»: несколько картинок одним сообщением
+	// Модель веток — по вердикту ресерчера (artifacts/research/2026-10-24-branching-verdict.md):
+	// шаг = сообщение блока (блок — шаги с одним днём и временем), ветка живёт в кнопке.
+	Key          string        `json:"key"`                         // стабильный ключ для повторного импорта и аналитики
+	Required     bool          `json:"required"`                    // «Обязательный этап» ТЗ
+	Media        MediaRefList  `gorm:"type:jsonb" json:"media"`     // картинки/файлы из медиатеки по имени
+	Gallery      bool          `json:"gallery"`                     // «ФОТО»: несколько картинок одним сообщением
+	AltText      *string       `json:"alt_text"`                    // авторская альтернатива текста (ТЗ r8)
+	HRTask       bool          `json:"hr_task"`                     // письмо/задача HR — бот не отправляет (ТЗ r19)
+	FlagRequired *string       `json:"flag_required"`               // показ «по отмашке рекрутера»: флаг новичка
+	NoAnswer     *NoAnswerRule `gorm:"type:jsonb" json:"no_answer"` // nil — продолжать молча
 }
 
-// StepTrigger — когда уходит шаг. type "time" (по умолчанию) — по day_offset/time; "answer" —
-// сразу после ответа на родительский шаг: on — индексы кнопок родителя, on_survey — вариант или
-// оценка ниже порога в вопросе опроса родителя.
-type StepTrigger struct {
-	Type     string         `json:"type"`
-	ParentID *uuid.UUID     `json:"parent_id,omitempty"`
-	On       []int          `json:"on,omitempty"`
-	OnSurvey *SurveyTrigger `json:"on_survey,omitempty"`
+// NoAnswerRule — «если не ответил»: напомнить через N часов, не больше Max раз.
+type NoAnswerRule struct {
+	RemindAfterH []int `json:"remind_after_h"`
+	Max          int   `json:"max"`
 }
 
-type SurveyTrigger struct {
-	Q       int   `json:"q"`
-	Options []int `json:"options,omitempty"`
-	Below   *int  `json:"below,omitempty"`
-}
-
-const (
-	TriggerTime   = "time"
-	TriggerAnswer = "answer"
-)
-
-// IsAnswer — дочерний шаг, уходит по ответу на родителя.
-func (s ScenarioStep) IsAnswer() bool { return s.Trigger != nil && s.Trigger.Type == TriggerAnswer }
-
-func (t *StepTrigger) Value() (driver.Value, error) {
-	if t == nil {
+func (r *NoAnswerRule) Value() (driver.Value, error) {
+	if r == nil {
 		return nil, nil
 	}
-	return jsonValue(*t)
+	return jsonValue(*r)
 }
 
-func (t *StepTrigger) Scan(src any) error { return jsonScan(src, t) }
+func (r *NoAnswerRule) Scan(src any) error { return jsonScan(src, r) }
+
+// Branch — ответ на кнопку: до двух сообщений (у последнего — терминальные кнопки без своих
+// веток), действия из закрытого списка и что дальше. Ветка всегда возвращается в поток блока.
+type Branch struct {
+	Messages []BranchMessage `json:"messages"`
+	Actions  []Action        `json:"actions"`
+	Then     string          `json:"then"` // continue (по умолчанию) | end_block | goto_block
+	Goto     string          `json:"goto,omitempty"`
+}
+
+type BranchMessage struct {
+	TextTy  string       `json:"text_ty"`
+	TextVy  string       `json:"text_vy"`
+	Media   MediaRefList `json:"media"`
+	Buttons []StepButton `json:"buttons"` // терминальные: Branch у них игнорируется
+}
+
+// Action — действие ветки. type: escalate (обращение: category F-код, route, notify_manager),
+// handoff (to: recruiter|hr|security — «связаться с человеком»), set_field (field: address_form,
+// value), set_flag (flag), send_file (media по имени; per_tag — файл под площадку новичка),
+// open_free_text (prompt — бот ждёт текст, потом флаги и обращение).
+type Action struct {
+	Type          string `json:"type"`
+	Category      string `json:"category,omitempty"`
+	Route         string `json:"route,omitempty"`
+	NotifyManager bool   `json:"notify_manager,omitempty"`
+	To            string `json:"to,omitempty"`
+	Field         string `json:"field,omitempty"`
+	Value         string `json:"value,omitempty"`
+	Flag          string `json:"flag,omitempty"`
+	Media         string `json:"media,omitempty"`
+	PerTag        bool   `json:"per_tag,omitempty"`
+	Prompt        string `json:"prompt,omitempty"`
+}
 
 // MediaRef — ссылка шага на запись медиатеки. Name храним рядом с id: импорт ТЗ создаёт ссылку
 // по имени («Изображение 14») раньше, чем HR загрузит файл.
@@ -181,9 +202,12 @@ func (s ScenarioStep) AppliesTo(site string) bool { return len(s.Sites) == 0 || 
 // StepButton — кнопка шага. Action — что сделать по нажатию (api_contract.md, заметка backend):
 // "" или произвольный код — записать ответ; "link:<url>" или "http…" — кнопка-ссылка;
 // "human" — «Спросить человека»; "skip" — отметить шаг пропущенным.
+// Branch — ответ на нажатие (nil — просто записать ответ). OpensFreeText — «Другое: свой ответ».
 type StepButton struct {
-	Label  string `json:"label"`
-	Action string `json:"action"`
+	Label         string  `json:"label"`
+	Action        string  `json:"action"`
+	Branch        *Branch `json:"branch,omitempty"`
+	OpensFreeText bool    `json:"opens_free_text,omitempty"`
 }
 
 // ButtonList — jsonb-массив кнопок.
