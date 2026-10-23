@@ -840,3 +840,9 @@
 - PUT/GET шагов теперь пропускают все поля v4: ветка сохраняется и переживает перезагрузку (проверено на
   API :8088). Вкладка «Команды и правила» (/food, /hr, «свободный вопрос», «напоминание об опросе») —
   на моках: `PATCH /api/scenarios/{id}` пока 405, кабинет так и говорит.
+
+### Упаковка для жюри: `make demo` — готово (24.10 ~02:40), без коммита
+- `docker-compose.demo.yml` (проект `polyplastic-demo`, отдельно от `polyplastic` и centr-invest): postgres :15440, rag :18093 (hybrid+bge из тома `services/rag/.cache`; нет весов — BM25 с WARN; `RAG_CORPUS=real` — `corpus-real/` томом), backend :18081 (сид `seed` + `seed-demo` на старте, APP_ENV=development, без `MAX_BOT_TOKEN` — подделка), frontend :18080 (nginx, `/api` → backend, сборка с «Демо-чатом»). Всё на 127.0.0.1, `DEMO_BIND=0.0.0.0` — для стенда.
+- Make: `demo`, `demo-down`, `demo-clean`, `demo-logs`, `demo-ps`, `demo-build`, `rag-models`. Скрипты старта — `deploy/demo/`. В образе backend добавлены бинарники seed/seed-demo; frontend — nginx вместо caddy; rag — `COPY *.py *.yaml` (нужен synonyms.yaml).
+- Проверено на HEAD 4922962 (worktree; рабочая копия backend не собиралась — чужая правка в процессе): сборка трёх образов, `make demo` → все healthy за ~45 с, health ok/ok/ok, 153 новичка, демо-чат: «Когда выплачивают аванс?» → ответ LLM + «Источник: ПВТР-синтетика, п. 6.1». Режим BM25 без весов проверен отдельно. Стек остановлен.
+- Осторожно: в корневом .env есть `MAX_BOT_TOKEN` — `make demo` на этой машине поднимет второй поллер живого бота. Для показа: `MAX_BOT_TOKEN= make demo`.

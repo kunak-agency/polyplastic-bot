@@ -9,7 +9,7 @@ export GOTOOLCHAIN := auto
 
 help: ## показать список целей
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
-		| awk 'BEGIN {FS = ":.*?## "} {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
+		| awk 'BEGIN {FS = ":.*?## "} {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 up: ## поднять Postgres и rag в Docker
 	docker compose up -d --build
@@ -51,3 +51,50 @@ seed: ## демо-сценарии «Завод GTP», «Офис GrPP» и 3 с
 # и обращения, затем заливает сид заново. Перед удалением показывает, что сотрёт, и ждёт «yes».
 seed-reset: ## чистая пересборка демо-данных (development, с подтверждением)
 	cd backend && go run ./cmd/seed -reset
+
+# ---- Демо-стек одной командой (docker-compose.demo.yml) ----
+# Порты демо: кабинет 18080, API 18081, RAG 18093, Postgres 15440 (переменные DEMO_*_PORT).
+# Порты меняются в .env или окружением: DEMO_WEB_PORT=28080 make demo.
+DEMO_COMPOSE := docker compose -f docker-compose.demo.yml
+# Порт для подсказки после старта: окружение, затем .env, затем значение по умолчанию.
+demo_port = $${$(1):-$$(grep -E '^$(1)=.+' .env 2>/dev/null | tail -1 | cut -d= -f2)}; $(1)=$${$(1):-$(2)}
+
+.PHONY: demo demo-build demo-down demo-clean demo-logs demo-ps rag-models
+
+demo: ## поднять всё в Docker: Postgres, API+бот, RAG, кабинет; сид демо-данных
+	@if [ ! -f .env ]; then cp .env.example .env && echo "создан .env из .env.example (MAX и LLM пусты — демо-режим)"; fi
+	@if [ ! -d services/rag/.cache/hub/models--BAAI--bge-m3 ]; then \
+	  echo "ВНИМАНИЕ: нет весов моделей в services/rag/.cache — RAG стартует на BM25."; \
+	  echo "          Рабочая конфигурация hybrid+bge: make rag-models (~6 ГБ), затем make demo."; fi
+	$(DEMO_COMPOSE) up -d --build --wait --wait-timeout 900
+	@DEMO_WEB_PORT=$(call demo_port,DEMO_WEB_PORT,18080); DEMO_API_PORT=$(call demo_port,DEMO_API_PORT,18081); \
+	DEMO_RAG_PORT=$(call demo_port,DEMO_RAG_PORT,18093); \
+	echo ""; echo "Готово:"; \
+	echo "  кабинет HR   http://localhost:$$DEMO_WEB_PORT"; \
+	echo "  демо-чат     http://localhost:$$DEMO_WEB_PORT/dev/chat   (без MAX_BOT_TOKEN)"; \
+	echo "  API health   http://localhost:$$DEMO_API_PORT/api/health"; \
+	echo "  RAG health   http://localhost:$$DEMO_RAG_PORT/health"; \
+	echo "Остановить: make demo-down"
+
+demo-build: ## только собрать образы демо-стека
+	$(DEMO_COMPOSE) build
+
+demo-down: ## остановить демо-стек (данные в томе остаются)
+	$(DEMO_COMPOSE) down
+
+demo-clean: ## остановить демо-стек и удалить его базу (следующий make demo засеет заново)
+	$(DEMO_COMPOSE) down -v
+
+demo-logs: ## логи демо-стека (Ctrl+C — выход)
+	$(DEMO_COMPOSE) logs -f --tail=100
+
+demo-ps: ## состояние контейнеров демо-стека
+	$(DEMO_COMPOSE) ps
+
+# Веса bge-m3 и bge-reranker-v2-m3 (~6 ГБ, ~10 мин) в services/rag/.cache — тот же каталог,
+# что у локального rag (run.sh). Качаются образом rag, Python на хосте не нужен.
+rag-models: ## скачать веса моделей RAG в services/rag/.cache (~6 ГБ)
+	mkdir -p services/rag/.cache
+	$(DEMO_COMPOSE) build rag
+	$(DEMO_COMPOSE) run --rm --no-deps --user "$$(id -u):$$(id -g)" -e HF_HUB_OFFLINE=0 --entrypoint python rag -c \
+	  "from sentence_transformers import SentenceTransformer, CrossEncoder; SentenceTransformer('BAAI/bge-m3'); CrossEncoder('BAAI/bge-reranker-v2-m3'); print('веса в services/rag/.cache')"

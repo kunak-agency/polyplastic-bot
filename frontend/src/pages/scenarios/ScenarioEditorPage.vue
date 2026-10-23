@@ -1,32 +1,61 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { FileSpreadsheet, ListPlus, Plus, Save, Send, Trash2, TriangleAlert } from 'lucide-vue-next'
+import {
+  CircleAlert,
+  FileSpreadsheet,
+  ListPlus,
+  Plus,
+  Save,
+  Send,
+  Trash2,
+  TriangleAlert,
+} from 'lucide-vue-next'
 import PageContainer from '@/components/common/PageContainer.vue'
 import PageHead from '@/components/common/PageHead.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
+import ImportReport from '@/components/scenarios/ImportReport.vue'
+import { rememberImportReport, useImportReport } from '@/components/scenarios/importReport'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ErrorState from '@/components/common/ErrorState.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import ScenarioStatus from '@/components/scenarios/ScenarioStatus.vue'
 import StepPanel from '@/components/scenarios/StepPanel.vue'
+import StepsTable from '@/components/scenarios/StepsTable.vue'
+import PhonePreview from '@/components/scenarios/PhonePreview.vue'
 import PublishDialog from '@/components/scenarios/PublishDialog.vue'
+import ScenarioRules from '@/components/scenarios/ScenarioRules.vue'
 import { Button } from '@/components/ui/button'
 import {
   apiDeleteScenario,
   apiGetScenario,
   apiImportScenarioSteps,
+  apiPatchScenario,
+  apiPublishPreview,
   apiPublishScenario,
   apiPutScenarioSteps,
+  apiScenarioStats,
+  apiSendTest,
 } from '@/api/scenarios'
+import { SITES, useSiteStore } from '@/stores/site'
+import { useMediaStore } from '@/stores/media'
+import { apiListNewcomers } from '@/api/newcomers'
 import { useBreadcrumbTail } from '@/composables/useBreadcrumbs'
 import { useToast } from '@/composables/useToast'
 import { errorMessage, isApiError } from '@/lib/apiError'
 import { formatDayOffset } from '@/lib/calendar'
 import { uuidV4 } from '@/lib/ids'
 import { createStep, sortSteps, stepIssues } from '@/lib/scenarioSteps'
-import type { PublishRequest, ScenarioDetail, ScenarioStep } from '@/types/api'
+import { countIssues, groupBlocks, validateScenario } from '@/lib/scenarioBranches'
+import type {
+  PublishPreview,
+  PublishRequest,
+  ScenarioDetail,
+  ScenarioPatch,
+  ScenarioStep,
+  StepStats,
+} from '@/types/api'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -35,6 +64,8 @@ const toast = useToast()
 const { setBreadcrumbTail } = useBreadcrumbTail()
 
 const id = computed(() => String(route.params.id))
+// Report of the last Excel import of this scenario: warnings open their step.
+const { report: importReport, clear: clearImportReport } = useImportReport(id)
 const scenario = ref<ScenarioDetail | null>(null)
 const error = ref<unknown>(null)
 // The draft being edited: a copy, so "dirty" is a plain comparison and a
@@ -104,7 +135,9 @@ async function onFile(e: Event): Promise<void> {
   if (!file || !scenario.value) return
   importing.value = true
   try {
-    adopt(await apiImportScenarioSteps(scenario.value.id, file))
+    const imported = await apiImportScenarioSteps(scenario.value.id, file)
+    adopt(imported)
+    rememberImportReport(imported.id, imported)
     toast.success(t('scenarios.editor.imported'))
   } catch (err) {
     toast.error(errorMessage(err, 'scenarios.import.failed'))
@@ -114,8 +147,172 @@ async function onFile(e: Event): Promise<void> {
 }
 
 const selected = computed(() => steps.value.find((s) => s.id === selectedId.value) ?? null)
-const issues = computed(() => new Map(steps.value.map((s) => [s.id, stepIssues(s)])))
-const issueTotal = computed(() => [...issues.value.values()].reduce((n, l) => n + l.length, 0))
+// Steps table or the scenario's commands and rules.
+const view = ref<'table' | 'rules'>('table')
+const savingRules = ref(false)
+// Only commands and rules are taken from the answer: unsaved step edits stay.
+async function onSaveRules(body: ScenarioPatch): Promise<void> {
+  if (!scenario.value) return
+  savingRules.value = true
+  try {
+    const res = await apiPatchScenario(scenario.value.id, body)
+    scenario.value = {
+      ...scenario.value,
+      commands: res.commands ?? body.commands,
+      rules: res.rules ?? body.rules,
+    }
+    toast.success(t('scenarios.rules.saved'))
+  } catch (e) {
+    toast.error(
+      isApiError(e) && (e.status === 405 || (e.status === 404 && !e.serverMessage))
+        ? t('scenarios.rules.notReady')
+        : errorMessage(e, 'scenarios.rules.saveFailed'),
+    )
+  } finally {
+    savingRules.value = false
+  }
+}
+
+// The open tab of the step panel: null — the message, N — the branch of button N.
+const tab = ref<number | null>(null)
+watch(selectedId, () => (tab.value = null))
+
+// Verdict §Q3: errors block publishing, warnings do not. The older step checks
+// (scenarioSteps.ts) stay warnings.
+// The media library knows which names have files; until it loads, a ref
+// without media_id counts as "no file".
+const mediaStore = useMediaStore()
+onMounted(() => void mediaStore.ensureLoaded().catch(() => undefined))
+const mediaStatus = computed(() => {
+  const m = new Map<string, 'missing' | 'ready'>()
+  for (const it of mediaStore.items) {
+    const st = it.status === 'ready' ? 'ready' : 'missing'
+    m.set(it.name, st)
+    for (const a of it.aliases) m.set(a, st)
+  }
+  return m
+})
+const issues = computed(() =>
+  validateScenario(steps.value, scenario.value?.sites ?? [], SITES, {
+    mediaStatus: mediaStatus.value.size > 0 ? mediaStatus.value : undefined,
+  }),
+)
+const legacy = computed(() => new Map(steps.value.map((s) => [s.id, stepIssues(s) as string[]])))
+const counts = computed(() => {
+  const c = countIssues(issues.value.values())
+  for (const l of legacy.value.values()) c.warnings += l.length
+  return c
+})
+
+const blocks = computed(() => groupBlocks(steps.value))
+const selectedBlock = computed(
+  () => blocks.value.find((b) => b.steps.some((s) => s.id === selectedId.value))?.steps ?? [],
+)
+const hasNextInBlock = computed(() => {
+  const b = selectedBlock.value
+  return b.length > 0 && b[b.length - 1].id !== selectedId.value
+})
+const gotoOptions = computed(() =>
+  blocks.value.map((b) => ({
+    value: b.key,
+    label: `${formatDayOffset(b.day_offset)} ${b.time} · ${b.steps[0].title || t('scenarios.editor.untitled')}`,
+  })),
+)
+// Names the scenario already uses: the stand-in for the media picker.
+const mediaNames = computed(() => {
+  const names = new Set<string>()
+  for (const s of steps.value) {
+    for (const m of s.media ?? []) if (!m.personal) names.add(m.name)
+    for (const b of s.buttons) {
+      for (const m of b.branch?.messages ?? []) for (const r of m.media) names.add(r.name)
+      for (const a of b.branch?.actions ?? []) if (a.media) names.add(a.media)
+    }
+  }
+  return [...names].sort()
+})
+
+// ── Statistics (verdict §Q7): badges on buttons, counters on the step ──
+const siteStore = useSiteStore()
+const stats = ref(new Map<string, StepStats>())
+async function loadStats(): Promise<void> {
+  if (!scenario.value) return
+  try {
+    const r = await apiScenarioStats(scenario.value.id, siteStore.apiSite())
+    stats.value = new Map(r.items.map((x) => [x.step_id, x]))
+  } catch {
+    // Statistics are a garnish: the editor works without them.
+    stats.value = new Map()
+  }
+}
+watch(
+  () => [scenario.value?.id, siteStore.current],
+  () => void loadStats(),
+)
+
+// ── "Send to myself" / "Walk this path" (bot side, send-test) ──
+// The test goes to a connected newcomer (the HR's own test account in the
+// demo chat); the choice is remembered per browser.
+const RECIPIENT_KEY = 'scenarios.testRecipient'
+const recipients = ref<{ id: string; name: string }[]>([])
+const recipient = ref<string | null>(null)
+watch(recipient, (v) => {
+  try {
+    if (v) localStorage.setItem(RECIPIENT_KEY, v)
+  } catch {
+    // storage may be unavailable: the choice just is not remembered
+  }
+})
+onMounted(async () => {
+  try {
+    const r = await apiListNewcomers()
+    recipients.value = r.items
+      .filter((n) => n.connection === 'connected')
+      .map((n) => ({ id: n.id, name: n.full_name }))
+    let saved: string | null = null
+    try {
+      saved = localStorage.getItem(RECIPIENT_KEY)
+    } catch {
+      saved = null
+    }
+    recipient.value =
+      recipients.value.find((x) => x.id === saved)?.id ?? recipients.value[0]?.id ?? null
+  } catch {
+    recipients.value = []
+  }
+})
+
+const sending = ref(false)
+async function onSendTest(button: number | null): Promise<void> {
+  const s = selected.value
+  if (!scenario.value || !s) return
+  if (!recipient.value) {
+    toast.error(t('scenarios.test.noRecipient'))
+    return
+  }
+  sending.value = true
+  try {
+    // The bot sends the saved draft: unsaved edits are saved first.
+    if (dirty.value && !(await save())) return
+    await apiSendTest(scenario.value.id, s.id, {
+      newcomer_id: recipient.value,
+      press_button: button,
+    })
+    toast.success(
+      button === null
+        ? t('scenarios.test.sent')
+        : t('scenarios.test.walked', { label: s.buttons[button]?.label ?? '' }),
+    )
+  } catch (e) {
+    toast.error(
+      isApiError(e) &&
+        (e.status === 405 || e.status === 501 || (e.status === 404 && !e.serverMessage))
+        ? t('scenarios.test.notReady')
+        : errorMessage(e, 'scenarios.test.failed'),
+    )
+  } finally {
+    sending.value = false
+  }
+}
 
 function patchSelected(p: Partial<ScenarioStep>): void {
   const s = selected.value
@@ -147,11 +344,28 @@ function removeSelected(): void {
   selectedId.value = null
 }
 
+// How much of the v4 model a step list carries: a server that does not keep
+// branches yet answers with fewer, and HR must hear it before trusting a save.
+function v4Weight(list: ScenarioStep[]): number {
+  return list.reduce(
+    (n, s) =>
+      n +
+      s.buttons.filter((b) => !!b.branch).length +
+      (s.media?.length ?? 0) +
+      (s.hr_task ? 1 : 0) +
+      (s.advance ? 1 : 0),
+    0,
+  )
+}
+
 async function save(): Promise<boolean> {
   if (!scenario.value) return false
   saving.value = true
   try {
-    adopt(await apiPutScenarioSteps(scenario.value.id, steps.value))
+    const sent = v4Weight(steps.value)
+    const res = await apiPutScenarioSteps(scenario.value.id, steps.value)
+    if (v4Weight(res.steps) < sent) toast.warning(t('scenarios.editor.v4Lost'))
+    adopt(res)
     return true
   } catch (e) {
     toast.error(saveError(e))
@@ -188,6 +402,28 @@ async function onSave(): Promise<void> {
   }
 }
 
+// The dialog opens on the saved draft: unsaved edits are saved first, then the
+// server counts the consequences (publish/preview).
+const preview = ref<PublishPreview | null>(null)
+const previewError = ref<string | null>(null)
+const loadingPreview = ref(false)
+
+async function openPublish(): Promise<void> {
+  if (!scenario.value) return
+  if (dirty.value && !(await save())) return
+  preview.value = null
+  previewError.value = null
+  publishOpen.value = true
+  loadingPreview.value = true
+  try {
+    preview.value = await apiPublishPreview(scenario.value.id)
+  } catch (e) {
+    previewError.value = errorMessage(e, 'scenarios.publish.previewFailed')
+  } finally {
+    loadingPreview.value = false
+  }
+}
+
 // Unsaved edits are saved first: what gets published is what HR sees.
 async function onPublish(body: PublishRequest): Promise<void> {
   if (!scenario.value) return
@@ -196,6 +432,7 @@ async function onPublish(body: PublishRequest): Promise<void> {
     if (dirty.value && !(await save())) return
     const s = await apiPublishScenario(scenario.value.id, body)
     adopt(s)
+    void loadStats()
     publishOpen.value = false
     toast.success(t('scenarios.publish.done', { version: s.version }))
   } catch (e) {
@@ -203,12 +440,6 @@ async function onPublish(body: PublishRequest): Promise<void> {
   } finally {
     publishing.value = false
   }
-}
-
-function sitesLabel(s: ScenarioStep): string {
-  return s.sites.length === 0
-    ? t('scenarios.allSites')
-    : s.sites.map((c) => t(`common.site.${c}`)).join(', ')
 }
 </script>
 
@@ -226,8 +457,11 @@ function sitesLabel(s: ScenarioStep): string {
           <span class="head-meta">
             <ScenarioStatus :scenario="scenario" />
             <span>{{ t('scenarios.editor.stepsCount', steps.length) }}</span>
-            <span v-if="issueTotal > 0" class="head-meta__warn">
-              <TriangleAlert :size="12" />{{ t('scenarios.editor.issuesCount', issueTotal) }}
+            <span v-if="counts.errors > 0" class="head-meta__err">
+              <CircleAlert :size="12" />{{ t('scenarios.table.errors', counts.errors) }}
+            </span>
+            <span v-if="counts.warnings > 0" class="head-meta__warn">
+              <TriangleAlert :size="12" />{{ t('scenarios.table.warnings', counts.warnings) }}
             </span>
             <span v-if="dirty" class="head-meta__dirty">{{ t('scenarios.editor.unsaved') }}</span>
           </span>
@@ -248,7 +482,12 @@ function sitesLabel(s: ScenarioStep): string {
               saving ? t('common.actions.saving') : t('scenarios.editor.save')
             }}
           </Button>
-          <Button variant="primary" :disabled="steps.length === 0" @click="publishOpen = true">
+          <Button
+            variant="primary"
+            :disabled="steps.length === 0 || saving"
+            :title="counts.errors > 0 ? t('scenarios.publish.blockedHint') : undefined"
+            @click="openPublish"
+          >
             <Send :size="14" />{{ t('scenarios.editor.publish') }}
           </Button>
         </template>
@@ -256,9 +495,24 @@ function sitesLabel(s: ScenarioStep): string {
 
       <div class="views" role="tablist" :aria-label="t('scenarios.editor.views.label')">
         <span class="tabs">
-          <span class="tab active" role="tab" aria-selected="true">{{
-            t('scenarios.editor.views.table')
-          }}</span>
+          <button
+            type="button"
+            :class="['tab', { active: view === 'table' }]"
+            role="tab"
+            :aria-selected="view === 'table'"
+            @click="view = 'table'"
+          >
+            {{ t('scenarios.editor.views.table') }}
+          </button>
+          <button
+            type="button"
+            :class="['tab', { active: view === 'rules' }]"
+            role="tab"
+            :aria-selected="view === 'rules'"
+            @click="view = 'rules'"
+          >
+            {{ t('scenarios.editor.views.rules') }}
+          </button>
           <span
             class="tab tab--disabled"
             role="tab"
@@ -271,7 +525,23 @@ function sitesLabel(s: ScenarioStep): string {
         </span>
       </div>
 
-      <div :class="['editor', { 'editor--with-panel': selected }]">
+      <ImportReport
+        v-if="importReport"
+        :report="importReport"
+        :steps="steps"
+        @open="selectedId = $event"
+        @close="clearImportReport"
+      />
+
+      <ScenarioRules
+        v-if="view === 'rules'"
+        :commands="scenario.commands ?? []"
+        :rules="scenario.rules ?? []"
+        :media-names="mediaNames"
+        :saving="savingRules"
+        @save="onSaveRules"
+      />
+      <div v-else :class="['editor', { 'editor--with-panel': selected }]">
         <SectionCard body-padding="none">
           <EmptyState
             v-if="steps.length === 0"
@@ -305,70 +575,38 @@ function sitesLabel(s: ScenarioStep): string {
               </div>
             </template>
           </EmptyState>
-          <div v-else class="tbl-scroll">
-            <table class="tbl steps">
-              <thead>
-                <tr>
-                  <th>{{ t('scenarios.editor.columns.day') }}</th>
-                  <th>{{ t('scenarios.editor.columns.time') }}</th>
-                  <th class="col-stage">{{ t('scenarios.editor.columns.stage') }}</th>
-                  <th>{{ t('scenarios.editor.columns.sites') }}</th>
-                  <th>{{ t('scenarios.editor.columns.kind') }}</th>
-                  <th>{{ t('scenarios.editor.columns.text') }}</th>
-                  <th class="td-num">{{ t('scenarios.editor.columns.buttons') }}</th>
-                  <th class="col-condition">{{ t('scenarios.editor.columns.condition') }}</th>
-                  <th>{{ t('scenarios.editor.columns.status') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="s in steps"
-                  :key="s.id"
-                  :class="['steps__row', { 'steps__row--on': s.id === selectedId }]"
-                  tabindex="0"
-                  :aria-selected="s.id === selectedId"
-                  @click="selectedId = s.id"
-                  @keydown.enter.prevent="selectedId = s.id"
-                >
-                  <td class="tabular fw-medium">{{ formatDayOffset(s.day_offset) }}</td>
-                  <td class="tabular">{{ s.time }}</td>
-                  <td class="cell-muted col-stage">{{ t(`common.stage.${s.stage}`) }}</td>
-                  <td class="cell-muted">{{ sitesLabel(s) }}</td>
-                  <td class="cell-muted">{{ t(`common.stepKind.${s.kind}`) }}</td>
-                  <td class="cell-text">
-                    <div class="fw-medium">{{ s.title || t('scenarios.editor.untitled') }}</div>
-                    <div class="cell-preview">{{ s.text_vy || s.text_ty }}</div>
-                  </td>
-                  <td class="td-num tabular">{{ s.buttons.length }}</td>
-                  <td class="cell-muted col-condition">{{ s.condition ?? '' }}</td>
-                  <td>
-                    <span v-if="(issues.get(s.id) ?? []).length === 0" class="badge solid-success">
-                      {{ t('scenarios.issues.ok') }}
-                    </span>
-                    <template v-else>
-                      <span
-                        v-for="issue in issues.get(s.id) ?? []"
-                        :key="issue"
-                        class="badge solid-warning issue"
-                      >
-                        {{ t(`scenarios.issues.${issue}`) }}
-                      </span>
-                    </template>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <StepsTable
+            v-else
+            :steps="steps"
+            :selected-id="selectedId"
+            :issues="issues"
+            :legacy="legacy"
+            :stats="stats"
+            :compact="!!selected"
+            @select="selectedId = $event"
+          />
         </SectionCard>
 
-        <StepPanel
-          v-if="selected"
-          :key="selected.id"
-          :step="selected"
-          @patch="patchSelected"
-          @remove="removeSelected"
-          @close="selectedId = null"
-        />
+        <div v-if="selected" class="side">
+          <StepPanel
+            :key="selected.id"
+            v-model:tab="tab"
+            v-model:recipient="recipient"
+            :step="selected"
+            :has-next-in-block="hasNextInBlock"
+            :issues="issues.get(selected.id) ?? []"
+            :stats="stats.get(selected.id) ?? null"
+            :goto-options="gotoOptions"
+            :media-names="mediaNames"
+            :sending="sending"
+            :recipients="recipients"
+            @patch="patchSelected"
+            @remove="removeSelected"
+            @close="selectedId = null"
+            @send-test="onSendTest"
+          />
+          <PhonePreview :block="selectedBlock" :selected-id="selected.id" :tab="tab" />
+        </div>
       </div>
 
       <PublishDialog
@@ -376,6 +614,11 @@ function sitesLabel(s: ScenarioStep): string {
         :next-version="scenario.version + 1"
         :active-newcomers="scenario.active_newcomers"
         :busy="publishing"
+        :preview="preview"
+        :preview-error="previewError"
+        :loading-preview="loadingPreview"
+        :errors="counts.errors"
+        :warnings="counts.warnings"
         @submit="onPublish"
       />
     </template>
@@ -420,6 +663,12 @@ function sitesLabel(s: ScenarioStep): string {
   cursor: not-allowed;
   opacity: 0.5;
 }
+.head-meta__err {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--danger);
+}
 .editor {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -427,47 +676,22 @@ function sitesLabel(s: ScenarioStep): string {
   align-items: start;
 }
 .editor--with-panel {
-  grid-template-columns: minmax(0, 1fr) 400px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 700px);
 }
-/* With the panel open the table loses its secondary columns: the panel shows
-   both fields for the selected step anyway. */
-.editor--with-panel .col-stage,
-.editor--with-panel .col-condition {
-  display: none;
+/* Panel and phone side by side; the phone drops under the panel when narrow. */
+.side {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 12px;
+  align-items: start;
 }
-.tbl-scroll {
-  overflow-x: auto;
-}
-.steps__row {
-  cursor: pointer;
-}
-.steps__row:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-.steps__row--on td {
-  background: var(--accent-soft);
-}
-.steps td {
-  padding-top: 8px;
-  padding-bottom: 8px;
-}
-.cell-muted {
-  color: var(--fg-muted);
-  font-size: var(--text-sm);
-}
-.cell-text {
-  max-width: 320px;
-}
-.cell-preview {
-  font-size: var(--text-sm);
-  color: var(--fg-subtle);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.issue + .issue {
-  margin-left: 4px;
+@media (max-width: 1500px) {
+  .editor--with-panel {
+    grid-template-columns: minmax(0, 1fr) 440px;
+  }
+  .side {
+    grid-template-columns: 1fr;
+  }
 }
 @media (max-width: 1100px) {
   .editor--with-panel {

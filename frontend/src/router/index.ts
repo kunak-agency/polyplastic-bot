@@ -99,12 +99,27 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
+    path: '/media',
+    name: 'media',
+    component: () => import('@/pages/media/MediaPage.vue'),
+    meta: { title: 'media.routeTitle', crumbs: [{ key: 'media.nav' }] },
+  },
+  {
     path: '/analytics',
     name: 'analytics',
     component: () => import('@/pages/analytics/AnalyticsPage.vue'),
     meta: {
       title: 'common.routes.analytics',
       crumbs: [{ key: 'common.nav.items.analytics' }],
+    },
+  },
+  {
+    path: '/manager',
+    name: 'manager',
+    component: () => import('@/pages/manager/ManagerPage.vue'),
+    meta: {
+      title: 'common.routes.manager',
+      crumbs: [{ key: 'common.nav.items.manager' }],
     },
   },
   {

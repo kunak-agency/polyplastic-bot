@@ -14,6 +14,7 @@ import ScenarioStatus from '@/components/scenarios/ScenarioStatus.vue'
 import CreateScenarioDialog from '@/components/scenarios/CreateScenarioDialog.vue'
 import { Button } from '@/components/ui/button'
 import { apiImportScenario } from '@/api/scenarios'
+import { rememberImportReport } from '@/components/scenarios/importReport'
 import { useScenariosStore } from '@/stores/scenarios'
 import type { ScenarioDetail } from '@/types/api'
 import { useSiteStore } from '@/stores/site'
@@ -55,6 +56,7 @@ async function onFile(e: Event): Promise<void> {
   importing.value = true
   try {
     const created = await apiImportScenario(file)
+    rememberImportReport(created.id, created)
     toast.success(t('scenarios.import.done'))
     void router.push({ name: 'scenario', params: { id: created.id } })
   } catch (err) {

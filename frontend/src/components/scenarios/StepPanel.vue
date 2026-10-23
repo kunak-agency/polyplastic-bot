@@ -1,34 +1,59 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, Trash2, X } from 'lucide-vue-next'
+import {
+  CircleAlert,
+  GitBranch,
+  MessageSquareText,
+  Plus,
+  Send,
+  Trash2,
+  TriangleAlert,
+  X,
+} from 'lucide-vue-next'
 import FormField from '@/components/common/FormField.vue'
 import { Button } from '@/components/ui/button'
+import BranchEditor from '@/components/scenarios/BranchEditor.vue'
+import MediaField from '@/components/scenarios/MediaField.vue'
+import SurveyEditor from '@/components/scenarios/SurveyEditor.vue'
 import { SITES } from '@/stores/site'
 import { formatDayOffset } from '@/lib/calendar'
 import { STAGES, STEP_KINDS, defaultSurvey } from '@/lib/scenarioSteps'
-import type {
-  ScenarioStep,
-  SiteCode,
-  StepButton,
-  StepKind,
-  StepSurvey,
-  SurveyQuestion,
-  SurveyScale,
-} from '@/types/api'
+import {
+  LABEL_MAX,
+  asksSomething,
+  branchFor,
+  branchHasContent,
+  labelLength,
+  statsBadge,
+  type Issue,
+} from '@/lib/scenarioBranches'
+import type { Branch, ScenarioStep, SiteCode, StepButton, StepKind, StepStats } from '@/types/api'
 
-// Right-hand step panel (ux-spec 3.5). It never mutates the step it shows:
-// every edit leaves as a patch and the editor applies it to its draft.
-const props = defineProps<{ step: ScenarioStep }>()
+// Right-hand step panel (verdict §4): message, buttons, then a tab per button
+// with what happens after it. It never mutates the step it shows: every edit
+// leaves as a patch and the editor applies it to its draft.
+const props = defineProps<{
+  step: ScenarioStep
+  hasNextInBlock: boolean
+  issues: Issue[]
+  stats: StepStats | null
+  gotoOptions: { value: string; label: string }[]
+  mediaNames: string[]
+  sending: boolean
+}>()
+const tab = defineModel<number | null>('tab', { required: true })
 const emit = defineEmits<{
   patch: [patch: Partial<ScenarioStep>]
   remove: []
   close: []
+  'send-test': [button: number | null]
 }>()
 const { t } = useI18n()
 
-const SCALES: SurveyScale[] = ['1-10', '1-5', 'yesno', 'choice']
 const SITE_CODES: readonly SiteCode[] = SITES
+const RECRUITER_FLAG = 'recruiter_enabled'
+const REMIND = { remind_after_h: [24, 48], max: 2 }
 
 const heading = computed(() =>
   t('scenarios.panel.title', {
@@ -36,6 +61,11 @@ const heading = computed(() =>
     time: props.step.time,
   }),
 )
+
+const errors = computed(() => props.issues.filter((i) => i.level === 'error'))
+const warnings = computed(() => props.issues.filter((i) => i.level === 'warning'))
+const asks = computed(() => asksSomething(props.step))
+const showAlt = ref(props.step.alt_text != null)
 
 function patch(p: Partial<ScenarioStep>): void {
   emit('patch', p)
@@ -48,14 +78,9 @@ function toggleSite(code: SiteCode, on: boolean): void {
   patch({ sites })
 }
 
-// A survey needs its settings the moment the type becomes "survey"; leaving
-// the type drops them, as the contract has survey: null for other kinds.
 function setKind(kind: StepKind): void {
-  if (kind === 'survey') {
-    patch({ kind, survey: props.step.survey ?? defaultSurvey(props.step) })
-  } else {
-    patch({ kind, survey: null })
-  }
+  if (kind === 'survey') patch({ kind, survey: props.step.survey ?? defaultSurvey(props.step) })
+  else patch({ kind, survey: null })
 }
 
 function setButton(i: number, p: Partial<StepButton>): void {
@@ -63,47 +88,116 @@ function setButton(i: number, p: Partial<StepButton>): void {
 }
 function addButton(): void {
   const n = props.step.buttons.length + 1
-  patch({ buttons: [...props.step.buttons, { label: '', action: `reply_${n}` }] })
+  patch({ buttons: [...props.step.buttons, { label: '', action: `reply_${n}`, branch: null }] })
+  tab.value = props.step.buttons.length
 }
 function removeButton(i: number): void {
-  patch({ buttons: props.step.buttons.filter((_, j) => j !== i) })
+  const b = props.step.buttons[i]
+  if (
+    branchHasContent(b.branch) &&
+    !window.confirm(t('scenarios.branch.removeButtonConfirm', { label: b.label }))
+  )
+    return
+  // Shared branches point at buttons by index: drop i, shift the ones after it.
+  const buttons = props.step.buttons
+    .filter((_, j) => j !== i)
+    .map((x) => {
+      if (!x.branch?.on) return x
+      const on = x.branch.on.filter((k) => k !== i).map((k) => (k > i ? k - 1 : k))
+      return { ...x, branch: { ...x.branch, on: on.length > 0 ? on : undefined } }
+    })
+  patch({ buttons })
+  if (tab.value !== null && tab.value >= i) tab.value = tab.value === i ? null : tab.value - 1
+}
+function setBranch(i: number, branch: Branch | null): void {
+  setButton(i, { branch })
 }
 
-function setSurvey(p: Partial<StepSurvey>): void {
-  if (!props.step.survey) return
-  patch({ survey: { ...props.step.survey, ...p } })
+// Tab of a button answered by another button's shared branch ("if 1–2").
+const sharedOwner = computed(() => {
+  if (tab.value === null) return null
+  const f = branchFor(props.step, tab.value)
+  return f && f.owner !== tab.value ? f.owner : null
+})
+// Buttons a branch may also answer: those without a branch of their own and
+// not taken by another shared branch.
+function shareWith(i: number): { index: number; label: string }[] {
+  return props.step.buttons
+    .map((b, j) => ({ index: j, label: b.label, b }))
+    .filter(({ index, b }) => {
+      if (index === i || b.branch) return false
+      const f = branchFor(props.step, index)
+      return !f || f.owner === i
+    })
+    .map(({ index, label }) => ({ index, label }))
 }
-function setThreshold(raw: string): void {
-  const v = raw.trim() === '' ? null : Number(raw)
-  setSurvey({ threshold: v === null || Number.isFinite(v) ? v : null })
+function detach(i: number, owner: number): void {
+  const br = props.step.buttons[owner]?.branch
+  if (!br) return
+  const on = (br.on ?? []).filter((x) => x !== i)
+  setBranch(owner, { ...br, on: on.length > 0 ? on : undefined })
 }
-function setQuestion(i: number, p: Partial<SurveyQuestion>): void {
-  const qs = props.step.survey?.questions ?? []
-  setSurvey({ questions: qs.map((q, j) => (j === i ? { ...q, ...p } : q)) })
-}
-function addQuestion(): void {
-  setSurvey({ questions: [...(props.step.survey?.questions ?? []), { text: '', options: [] }] })
-}
-function removeQuestion(i: number): void {
-  setSurvey({ questions: (props.step.survey?.questions ?? []).filter((_, j) => j !== i) })
-}
-function parseOptions(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
+
+// The newcomer's own adaptation plan from their card (r36), not the library.
+const personalMedia = computed(() => (props.step.media ?? []).filter((m) => !!m.personal))
+function setPersonal(on: boolean): void {
+  const rest = (props.step.media ?? []).filter((m) => !m.personal)
+  patch({
+    media: on
+      ? [...rest, { name: t('scenarios.panel.personalPlanName'), personal: 'adaptation_plan' }]
+      : rest,
+  })
 }
 
 function setDay(raw: string): void {
   const v = Number(raw)
   if (Number.isInteger(v)) patch({ day_offset: v })
 }
+
+function issueText(i: Issue): string {
+  const where =
+    i.button !== undefined
+      ? t('scenarios.issue.where', { label: props.step.buttons[i.button]?.label || '…' })
+      : ''
+  return where + t(`scenarios.issue.${i.code}`, { detail: i.detail ?? '' })
+}
+function tabIssue(i: number): 'error' | 'warning' | null {
+  const own = props.issues.filter((x) => x.button === i)
+  if (own.some((x) => x.level === 'error')) return 'error'
+  return own.length > 0 ? 'warning' : null
+}
+function badge(i: number) {
+  return statsBadge(props.stats?.buttons.find((b) => b.label === props.step.buttons[i]?.label))
+}
+const tabTickets = computed(() => {
+  if (tab.value === null) return null
+  const label = props.step.buttons[tab.value]?.label
+  return props.stats?.buttons.find((b) => b.label === label)?.tickets ?? null
+})
+function minutes(s: number | null): string {
+  if (s === null) return '—'
+  return s < 3600
+    ? t('scenarios.stats.minutes', { n: Math.max(1, Math.round(s / 60)) })
+    : t('scenarios.stats.hours', { n: Math.round(s / 360) / 10 })
+}
 </script>
 
 <template>
   <aside class="panel" :aria-label="heading">
     <div class="panel__head">
-      <div class="fw-semi">{{ heading }}</div>
+      <div>
+        <div class="fw-semi">{{ heading }}</div>
+        <div v-if="stats" class="panel__stats tabular">
+          {{
+            t('scenarios.stats.step', {
+              sent: stats.sent,
+              answered: stats.answered,
+              none: stats.no_answer,
+              median: minutes(stats.median_answer_s),
+            })
+          }}
+        </div>
+      </div>
       <Button
         variant="ghost"
         size="icon-sm"
@@ -115,6 +209,15 @@ function setDay(raw: string): void {
     </div>
 
     <div class="panel__body">
+      <ul v-if="issues.length > 0" class="issues">
+        <li v-for="(i, n) in errors" :key="'e' + n" class="issues__err">
+          <CircleAlert :size="13" />{{ issueText(i) }}
+        </li>
+        <li v-for="(i, n) in warnings" :key="'w' + n" class="issues__warn">
+          <TriangleAlert :size="13" />{{ issueText(i) }}
+        </li>
+      </ul>
+
       <FormField :label="t('scenarios.panel.name')" html-for="sp-title">
         <input
           id="sp-title"
@@ -184,7 +287,19 @@ function setDay(raw: string): void {
         </div>
       </FormField>
 
-      <FormField :label="t('scenarios.panel.textTy')" html-for="sp-ty">
+      <FormField :label="t('scenarios.panel.textVy')" html-for="sp-vy">
+        <textarea
+          id="sp-vy"
+          class="textarea panel__text"
+          :value="step.text_vy"
+          @input="patch({ text_vy: ($event.target as HTMLTextAreaElement).value })"
+        />
+      </FormField>
+      <FormField
+        :label="t('scenarios.panel.textTy')"
+        html-for="sp-ty"
+        :hint="t('scenarios.panel.placeholders')"
+      >
         <textarea
           id="sp-ty"
           class="textarea panel__text"
@@ -193,38 +308,55 @@ function setDay(raw: string): void {
         />
       </FormField>
       <FormField
-        :label="t('scenarios.panel.textVy')"
-        html-for="sp-vy"
-        :hint="t('scenarios.panel.placeholders')"
+        v-if="showAlt"
+        :label="t('scenarios.panel.altText')"
+        html-for="sp-alt"
+        :hint="t('scenarios.panel.altTextHint')"
       >
         <textarea
-          id="sp-vy"
-          class="textarea panel__text"
-          :value="step.text_vy"
-          @input="patch({ text_vy: ($event.target as HTMLTextAreaElement).value })"
+          id="sp-alt"
+          class="textarea panel__text panel__text--alt"
+          :value="step.alt_text ?? ''"
+          @input="patch({ alt_text: ($event.target as HTMLTextAreaElement).value || null })"
         />
       </FormField>
+      <Button v-else size="sm" variant="ghost" class="list__add" @click="showAlt = true">
+        <Plus :size="14" />{{ t('scenarios.panel.addAltText') }}
+      </Button>
 
-      <FormField :label="t('scenarios.panel.buttons')">
-        <div class="list">
-          <p v-if="step.buttons.length === 0" class="muted txt-sm">
-            {{ t('scenarios.panel.noButtons') }}
-          </p>
-          <div v-for="(b, i) in step.buttons" :key="i" class="list__row">
+      <FormField :label="t('scenarios.panel.media')" :hint="t('scenarios.panel.mediaHint')">
+        <MediaField
+          :model-value="(step.media ?? []).filter((m) => !m.personal)"
+          :names="mediaNames"
+          @update:model-value="patch({ media: [...$event, ...personalMedia] })"
+        />
+        <label class="check check--sm">
+          <input
+            type="checkbox"
+            :checked="personalMedia.length > 0"
+            @change="setPersonal(($event.target as HTMLInputElement).checked)"
+          />
+          {{ t('scenarios.panel.personalPlan') }}
+        </label>
+      </FormField>
+
+      <section class="buttons">
+        <div class="section-title">{{ t('scenarios.panel.buttons') }}</div>
+        <p v-if="step.buttons.length === 0" class="muted txt-sm">
+          {{ t('scenarios.panel.noButtons') }}
+        </p>
+        <div v-for="(b, i) in step.buttons" :key="i" class="btnrow">
+          <div class="btnrow__main">
             <input
-              class="input"
+              :class="['input', { err: !b.label.trim() || labelLength(b.label) > LABEL_MAX }]"
               :aria-label="t('scenarios.panel.buttonLabel')"
               :placeholder="t('scenarios.panel.buttonLabel')"
               :value="b.label"
               @input="setButton(i, { label: ($event.target as HTMLInputElement).value })"
             />
-            <input
-              class="input mono list__action"
-              :aria-label="t('scenarios.panel.buttonAction')"
-              :placeholder="t('scenarios.panel.buttonAction')"
-              :value="b.action"
-              @input="setButton(i, { action: ($event.target as HTMLInputElement).value })"
-            />
+            <span :class="['count', { 'count--over': labelLength(b.label) > LABEL_MAX }]">
+              {{ labelLength(b.label) }}/{{ LABEL_MAX }}
+            </span>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -234,98 +366,194 @@ function setDay(raw: string): void {
               <X :size="14" />
             </Button>
           </div>
-          <Button size="sm" variant="ghost" class="list__add" @click="addButton">
-            <Plus :size="14" />{{ t('scenarios.panel.addButton') }}
-          </Button>
+          <div class="btnrow__meta">
+            <label class="check check--sm">
+              <input
+                type="checkbox"
+                :checked="!!b.opens_free_text"
+                @change="
+                  setButton(i, { opens_free_text: ($event.target as HTMLInputElement).checked })
+                "
+              />
+              {{ t('scenarios.panel.ownAnswer') }}
+            </label>
+            <span v-if="badge(i)" class="statbadge tabular" :title="t('scenarios.stats.badgeHint')">
+              {{ b.label }} · {{ badge(i)!.percent }}% ({{ badge(i)!.picked }})
+            </span>
+          </div>
         </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          class="list__add"
+          :disabled="step.buttons.length >= 7"
+          @click="addButton"
+        >
+          <Plus :size="14" />{{ t('scenarios.panel.addButton') }}
+        </Button>
+      </section>
+
+      <section v-if="step.buttons.length > 0" class="branches">
+        <div class="tabs branch-tabs" role="tablist" :aria-label="t('scenarios.branch.tabs')">
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="tab === null"
+            :class="['tab', { active: tab === null }]"
+            @click="tab = null"
+          >
+            <MessageSquareText :size="12" />{{ t('scenarios.branch.messageTab') }}
+          </button>
+          <button
+            v-for="(b, i) in step.buttons"
+            :key="i"
+            type="button"
+            role="tab"
+            :aria-selected="tab === i"
+            :class="['tab', { active: tab === i }]"
+            @click="tab = i"
+          >
+            <GitBranch v-if="branchFor(step, i)" :size="12" />
+            {{ t('scenarios.branch.tab', { label: b.label || '…' }) }}
+            <span v-if="tabIssue(i)" :class="['tabdot', `tabdot--${tabIssue(i)}`]" />
+          </button>
+        </div>
+        <div v-if="tab !== null && step.buttons[tab]" class="branch-body" role="tabpanel">
+          <p v-if="tabTickets" class="muted txt-sm">
+            {{ t('scenarios.stats.branchTickets', { n: tabTickets }) }}
+          </p>
+          <div v-if="sharedOwner !== null" class="shared">
+            <p class="muted txt-sm">
+              {{
+                t('scenarios.branch.sharedNote', {
+                  label: step.buttons[sharedOwner]?.label || '…',
+                })
+              }}
+            </p>
+            <div class="shared__row">
+              <Button size="sm" @click="tab = sharedOwner">
+                {{ t('scenarios.branch.sharedOpen') }}
+              </Button>
+              <Button size="sm" variant="ghost" @click="detach(tab!, sharedOwner)">
+                {{ t('scenarios.branch.sharedDetach') }}
+              </Button>
+            </div>
+          </div>
+          <BranchEditor
+            v-else
+            :key="tab"
+            :branch="step.buttons[tab].branch ?? null"
+            :label="step.buttons[tab].label"
+            :issues="issues.filter((x) => x.button === tab)"
+            :goto-options="gotoOptions"
+            :media-names="mediaNames"
+            :share-with="shareWith(tab)"
+            @update="setBranch(tab!, $event)"
+            @walk-path="emit('send-test', tab)"
+          />
+        </div>
+        <p v-else class="muted txt-sm">{{ t('scenarios.branch.pickTab') }}</p>
+      </section>
+
+      <FormField v-if="!asks" :label="t('scenarios.advance.label')">
+        <div class="radios" role="radiogroup" :aria-label="t('scenarios.advance.label')">
+          <label class="check">
+            <input
+              type="radio"
+              name="sp-advance"
+              :checked="step.advance !== 'auto'"
+              @change="patch({ advance: 'button' })"
+            />
+            {{ t('scenarios.advance.button') }}
+          </label>
+          <label class="check">
+            <input
+              type="radio"
+              name="sp-advance"
+              :checked="step.advance === 'auto'"
+              @change="patch({ advance: 'auto' })"
+            />
+            {{ t('scenarios.advance.auto') }}
+          </label>
+        </div>
+        <span v-if="!hasNextInBlock" class="field-hint">{{ t('scenarios.advance.last') }}</span>
       </FormField>
 
-      <div v-if="step.kind === 'survey' && !step.survey" class="survey survey--missing">
+      <FormField v-if="asks" :label="t('scenarios.noAnswer.label')" html-for="sp-noanswer">
+        <select
+          id="sp-noanswer"
+          class="input"
+          :value="step.no_answer ? 'remind' : 'silent'"
+          @change="
+            patch({
+              no_answer:
+                ($event.target as HTMLSelectElement).value === 'remind' ? { ...REMIND } : null,
+            })
+          "
+        >
+          <option value="silent">{{ t('scenarios.noAnswer.silent') }}</option>
+          <option value="remind">{{ t('scenarios.noAnswer.remind') }}</option>
+        </select>
+      </FormField>
+
+      <div v-if="step.kind === 'survey' && !step.survey" class="survey--missing">
         <p class="muted txt-sm">{{ t('scenarios.panel.surveyMissing') }}</p>
         <Button size="sm" @click="patch({ survey: defaultSurvey(step) })">
           <Plus :size="14" />{{ t('scenarios.panel.surveyCreate') }}
         </Button>
       </div>
-      <fieldset v-if="step.kind === 'survey' && step.survey" class="survey">
-        <legend class="fw-semi">{{ t('scenarios.panel.survey') }}</legend>
-        <FormField :label="t('scenarios.panel.scale')">
-          <div class="checks" role="radiogroup" :aria-label="t('scenarios.panel.scale')">
-            <label v-for="sc in SCALES" :key="sc" class="check">
-              <input
-                type="radio"
-                name="sp-scale"
-                :checked="step.survey.scale === sc"
-                @change="setSurvey({ scale: sc })"
-              />
-              {{ t(`scenarios.panel.scales.${sc}`) }}
-            </label>
-          </div>
-        </FormField>
-        <FormField
-          v-if="step.survey.scale === '1-10' || step.survey.scale === '1-5'"
-          :label="t('scenarios.panel.threshold')"
-          html-for="sp-threshold"
-          :hint="t('scenarios.panel.thresholdHint')"
-        >
-          <input
-            id="sp-threshold"
-            class="input tabular panel__narrow"
-            type="number"
-            min="1"
-            :max="step.survey.scale === '1-10' ? 10 : 5"
-            :value="step.survey.threshold ?? ''"
-            @change="setThreshold(($event.target as HTMLInputElement).value)"
-          />
-        </FormField>
-        <FormField :label="t('scenarios.panel.questions')">
-          <div class="list">
-            <div v-for="(q, i) in step.survey.questions" :key="i" class="list__q">
-              <div class="list__row">
-                <input
-                  class="input"
-                  :aria-label="t('scenarios.panel.question', { n: i + 1 })"
-                  :placeholder="t('scenarios.panel.questionText')"
-                  :value="q.text"
-                  @input="setQuestion(i, { text: ($event.target as HTMLInputElement).value })"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  :aria-label="t('scenarios.panel.removeQuestion')"
-                  @click="removeQuestion(i)"
-                >
-                  <X :size="14" />
-                </Button>
-              </div>
-              <input
-                v-if="step.survey.scale === 'choice'"
-                class="input"
-                :aria-label="t('scenarios.panel.options')"
-                :placeholder="t('scenarios.panel.options')"
-                :value="q.options.join(', ')"
-                @change="
-                  setQuestion(i, {
-                    options: parseOptions(($event.target as HTMLInputElement).value),
-                  })
-                "
-              />
-            </div>
-            <Button size="sm" variant="ghost" class="list__add" @click="addQuestion">
-              <Plus :size="14" />{{ t('scenarios.panel.addQuestion') }}
-            </Button>
-          </div>
-        </FormField>
-      </fieldset>
+      <SurveyEditor
+        v-if="step.kind === 'survey' && step.survey"
+        :survey="step.survey"
+        :issues="issues"
+        :media-names="mediaNames"
+        @update="patch({ survey: $event })"
+      />
+      <p v-if="step.kind === 'input'" class="hint-box txt-sm">
+        {{ t('scenarios.panel.inputHint') }}
+      </p>
 
-      <FormField :label="t('scenarios.panel.sending')" :hint="t('scenarios.panel.workHoursHint')">
-        <label class="check">
-          <input
-            type="checkbox"
-            :checked="step.work_hours_only"
-            @change="patch({ work_hours_only: ($event.target as HTMLInputElement).checked })"
-          />
-          {{ t('scenarios.panel.workHoursOnly') }}
-        </label>
+      <FormField :label="t('scenarios.panel.settings')">
+        <div class="flags">
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="!!step.required"
+              @change="patch({ required: ($event.target as HTMLInputElement).checked })"
+            />
+            {{ t('scenarios.panel.required') }}
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="!!step.hr_task"
+              @change="patch({ hr_task: ($event.target as HTMLInputElement).checked })"
+            />
+            {{ t('scenarios.panel.hrTask') }}
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="step.flag_required === RECRUITER_FLAG"
+              @change="
+                patch({
+                  flag_required: ($event.target as HTMLInputElement).checked
+                    ? RECRUITER_FLAG
+                    : null,
+                })
+              "
+            />
+            {{ t('scenarios.panel.recruiterFlag') }}
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="step.work_hours_only"
+              @change="patch({ work_hours_only: ($event.target as HTMLInputElement).checked })"
+            />
+            {{ t('scenarios.panel.workHoursOnly') }}
+          </label>
+        </div>
       </FormField>
 
       <FormField :label="t('scenarios.panel.condition')" html-for="sp-cond">
@@ -340,6 +568,16 @@ function setDay(raw: string): void {
     </div>
 
     <div class="panel__foot">
+      <Button
+        size="sm"
+        :disabled="sending || !!step.hr_task"
+        :title="step.hr_task ? t('scenarios.test.hrTask') : t('scenarios.test.sendSelfHint')"
+        @click="emit('send-test', null)"
+      >
+        <Send :size="14" />{{
+          sending ? t('scenarios.test.sending') : t('scenarios.test.sendSelf')
+        }}
+      </Button>
       <Button variant="danger" size="sm" @click="emit('remove')">
         <Trash2 :size="14" />{{ t('scenarios.editor.deleteStep') }}
       </Button>
@@ -354,17 +592,22 @@ function setDay(raw: string): void {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
-  /* Below the sticky topbar (52px) with a gap. */
   max-height: calc(100vh - 84px);
   position: sticky;
   top: 68px;
+  min-width: 0;
 }
 .panel__head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border-subtle);
+}
+.panel__stats {
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+  margin-top: 2px;
 }
 .panel__body {
   padding: 16px;
@@ -374,18 +617,47 @@ function setDay(raw: string): void {
   gap: 14px;
 }
 .panel__foot {
+  display: flex;
+  justify-content: space-between;
   padding: 10px 16px;
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-subtle);
 }
 .panel__text {
-  height: 72px;
+  height: 64px;
   padding: 8px 10px;
   line-height: 1.45;
   resize: vertical;
 }
-.panel__narrow {
-  width: 100px;
+.panel__text--alt {
+  background: var(--bg-subtle);
+  font-style: italic;
+}
+.issues {
+  list-style: none;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-sm);
+}
+.issues li {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+.issues li :deep(svg) {
+  flex: none;
+  margin-top: 2px;
+}
+.issues__err {
+  color: var(--danger);
+}
+.issues__warn {
+  color: var(--warning);
 }
 .grid3 {
   display: grid;
@@ -397,6 +669,12 @@ function setDay(raw: string): void {
   flex-wrap: wrap;
   gap: 6px 14px;
 }
+.radios,
+.flags {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .check {
   display: inline-flex;
   align-items: center;
@@ -404,42 +682,126 @@ function setDay(raw: string): void {
   font-size: var(--text-base);
   cursor: pointer;
 }
-.list {
+.check--sm {
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+.section-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.buttons {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
-.list__row {
+.btnrow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.btnrow__main {
   display: flex;
   gap: 6px;
   align-items: center;
 }
-.list__action {
-  width: 120px;
-  flex: none;
+.btnrow__main .input {
+  flex: 1;
+  min-width: 0;
 }
-.list__q {
+.btnrow__meta {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  padding-left: 2px;
+}
+.count {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  width: 38px;
+  text-align: right;
+}
+.count--over {
+  color: var(--danger);
+  font-weight: 600;
+}
+.statbadge {
+  font-size: var(--text-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--info-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+.err {
+  border-color: var(--danger);
 }
 .list__add {
   align-self: flex-start;
 }
-.survey--missing {
-  align-items: flex-start;
-}
-.survey {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 10px 12px 12px;
-  margin: 0;
+.branches {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 8px 10px 12px;
 }
-.survey legend {
-  padding: 0 4px;
+.branch-tabs {
+  flex-wrap: wrap;
+  height: auto;
+  gap: 2px;
+}
+.branch-tabs .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: var(--text-sm);
+}
+.tabdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.tabdot--error {
+  background: var(--danger);
+}
+.tabdot--warning {
+  background: var(--warning);
+}
+.branch-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.shared {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.shared__row {
+  display: flex;
+  gap: 6px;
+}
+.hint-box {
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--info-soft);
+}
+.survey--missing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 </style>

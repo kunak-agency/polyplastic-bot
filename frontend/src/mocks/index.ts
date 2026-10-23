@@ -6,6 +6,8 @@ import { scenarioRoutes } from './handlers/scenarios'
 import { ticketRoutes } from './handlers/tickets'
 import { overviewRoutes } from './handlers/overview'
 import { knowledgeRoutes } from './handlers/knowledge'
+import { mediaRoutes } from './handlers/media'
+import { digestRoutes } from './handlers/digest'
 
 export const MOCKS_ENABLED = import.meta.env.VITE_USE_MOCKS === 'true'
 
@@ -24,6 +26,8 @@ export function installMocks(instance: AxiosInstance): void {
     ...ticketRoutes,
     ...overviewRoutes,
     ...knowledgeRoutes,
+    ...mediaRoutes,
+    ...digestRoutes,
   ]
   instance.defaults.adapter = createMockAdapter(routes)
   console.info(`[mocks] axios adapter installed — ${routes.length} route(s) served locally`)

@@ -12,6 +12,7 @@ import RiskMark from '@/components/newcomers/RiskMark.vue'
 import ConnectionBadge from '@/components/newcomers/ConnectionBadge.vue'
 import NewcomerTimeline from '@/components/newcomers/NewcomerTimeline.vue'
 import NewcomerTickets from '@/components/tickets/NewcomerTickets.vue'
+import ManagerInviteButton from '@/components/manager/ManagerInviteButton.vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -220,6 +221,7 @@ function consent(n: Newcomer): string {
                 <Link2 :size="14" />{{ t('newcomers.actions.invite') }}
               </RouterLink>
             </Button>
+            <ManagerInviteButton :newcomer-id="newcomer.id" />
             <Button :aria-expanded="rsOpen" @click="rsOpen = !rsOpen">
               <CalendarClock :size="14" />{{ t('newcomers.reschedule.button') }}
             </Button>

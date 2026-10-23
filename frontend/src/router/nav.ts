@@ -3,10 +3,12 @@ import {
   BookOpen,
   ChartColumn,
   MessagesSquare,
+  Images,
   Inbox,
   LayoutDashboard,
   Route,
   Settings,
+  UserCheck,
   Users,
 } from 'lucide-vue-next'
 
@@ -38,12 +40,15 @@ export const NAV: NavItem[] = [
     labelKey: 'common.nav.items.knowledge',
     icon: BookOpen,
   },
+  { id: 'media', routeName: 'media', labelKey: 'media.nav', icon: Images },
   {
     id: 'analytics',
     routeName: 'analytics',
     labelKey: 'common.nav.items.analytics',
     icon: ChartColumn,
   },
+  // Head of unit's "My newcomers" (case role 03); no roles yet, picked by name.
+  { id: 'manager', routeName: 'manager', labelKey: 'common.nav.items.manager', icon: UserCheck },
 ]
 
 // Bottom of the rail: the last sitemap item, set apart as in most admin shells.

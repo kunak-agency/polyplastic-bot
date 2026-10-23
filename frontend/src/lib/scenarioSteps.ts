@@ -2,7 +2,7 @@
 // types-only imports, so the node tests load it directly.
 import type { ScenarioStep, Stage, StepKind, StepSurvey } from '@/types/api'
 
-export const STEP_KINDS: readonly StepKind[] = ['text', 'card', 'file', 'survey', 'task']
+export const STEP_KINDS: readonly StepKind[] = ['text', 'card', 'file', 'survey', 'task', 'input']
 export const STAGES: readonly Stage[] = ['before', 'day0', 'week1', 'month1', 'probation', 'done']
 
 // The adaptation window of the case: three days before D0 to the end of probation.

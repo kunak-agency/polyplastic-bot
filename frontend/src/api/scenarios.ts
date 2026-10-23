@@ -1,7 +1,12 @@
 import { http } from '@/api/http'
 import type {
   ListResponse,
+  PublishPreview,
   PublishRequest,
+  ScenarioPatch,
+  ScenarioStats,
+  SendTestRequest,
+  SiteCode,
   Scenario,
   ScenarioCreateRequest,
   ScenarioDetail,
@@ -68,5 +73,42 @@ export async function apiImportScenarioSteps(id: string, file: File): Promise<Sc
   const r = await http.post<ScenarioDetail>(`/scenarios/${encodeURIComponent(id)}/import`, form, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
+  return r.data
+}
+
+// v4: per-step and per-button numbers; shares only at >= min_answers answers.
+export async function apiScenarioStats(id: string, site: SiteCode | null): Promise<ScenarioStats> {
+  const r = await http.get<ScenarioStats>(`/scenarios/${encodeURIComponent(id)}/stats`, {
+    params: site ? { site } : {},
+  })
+  return r.data
+}
+
+// v4: what publishing the saved draft would do (nothing is written).
+export async function apiPublishPreview(id: string): Promise<PublishPreview> {
+  const r = await http.post<PublishPreview>(
+    `/scenarios/${encodeURIComponent(id)}/publish/preview`,
+    {},
+  )
+  return r.data
+}
+
+// v4 (bot side): send the step to the HR's own MAX chat; with a button — walk
+// that branch too.
+export async function apiSendTest(
+  id: string,
+  stepId: string,
+  body: SendTestRequest,
+): Promise<void> {
+  await http.post(
+    `/scenarios/${encodeURIComponent(id)}/steps/${encodeURIComponent(stepId)}/send-test`,
+    body,
+  )
+}
+
+// v4: scenario commands (/food, /hr) and rules (free question, survey
+// reminder); the answer is the scenario with steps.
+export async function apiPatchScenario(id: string, body: ScenarioPatch): Promise<ScenarioDetail> {
+  const r = await http.patch<ScenarioDetail>(`/scenarios/${encodeURIComponent(id)}`, body)
   return r.data
 }

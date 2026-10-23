@@ -20,7 +20,8 @@ RUN pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY *.py ./
+# *.yaml — данные модулей рядом с кодом (synonyms.yaml для query_expand.py)
+COPY *.py *.yaml ./
 COPY prompts ./prompts
 COPY eval ./eval
 COPY testdata ./testdata

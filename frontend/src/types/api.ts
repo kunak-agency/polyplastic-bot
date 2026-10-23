@@ -143,7 +143,8 @@ export interface TimelineResponse {
 // ── Scenarios (GET /api/scenarios, /api/scenarios/{id}) ─────────────────────
 
 export type ScenarioStatus = 'draft' | 'published'
-export type StepKind = 'text' | 'card' | 'file' | 'survey' | 'task'
+// input — waits for the newcomer's own text and/or photo (06-excel-tz §2, r34).
+export type StepKind = 'text' | 'card' | 'file' | 'survey' | 'task' | 'input'
 export type SurveyScale = '1-10' | '1-5' | 'yesno' | 'choice'
 export type PublishApply = 'new' | 'active'
 
@@ -157,20 +158,123 @@ export interface Scenario {
   updated_at: string
 }
 
+// ── v4: branches, actions, media, per-question surveys (api_contract.md v4) ──
+
+// A media library entry referenced by name: an import creates the name before
+// HR uploads the file, so media_id may be absent.
+export interface MediaRef {
+  media_id?: string | null
+  name: string
+  // A file from the newcomer's own card instead of the library (r36).
+  personal?: 'adaptation_plan' | null
+}
+
+export type ActionType =
+  'escalate' | 'handoff' | 'set_field' | 'set_flag' | 'send_file' | 'open_free_text'
+export type HandoffTo = 'recruiter' | 'hr' | 'security'
+export type EscalateRoute = 'hr' | 'recruiter' | 'security'
+
+export interface BranchAction {
+  type: ActionType
+  category?: string
+  route?: EscalateRoute | ''
+  notify_manager?: boolean
+  to?: HandoffTo | ''
+  field?: string
+  value?: string
+  flag?: string
+  media?: string
+  per_tag?: boolean
+  prompt?: string
+}
+
+export type BranchThen = 'continue' | 'end_block' | 'goto_block'
+
+export interface BranchMessage {
+  text_ty: string
+  text_vy: string
+  media: MediaRef[]
+  // Terminal: their own branch is ignored by the bot (depth is at most 2).
+  buttons: StepButton[]
+}
+
+export interface Branch {
+  messages: BranchMessage[] // at most 2
+  actions: BranchAction[]
+  then: BranchThen
+  goto?: string
+  // Shared branch: indices of the buttons (or survey options) it answers,
+  // "if 1–2" (06-excel-tz §1.4). Absent — only the button that holds it.
+  on?: number[]
+}
+
 export interface StepButton {
   label: string
   action: string
+  branch?: Branch | null
+  opens_free_text?: boolean
+}
+
+export interface NoAnswerRule {
+  remind_after_h: number[]
+  max: number
+}
+
+// How the flow moves past a step without a question: "button" — a "Next"
+// button (the default when more steps follow in the block), "auto" — right
+// away after a "typing…" pause. null — the default.
+export type StepAdvance = 'button' | 'auto'
+
+export type QuestionType = 'scale' | 'yesno' | 'choice' | 'multi' | 'text'
+
+export type FlagSeverity = 'low' | 'medium' | 'high'
+
+// A risk flag an option raises right away (06-excel-tz §1.3): F-code + severity.
+export interface OptionFlag {
+  code: string
+  severity?: FlagSeverity
 }
 
 export interface SurveyQuestion {
   text: string
   options: string[]
+  type?: QuestionType
+  scale?: '1-10' | '1-5'
+  threshold?: number | null
+  anchors?: string[]
+  // optional — a comment at any answer; below — a reason under the threshold;
+  // on_no — a reason after "no".
+  comment?: 'optional' | 'below' | 'on_no' | ''
+  other?: boolean
+  required?: boolean
+  // Answer value as a string → its branch (text and actions before the next
+  // question): choice — option number from 1, yesno — "1"/"0", scale — the number.
+  branches?: Record<string, Branch>
+  // Same keys → risk flag.
+  option_flags?: Record<string, OptionFlag>
+}
+
+// Rules after a survey (r57): conditions on answers; rules of one group
+// exclude each other ("OR"), groups are independent ("+").
+export interface OutcomeCondition {
+  q: number // question number, from 1
+  in?: number[] // answer value is one of (option numbers from 1, yes/no 1/0, scale)
+  contains?: number[] // a multi answer has any of these options (from 1)
+}
+
+export interface SurveyOutcome {
+  if: OutcomeCondition[]
+  match?: 'any' | 'all'
+  group?: string
+  messages: BranchMessage[]
+  actions: BranchAction[]
 }
 
 export interface StepSurvey {
   scale: SurveyScale
   threshold: number | null
   questions: SurveyQuestion[]
+  outcomes?: SurveyOutcome[]
 }
 
 export interface ScenarioStep {
@@ -187,10 +291,53 @@ export interface ScenarioStep {
   survey: StepSurvey | null
   condition: string | null
   work_hours_only: boolean
+  // v4 (optional: older payloads and fixtures do not carry them)
+  key?: string
+  required?: boolean
+  media?: MediaRef[]
+  gallery?: boolean
+  alt_text?: string | null
+  hr_task?: boolean
+  flag_required?: string | null
+  no_answer?: NoAnswerRule | null
+  advance?: StepAdvance | null
+}
+
+// Scenario commands (/food, /hr): the bot runs the actions on the command.
+export interface ScenarioCommand {
+  name: string
+  text_ty?: string
+  text_vy?: string
+  actions: BranchAction[]
+}
+
+// Scenario-wide rules (r69, r70): reactions to events, not timeline steps.
+// free_question — the refusal with a pair of buttons when the bot cannot
+// answer; survey_reminder — a reminder about an unfinished survey.
+export type ScenarioRuleKind = 'free_question' | 'survey_reminder'
+
+export interface ScenarioRule {
+  key: string
+  kind: ScenarioRuleKind
+  trigger: string
+  text_ty: string
+  text_vy: string
+  media: MediaRef[]
+  buttons: StepButton[]
+  remind_after_h?: number[]
+  row?: number
+}
+
+// PATCH /api/scenarios/{id}: scenario-wide commands and rules.
+export interface ScenarioPatch {
+  commands?: ScenarioCommand[]
+  rules?: ScenarioRule[]
 }
 
 export interface ScenarioDetail extends Scenario {
   steps: ScenarioStep[]
+  commands?: ScenarioCommand[]
+  rules?: ScenarioRule[]
 }
 
 // POST /api/scenarios: a draft (version 0), empty or a copy of another
@@ -204,6 +351,61 @@ export interface ScenarioCreateRequest {
 export interface PublishRequest {
   comment: string
   apply: PublishApply
+}
+
+// GET /api/scenarios/{id}/stats?site= — shares only at >= min_answers answers.
+export interface ButtonStats {
+  label: string
+  picked: number
+  share: number | null
+  tickets: number
+}
+
+export interface StepStats {
+  step_id: string
+  sent: number
+  answered: number
+  no_answer: number
+  median_answer_s: number | null
+  buttons: ButtonStats[]
+}
+
+export interface ScenarioStats {
+  site: SiteCode | null
+  min_answers: number
+  items: StepStats[]
+}
+
+// POST /api/scenarios/{id}/publish/preview — what publishing the saved draft does.
+export type StepChangeKind = 'added' | 'removed' | 'changed'
+export type StepChangeField =
+  'when' | 'text' | 'sites' | 'buttons' | 'branches' | 'media' | 'survey' | 'settings'
+
+export interface StepChange {
+  step_id: string
+  title: string
+  day_offset: number
+  time: string
+  change: StepChangeKind
+  fields: StepChangeField[]
+  buttons_removed: string[]
+}
+
+export interface PublishPreview {
+  next_version: number
+  active_newcomers: number
+  inside_survey: number
+  removed_branches_live: number
+  recommend: PublishApply
+  changes: StepChange[]
+}
+
+// POST /api/scenarios/{id}/steps/{stepId}/send-test (development only): the
+// draft step goes to a connected test newcomer marked [TEST]; with
+// press_button — "walk this path", the button is pressed right away.
+export interface SendTestRequest {
+  newcomer_id: string
+  press_button: number | null
 }
 
 // ── Tickets (api_contract.md v2, GET/POST /api/tickets…) ────────────────────
@@ -462,4 +664,167 @@ export interface Overview {
     min_group: number
     series: { site: SiteCode | 'all'; points: OverviewTrendPoint[] }[]
   }
+}
+
+// ── v4: weekly digest and the head of unit (api_contract.md, "v4") ──────────
+
+export interface DigestTotals {
+  on_pulse: number
+  answered: number
+  response_rate_pct: number | null
+  // Index W 0-100 by survey scales; null below min_group respondents.
+  w_avg: number | null
+  pulse_avg: number | null
+  respondents: number
+  problems: number
+  critical: number
+}
+
+export interface DigestTheme {
+  key: string
+  label: string
+  category: string | null
+  newcomers: number
+  mentions: number
+  sites: SiteCode[]
+  owner: string | null
+  keywords: string[]
+  examples: string[]
+  prev_count: number | null
+  prev_hidden: boolean
+  delta: number | null
+}
+
+export interface DigestSiteRow {
+  site: SiteCode
+  on_pulse: number
+  answered: number
+  w_avg: number | null
+  problems: number
+  top_theme: string | null
+}
+
+export interface Digest {
+  week: string
+  from: string
+  to: string
+  site: SiteCode | null
+  generated_at: string
+  partial: boolean
+  min_group: number
+  totals: DigestTotals
+  previous: DigestTotals
+  themes: DigestTheme[]
+  hidden_themes: number
+  confidential: { present: boolean; count: number | null }
+  risk_zones: { red: number; yellow: number; items: OverviewRiskZone[] }
+  sites: DigestSiteRow[]
+  probation: { count: number; this_week: boolean }
+  text: {
+    summary: string
+    themes: string | null
+    changes: string | null
+    source: 'llm' | 'template'
+    rejected: string[]
+  }
+  max_message: { text: string; length: number; link: string }
+}
+
+export interface DigestSendResult {
+  week: string
+  sent_to: number
+  logged: boolean
+  text: string
+}
+
+export type ManagerTaskKind = 'low_pulse_twice' | 'silent_3d' | 'probation_3d' | 'd30_meeting'
+
+export interface ManagerTask {
+  id: string
+  kind: ManagerTaskKind
+  status: 'open' | 'planned'
+  text: string
+  created_at: string
+}
+
+export interface ManagerCard {
+  newcomer_id: string
+  full_name: string
+  site: SiteCode
+  department: string
+  position: string
+  start_date: string
+  day: number
+  stage: Stage
+  connection: string
+  last_pulse: number | null
+  probation_date: string
+  attention: string[]
+  meetings: ManagerTask[]
+}
+
+export interface ManagerView {
+  manager_name: string
+  connected: boolean
+  items: ManagerCard[]
+  total: number
+}
+
+export interface ManagerSummary {
+  manager_name: string
+  newcomers: number
+  connected: boolean
+}
+
+export interface ManagerInvite {
+  manager_name: string
+  link: string
+  expires_at: string
+  connected: boolean
+}
+
+// ── v4: media library (api_contract.md v4, media library) ──
+
+export type MediaKind = 'image' | 'file'
+export type MediaStatus = 'missing' | 'ready'
+
+// One file of an entry: site null is the common file, sent when the
+// newcomer's site has none of its own.
+export interface MediaFile {
+  site: SiteCode | null
+  filename: string
+  mime: string
+  size: number
+  sha256: string
+  updated_at: string
+}
+
+export interface MediaItem {
+  id: string
+  name: string
+  kind: MediaKind
+  files: MediaFile[]
+  status: MediaStatus
+  // Steps and button branches (latest published versions + drafts) that
+  // reference the entry by id or by name.
+  used_in: number
+  // Former names: published versions keep referencing them.
+  aliases: string[]
+  updated_by: string | null
+  updated_at: string
+}
+
+export interface MediaUploadRequest {
+  file: File
+  name?: string
+  site?: SiteCode | null
+  updated_by?: string
+}
+
+export interface MediaRenamed extends MediaItem {
+  updated_refs: number
+}
+
+export interface MediaEnsureResponse extends ListResponse<MediaItem> {
+  created: number
 }

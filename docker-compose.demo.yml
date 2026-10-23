@@ -1,0 +1,135 @@
+# Демо-стек «Корсика» одной командой: `make demo` (или
+# `docker compose -f docker-compose.demo.yml up -d --build --wait`).
+#
+#   postgres  — база (том pgdata, наружу только loopback);
+#   backend   — API и бот MAX; на старте сид демо-данных (cmd/seed + cmd/seed-demo, синтетика);
+#   rag       — поиск по регламентам с цитатами (hybrid + bge, веса из services/rag/.cache;
+#               нет весов — BM25 с предупреждением, см. deploy/demo/rag-entrypoint.sh);
+#   frontend  — кабинет HR: статика в nginx, /api проксируется на backend.
+#
+# Переменные берутся из корневого .env (compose читает его сам) и из окружения шелла:
+#   MAX_BOT_TOKEN пуст  → подделка MAX, путь новичка — в «Демо-чате» кабинета;
+#   MAX_BOT_TOKEN задан → живой бот MAX (один токен — один запущенный бот!);
+#   LLM_BASE_URL/LLM_API_KEY/LLM_MODEL — OpenAI-совместимая модель; пусто — RAG отвечает
+#   дословной цитатой пункта.
+#
+# Порты демо отличаются от портов разработки (5437/8081/8093/5173), чтобы стек можно было
+# поднять рядом. Меняются переменными DEMO_*_PORT.
+#
+# Отдельное имя проекта: контейнеры и тома не пересекаются с docker-compose.yml (polyplastic)
+# и с соседними проектами на том же Docker.
+name: polyplastic-demo
+
+x-llm-env: &llm-env
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_MODEL: ${LLM_MODEL:-tlite}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.2}
+  LLM_PRESENCE_PENALTY: ${LLM_PRESENCE_PENALTY:-1.0}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: polyplastic
+      # Только для демо на локальной машине, не для эксплуатации.
+      POSTGRES_PASSWORD: polyplastic
+      POSTGRES_DB: polyplastic
+    ports: ["127.0.0.1:${DEMO_PG_PORT:-15440}:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polyplastic -d polyplastic"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  rag:
+    build: ./services/rag
+    image: polyplastic-demo/rag:latest
+    entrypoint: ["sh", "/demo/rag-entrypoint.sh"]
+    ports: ["127.0.0.1:${DEMO_RAG_PORT:-18093}:8093"]
+    environment:
+      <<: *llm-env
+      # На CPU в Docker ответ модели с контекстом идёт дольше, чем на хосте с mps.
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-6}
+      RAG_RETRIEVER: ${RAG_RETRIEVER:-hybrid}
+      RAG_RERANKER: ${RAG_RERANKER:-bge}
+      # synthetic (по умолчанию) | real — services/rag/corpus-real с хоста, если он есть
+      RAG_CORPUS: ${RAG_CORPUS:-synthetic}
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - ./services/rag/.cache:/app/.cache
+      - ./services/rag/corpus-real:/app/corpus-real:ro
+      - ./deploy/demo/rag-entrypoint.sh:/demo/rag-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8093/health', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      # Загрузка двух моделей из тома и эмбеддинги корпуса на CPU: до нескольких минут.
+      start_period: 300s
+      retries: 6
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    image: polyplastic-demo/backend:latest
+    entrypoint: ["sh", "/demo/backend-entrypoint.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Бэкенд живёт и без rag (health: rag down, бот отвечает «позову HR») — ждать прогрева
+      # моделей не нужно.
+      rag:
+        condition: service_started
+    ports: ["127.0.0.1:${DEMO_API_PORT:-18081}:8081"]
+    environment:
+      <<: *llm-env
+      APP_ENV: development
+      PORT: 0.0.0.0:8081
+      DATABASE_URL: postgres://polyplastic:polyplastic@postgres:5432/polyplastic?sslmode=disable
+      RAG_BASE_URL: http://rag:8093
+      RAG_ASK_TIMEOUT: ${RAG_ASK_TIMEOUT:-20s}
+      TAXONOMY_PATH: /app/data/taxonomy.yaml
+      MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:-}
+      MAX_BOT_USERNAME: ${MAX_BOT_USERNAME:-}
+      MAX_HR_CHAT_ID: ${MAX_HR_CHAT_ID:-}
+      MAX_SB_CHAT_ID: ${MAX_SB_CHAT_ID:-}
+      MAX_CA_FILE: /app/certs/russian_trusted_root_ca.pem
+      # Ссылки из MAX («Открыть аналитику») ведут в кабинет демо-стека
+      CABINET_URL: ${CABINET_URL:-http://localhost:${DEMO_WEB_PORT:-18080}}
+      # Кабинет и API на одном origin через nginx; прямой доступ к API — только curl/скрипты
+      ORIGINS: http://localhost:${DEMO_WEB_PORT:-18080}
+      DEMO_SEED: ${DEMO_SEED:-1}
+    volumes:
+      - ./data:/app/data:ro
+      - ./deploy/certs:/app/certs:ro
+      - ./deploy/demo/backend-entrypoint.sh:/demo/backend-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/api/health"]
+      interval: 5s
+      timeout: 3s
+      # Первый старт: миграция и сид демо-потока (~150 персон)
+      start_period: 120s
+      retries: 10
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api
+        DEMO_DEVTOOLS: "1"
+    image: polyplastic-demo/frontend:latest
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      API_UPSTREAM: http://backend:8081
+    # DEMO_BIND=0.0.0.0 — открыть кабинет в сеть (стенд в облаке); по умолчанию только loopback
+    ports: ["${DEMO_BIND:-127.0.0.1}:${DEMO_WEB_PORT:-18080}:80"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:

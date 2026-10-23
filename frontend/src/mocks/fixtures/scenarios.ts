@@ -7,6 +7,7 @@ import type {
   StepSurvey,
 } from '@/types/api'
 import { stageForDay } from '@/lib/scenarioSteps'
+import { branchesScenario } from './scenarioBranches'
 
 // Synthetic scenarios after the timeline of ux-spec 2.3 (the customer's Excel
 // plus the marked changes). Texts are short placeholders, not the customer's copy.
@@ -410,6 +411,7 @@ function seeds(site: 'factory' | 'office'): StepSeed[] {
 
 export function scenarioFixtures(nowIso: string): ScenarioDetail[] {
   return [
+    branchesScenario(nowIso),
     {
       id: SCENARIO_GTP_ID,
       name: 'Завод GTP',

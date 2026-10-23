@@ -1,6 +1,13 @@
 import type { MockRequest, MockResult, MockRoute } from '../adapter'
-import type { ScenarioDetail, ScenarioStep, SiteCode } from '@/types/api'
+import type {
+  PublishPreview,
+  ScenarioDetail,
+  ScenarioStep,
+  SiteCode,
+  StepChange,
+} from '@/types/api'
 import { importedScenario } from '../fixtures/scenarios'
+import { SCENARIO_BRANCHES_ID, syntheticStats } from '../fixtures/scenarioBranches'
 import { activeCount, ensureSeeded, newcomers, newId, scenarios } from '../state'
 
 // Mirrors backend/handlers/scenarios.go and in/scenario.go: 422
@@ -245,7 +252,64 @@ function importInto(req: MockRequest): MockResult {
   s.steps = importedScenario(s.id, file.name, new Date().toISOString()).steps
   s.status = 'draft'
   s.updated_at = new Date().toISOString()
-  return { status: 200, data: detail(s) }
+  return { status: 200, data: { ...detail(s), import_report: mockImportReport(s.steps) } }
+}
+
+// import_report of the mock import (api_contract.md v4): counts from the fixture
+// steps and a few warnings that point at real steps, so the report screen and
+// "open the step" work without the backend.
+function mockImportReport(steps: ScenarioDetail['steps']) {
+  const blocks = new Set(steps.map((x) => `${x.day_offset}|${x.time}`))
+  const media = new Set(steps.flatMap((x) => (x.media ?? []).map((m) => m.name)))
+  const pick = (i: number) => steps[Math.min(i, Math.max(steps.length - 1, 0))]
+  const warn = (row: number, code: string, message: string, i: number) => {
+    const st = pick(i)
+    return { row, code, message, step_key: st?.key ?? '', step_id: st?.id ?? '' }
+  }
+  return {
+    blocks: blocks.size,
+    messages: steps.length,
+    questions: steps.filter((x) => x.buttons.length > 0 || !!x.survey).length,
+    branches: steps.reduce((n, x) => n + x.buttons.filter((b) => !!b.branch).length, 0),
+    rules: 2,
+    media_names: media.size,
+    media_name_list: [...media],
+    warnings: steps.length
+      ? [
+          warn(3, 'no_text', 'Текст-заглушка («…») — допишите сообщение', 0),
+          warn(
+            8,
+            'alt_text',
+            'У текста два авторских варианта: первый взят в сообщение, второй — в альтернативу',
+            1,
+          ),
+          warn(
+            19,
+            'hr_task',
+            'Письмо HR кандидату: бот его не отправляет — шаг стал задачей HR',
+            2,
+          ),
+          warn(
+            34,
+            'recruiter_flag',
+            'Шаг «по отмашке рекрутера»: уйдёт, только если у новичка включён флаг recruiter_enabled',
+            3,
+          ),
+          warn(
+            45,
+            'photo_unnamed',
+            'Вложение «ФОТО» без имени файла — загрузите фото в медиатеку',
+            4,
+          ),
+          warn(
+            57,
+            'survey_outcomes',
+            'Реакции на ответы опроса добавлены к опросам блока — проверьте условия',
+            5,
+          ),
+        ]
+      : [],
+  }
 }
 
 function importExcel(req: MockRequest): MockResult {
@@ -255,7 +319,164 @@ function importExcel(req: MockRequest): MockResult {
   const name = form instanceof FormData ? String(form.get('name') ?? '').trim() : ''
   const s = importedScenario(newId(), name || file.name, new Date().toISOString())
   scenarios.set(s.id, s)
-  return { status: 201, data: detail(s) }
+  return { status: 201, data: { ...detail(s), import_report: mockImportReport(s.steps) } }
+}
+
+// ── v4: stats, publish preview, send-test (api_contract.md v4) ─────────────
+
+const MIN_ANSWERS = 5
+
+function stats(req: MockRequest): MockResult {
+  const s = scenarios.get(req.params.id)
+  if (!s) return notFound()
+  const site = req.query.site || null
+  if (site && !SITE_CODES.includes(site as SiteCode))
+    return error(422, 'VALIDATION_FAILED', 'Площадка: GrPP, Luzhniki или GTP', [
+      { field: 'site', code: 'OUT_OF_RANGE', message: 'GrPP, Luzhniki или GTP' },
+    ])
+  let items = syntheticStats(s.steps, MIN_ANSWERS)
+  // One site sees about a third of the traffic: some shares fall under the threshold.
+  if (site)
+    items = items.map((it) => {
+      const answered = Math.floor(it.answered / 3)
+      const buttons = it.buttons.map((b) => {
+        const picked = Math.floor(b.picked / 3)
+        return { ...b, picked, share: answered >= MIN_ANSWERS ? picked / answered : null }
+      })
+      const sent = Math.floor(it.sent / 3)
+      return { ...it, sent, answered, no_answer: sent - answered, buttons }
+    })
+  return { status: 200, data: { site, min_answers: MIN_ANSWERS, items } }
+}
+
+// What the branches fixture was published as: one step differs and one more
+// button with a branch existed, so the preview has something to show.
+function seededPublished(s: ScenarioDetail): ScenarioStep[] | undefined {
+  if (s.id !== SCENARIO_BRANCHES_ID) return undefined
+  return structuredClone(s.steps).map((st) =>
+    st.title === 'Пульс 3-го дня'
+      ? {
+          ...st,
+          text_vy: 'Как первые дни?',
+          buttons: [
+            ...st.buttons,
+            {
+              label: 'Позже',
+              action: '',
+              branch: { messages: [], actions: [], then: 'end_block' as const },
+            },
+          ],
+        }
+      : st,
+  )
+}
+
+function changedFields(a: ScenarioStep, b: ScenarioStep): StepChange['fields'] {
+  const j = (x: unknown) => JSON.stringify(x ?? null)
+  const plain = (l: ScenarioStep['buttons']) => l.map((x) => ({ ...x, branch: null }))
+  const f: StepChange['fields'] = []
+  if (a.day_offset !== b.day_offset || a.time !== b.time) f.push('when')
+  if (a.text_ty !== b.text_ty || a.text_vy !== b.text_vy || a.title !== b.title) f.push('text')
+  if (j(a.sites) !== j(b.sites)) f.push('sites')
+  if (j(plain(a.buttons)) !== j(plain(b.buttons))) f.push('buttons')
+  if (j(a.buttons.map((x) => x.branch)) !== j(b.buttons.map((x) => x.branch))) f.push('branches')
+  if (j(a.media) !== j(b.media)) f.push('media')
+  if (j(a.survey) !== j(b.survey)) f.push('survey')
+  if (
+    a.kind !== b.kind ||
+    !!a.required !== !!b.required ||
+    !!a.hr_task !== !!b.hr_task ||
+    j(a.no_answer) !== j(b.no_answer) ||
+    j(a.advance) !== j(b.advance)
+  )
+    f.push('settings')
+  return f
+}
+
+function preview(req: MockRequest): MockResult {
+  const s = scenarios.get(req.params.id)
+  if (!s) return notFound()
+  const published = publishedSteps.get(s.id) ?? seededPublished(s) ?? (s.version > 0 ? s.steps : [])
+  const old = new Map(published.map((st) => [st.id, st]))
+  const removedLabels = (prev: ScenarioStep, cur?: ScenarioStep) =>
+    prev.buttons.map((b) => b.label).filter((l) => !cur?.buttons.some((x) => x.label === l))
+  const changes: StepChange[] = []
+  for (const st of s.steps) {
+    const prev = old.get(st.id)
+    const base = { step_id: st.id, title: st.title, day_offset: st.day_offset, time: st.time }
+    if (!prev) {
+      changes.push({ ...base, change: 'added', fields: [], buttons_removed: [] })
+      continue
+    }
+    const fields = changedFields(prev, st)
+    if (fields.length > 0)
+      changes.push({ ...base, change: 'changed', fields, buttons_removed: removedLabels(prev, st) })
+  }
+  for (const st of published)
+    if (!s.steps.some((x) => x.id === st.id))
+      changes.push({
+        step_id: st.id,
+        title: st.title,
+        day_offset: st.day_offset,
+        time: st.time,
+        change: 'removed',
+        fields: [],
+        buttons_removed: removedLabels(st),
+      })
+  // Live branches: as if a third of the active newcomers still had each
+  // removed branch's message unanswered.
+  const active = activeCount(s.id) || (s.id === SCENARIO_BRANCHES_ID ? 9 : 0)
+  let removedBranches = 0
+  for (const prev of published) {
+    const cur = s.steps.find((x) => x.id === prev.id)
+    for (const b of prev.buttons)
+      if (b.branch && !cur?.buttons.some((x) => x.label === b.label && x.branch)) removedBranches++
+  }
+  const body: PublishPreview = {
+    next_version: s.version + 1,
+    active_newcomers: active,
+    inside_survey: Math.floor(active / 4),
+    removed_branches_live: removedBranches * Math.ceil(active / 3),
+    recommend: changes.some((c) => c.buttons_removed.length > 0) ? 'new' : 'active',
+    changes,
+  }
+  return { status: 200, data: body }
+}
+
+// PATCH /scenarios/:id {commands?, rules?} — the scenario's commands and rules.
+function patchScenario(req: MockRequest): MockResult {
+  const s = scenarios.get(req.params.id)
+  if (!s) return notFound()
+  const body = req.body as { commands?: unknown; rules?: unknown }
+  if (body.commands !== undefined) {
+    if (!Array.isArray(body.commands))
+      return error(422, 'VALIDATION_FAILED', 'Проверьте данные запроса', [
+        { field: 'commands', code: 'INVALID_FORMAT', message: 'Нужен список команд' },
+      ])
+    const bad = (body.commands as { name?: string }[]).findIndex(
+      (c) => !/^\/[a-z0-9_]{1,32}$/i.test(String(c.name ?? '').trim()),
+    )
+    if (bad >= 0)
+      return error(422, 'VALIDATION_FAILED', 'Проверьте данные запроса', [
+        { field: `commands[${bad}].name`, code: 'INVALID_FORMAT', message: 'Команда — /латиница' },
+      ])
+    s.commands = structuredClone(body.commands as ScenarioDetail['commands'])
+  }
+  if (body.rules !== undefined) s.rules = structuredClone(body.rules as ScenarioDetail['rules'])
+  s.updated_at = new Date().toISOString()
+  return { status: 200, data: detail(s) }
+}
+
+function sendTest(req: MockRequest): MockResult {
+  const s = scenarios.get(req.params.id)
+  if (!s) return notFound()
+  if (!s.steps.some((st) => st.id === req.params.stepId))
+    return error(404, 'NOT_FOUND', 'Шаг не найден в черновике сценария')
+  const nc = newcomers.get(String(req.body.newcomer_id ?? ''))
+  if (!nc) return error(404, 'NOT_FOUND', 'Новичок не найден')
+  if (nc.connection !== 'connected')
+    return error(409, 'CONFLICT', 'Новичок не подключён к боту — отправлять некуда')
+  return { status: 200, data: { status: 'sent', messages: 1 } }
 }
 
 const routes: MockRoute[] = [
@@ -281,9 +502,13 @@ const routes: MockRoute[] = [
   },
   { method: 'POST', path: '/scenarios', handler: createScenario },
   { method: 'DELETE', path: '/scenarios/:id', handler: deleteScenario },
+  { method: 'PATCH', path: '/scenarios/:id', handler: patchScenario },
   { method: 'PUT', path: '/scenarios/:id/steps', handler: putSteps },
   { method: 'POST', path: '/scenarios/:id/import', handler: importInto },
   { method: 'POST', path: '/scenarios/:id/publish', handler: publish },
+  { method: 'POST', path: '/scenarios/:id/publish/preview', handler: preview },
+  { method: 'GET', path: '/scenarios/:id/stats', handler: stats },
+  { method: 'POST', path: '/scenarios/:id/steps/:stepId/send-test', handler: sendTest },
   { method: 'POST', path: '/scenarios/import', handler: importExcel },
 ]
 
