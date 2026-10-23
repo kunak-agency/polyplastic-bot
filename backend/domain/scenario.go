@@ -52,9 +52,10 @@ const (
 	KindFile   = "file"
 	KindSurvey = "survey"
 	KindTask   = "task"
+	KindInput  = "input" // ждёт ответ новичка: текст и/или фото (ТЗ r34) → карточка и HR, не в RAG
 )
 
-var KindCodes = []string{KindText, KindCard, KindFile, KindSurvey, KindTask}
+var KindCodes = []string{KindText, KindCard, KindFile, KindSurvey, KindTask, KindInput}
 
 // Шкалы опроса.
 const (
@@ -75,7 +76,29 @@ type Scenario struct {
 	Sites     StringList `gorm:"type:jsonb"`
 	Version   int
 	Status    string
+	Rules     RuleList `gorm:"type:jsonb"` // глобальные правила (ТЗ r69, r70), domain/scenario_rules.go
+	// Commands — команды сценария (/food, /hr): по команде бот выполняет действия (ТЗ r25, r49).
+	Commands CommandList `gorm:"type:jsonb"`
 }
+
+// Command — команда бота из сценария: «/food» → send_file per_tag, «/hr» → handoff hr.
+type Command struct {
+	Name    string   `json:"name"` // «/food», регистр не важен
+	TextTy  string   `json:"text_ty,omitempty"`
+	TextVy  string   `json:"text_vy,omitempty"`
+	Actions []Action `json:"actions"`
+}
+
+type CommandList []Command
+
+func (l CommandList) Value() (driver.Value, error) {
+	if l == nil {
+		l = CommandList{}
+	}
+	return jsonValue([]Command(l))
+}
+
+func (l *CommandList) Scan(src any) error { return jsonScan(src, (*[]Command)(l)) }
 
 // ScenarioVersion — опубликованная версия: неизменяемый снимок шагов. События таймлайна
 // ссылаются на (step_id, номер версии) и рендерятся из снимка, а не из черновика.
@@ -87,6 +110,9 @@ type ScenarioVersion struct {
 	Apply       string   // new | active
 	Steps       StepList `gorm:"type:jsonb"`
 	PublishedAt time.Time
+	// Команды и глобальные правила сценария на момент публикации (бот читает их из снимка).
+	Commands CommandList `gorm:"type:jsonb"`
+	Rules    RuleList    `gorm:"type:jsonb"`
 }
 
 // Step — шаг ScenarioVersion.Steps по id.
@@ -127,6 +153,7 @@ type ScenarioStep struct {
 	HRTask       bool          `json:"hr_task"`                     // письмо/задача HR — бот не отправляет (ТЗ r19)
 	FlagRequired *string       `json:"flag_required"`               // показ «по отмашке рекрутера»: флаг новичка
 	NoAnswer     *NoAnswerRule `gorm:"type:jsonb" json:"no_answer"` // nil — продолжать молча
+	Advance      *string       `json:"advance"`                     // button | auto | nil (= button, если в блоке есть следующий шаг)
 }
 
 // NoAnswerRule — «если не ответил»: напомнить через N часов, не больше Max раз.
@@ -151,6 +178,9 @@ type Branch struct {
 	Actions  []Action        `json:"actions"`
 	Then     string          `json:"then"` // continue (по умолчанию) | end_block | goto_block
 	Goto     string          `json:"goto,omitempty"`
+	// On — общая ветка на несколько кнопок/вариантов (ТЗ r16 «если 1–2»): индексы кнопок с нуля
+	// (у кнопки шага) или значения вариантов (у вопроса опроса). Пусто — только своя кнопка.
+	On []int `json:"on,omitempty"`
 }
 
 type BranchMessage struct {
@@ -183,6 +213,10 @@ type Action struct {
 type MediaRef struct {
 	MediaID *uuid.UUID `json:"media_id,omitempty"`
 	Name    string     `json:"name"`
+	// Personal — личный файл из карточки новичка вместо медиатеки («adaptation_plan», ТЗ r36).
+	Personal string `json:"personal,omitempty"`
+	// Caption — подпись вложения (колонка J ТЗ).
+	Caption string `json:"caption,omitempty"`
 }
 
 type MediaRefList []MediaRef
@@ -228,6 +262,34 @@ type Survey struct {
 	Scale     string           `json:"scale"`
 	Threshold int              `json:"threshold"`
 	Questions []SurveyQuestion `json:"questions"`
+	// Outcomes — правила после опроса (ТЗ r57): «Спасибо» и сообщения/действия по условиям.
+	Outcomes []Outcome `json:"outcomes,omitempty"`
+}
+
+// Outcome — правило после опроса. If — условия по ответам; Match any|all (по умолчанию all);
+// Group — взаимоисключение: в одной группе срабатывает первое подходящее правило («ЛИБО»),
+// разные группы независимы («+»). Пустая группа — правило само по себе.
+type Outcome struct {
+	If       []OutcomeCond   `json:"if"`
+	Match    string          `json:"match,omitempty"`
+	Group    string          `json:"group,omitempty"`
+	Messages []BranchMessage `json:"messages"`
+	Actions  []Action        `json:"actions"`
+}
+
+// OutcomeCond — условие по вопросу Q (с единицы): In — ответ один из значений (choice/yesno/
+// scale — значение варианта), Contains — multi отмечен хотя бы один из вариантов (с единицы).
+type OutcomeCond struct {
+	Q        int   `json:"q"`
+	In       []int `json:"in,omitempty"`
+	Contains []int `json:"contains,omitempty"`
+}
+
+// OptionFlag — сигнал варианта ответа (ТЗ: «задумываюсь об уходе» → F7): код таксономии и
+// severity (low|medium|high). Срабатывает сразу, без LLM, по правилам таксономии.
+type OptionFlag struct {
+	Code     string `json:"code"`
+	Severity string `json:"severity,omitempty"`
 }
 
 // SurveyQuestion — вопрос опроса. Type пусто — как раньше: шкала/порог опроса целиком.
@@ -241,8 +303,15 @@ type SurveyQuestion struct {
 	Scale     string   `json:"scale,omitempty"`
 	Threshold *int     `json:"threshold,omitempty"`
 	Anchors   []string `json:"anchors,omitempty"`
-	Comment   string   `json:"comment,omitempty"`
+	Comment   string   `json:"comment,omitempty"` // optional | below | on_no
 	Other     bool     `json:"other,omitempty"`
+	// Required — без «Пропустить» («Обязательное поле», ТЗ r47 вопрос 7).
+	Required bool `json:"required,omitempty"`
+	// Branches — ветка на вариант: ключ — значение ответа строкой (choice — номер варианта с
+	// единицы, yesno — "1"/"0", шкала — число). Ветка уходит между вопросами, затем следующий.
+	Branches map[string]*Branch `json:"branches,omitempty"`
+	// OptionFlags — сигнал варианта: ключ — как у Branches.
+	OptionFlags map[string]OptionFlag `json:"option_flags,omitempty"`
 }
 
 func (s *Survey) Value() (driver.Value, error) {

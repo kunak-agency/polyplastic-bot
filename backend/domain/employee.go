@@ -52,6 +52,9 @@ type Employee struct {
 	// активный новичок (при новом приглашении старая связка снимается).
 	MaxUserID *int64 `gorm:"uniqueIndex"`
 	ChatID    *int64
+	// ManagerUserID — MAX user_id руководителя подразделения (вход по ссылке mgr_<token>,
+	// services/manager.go); nil — руководитель к боту не подключён, push только в лог.
+	ManagerUserID *int64
 
 	LastActivityAt *time.Time
 	LastPulse      *int
@@ -68,6 +71,11 @@ type Employee struct {
 	// («Напишу сам(а)»). nil — не ждёт.
 	AwaitEventID  *uuid.UUID `gorm:"type:uuid"`
 	AwaitQuestion int
+
+	// Flags — булевы флаги новичка (set_flag ветки, «по отмашке рекрутера» — flag_required шага).
+	Flags BoolMap `gorm:"type:jsonb"`
+	// AwaitFreeText — бот ждёт свободный текст («Другое», open_free_text) → обращение.
+	AwaitFreeText *FreeTextWait `gorm:"type:jsonb"`
 }
 
 // InviteToken — приглашение: случайная строка (≤ 128 символов, без ПДн) для deep link.

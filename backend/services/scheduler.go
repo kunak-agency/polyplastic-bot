@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"strconv"
 	"sync"
 	"time"
 
@@ -23,6 +22,8 @@ type SchedulerService struct {
 	now     func() time.Time
 	packGap time.Duration
 	sleep   func(ctx context.Context, d time.Duration) error
+	media   MediaAttacher  // nil — медиатеки нет: шаги уходят без вложений (branch_media.go)
+	tickets *TicketService // задача HR, если личного файла новичка нет (branch_input.go)
 
 	mu sync.Mutex // один такт отправки за раз в процессе; между процессами — SKIP LOCKED
 }
@@ -43,6 +44,7 @@ const (
 // шаги, которые уже доставлены (пересборка под новую версию); их не повторяем.
 func (s *SchedulerService) BuildEvents(e *domain.Employee, v *domain.ScenarioVersion, skip map[uuid.UUID]bool) []domain.ScheduledEvent {
 	site := domain.SiteOf(e.Site)
+	blocks := blockKeys(v.Steps)
 	var out []domain.ScheduledEvent
 	for _, st := range v.Steps {
 		if !st.AppliesTo(e.Site) || skip[st.ID] {
@@ -59,6 +61,7 @@ func (s *SchedulerService) BuildEvents(e *domain.Employee, v *domain.ScenarioVer
 			Kind:            st.Kind,
 			FireAt:          FireAt(e.StartDate, st.DayOffset, st.Time, site, st.WorkHoursOnly),
 			Status:          domain.EventScheduled,
+			Block:           blocks[st.ID],
 		})
 	}
 	return out
@@ -111,7 +114,12 @@ func (s *SchedulerService) Run(ctx context.Context, interval time.Duration) {
 
 // Tick — один такт: все созревшие события подключённых новичков.
 func (s *SchedulerService) Tick(ctx context.Context) (int, error) {
-	return s.dispatch(ctx, repositories.DueFilter{Now: s.now()}, false)
+	n, err := s.dispatch(ctx, repositories.DueFilter{Now: s.now()}, false)
+	if err != nil {
+		return n, err
+	}
+	r, err := s.remindNoAnswer(ctx)
+	return n + r, err
 }
 
 // DispatchEmployee — созревшие события одного новичка сразу, не дожидаясь такта (после
@@ -126,7 +134,8 @@ func (s *SchedulerService) TimeTravel(ctx context.Context, id uuid.UUID, day int
 	return s.dispatch(ctx, repositories.DueFilter{Now: s.now(), EmployeeID: &id, MaxDay: &day}, true)
 }
 
-// dispatch — забрать события под блокировкой и отправить. Транзакция держится, пока идут
+// dispatch — забрать созревшие события под блокировкой и отправить по блокам (branch_flow.go:
+// вопрос держит поток, «Дальше →», «Что вы пропустили»). Транзакция держится, пока идут
 // отправки: так событие не уйдёт дважды, даже если такт и машина времени совпали.
 func (s *SchedulerService) dispatch(ctx context.Context, f repositories.DueFilter, test bool) (int, error) {
 	if s.max == nil || !s.repos.Enabled() {
@@ -134,48 +143,27 @@ func (s *SchedulerService) dispatch(ctx context.Context, f repositories.DueFilte
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	start := s.now()
 	sent := 0
 	err := s.repos.Transaction(ctx, func(tx *repositories.Repos) error {
 		events, err := tx.Events.LockDue(ctx, f)
 		if err != nil {
 			return err
 		}
-		employees := map[uuid.UUID]*domain.Employee{}
-		versions := map[string]*domain.ScenarioVersion{}
-		var last uuid.UUID
-		for i := range events {
-			ev := &events[i]
-			e, ok := employees[ev.EmployeeID]
-			if !ok {
-				if e, err = tx.Employees.ByID(ctx, ev.EmployeeID); err != nil {
-					return err
-				}
-				employees[ev.EmployeeID] = e
+		var order []uuid.UUID
+		byEmp := map[uuid.UUID][]domain.ScheduledEvent{}
+		for _, ev := range events {
+			if _, ok := byEmp[ev.EmployeeID]; !ok {
+				order = append(order, ev.EmployeeID)
 			}
-			if e == nil {
-				continue
-			}
-			key := e.ScenarioID.String() + "/" + strconv.Itoa(ev.ScenarioVersion)
-			v, ok := versions[key]
-			if !ok {
-				if v, err = tx.Scenarios.Version(ctx, e.ScenarioID, ev.ScenarioVersion); err != nil {
-					return err
-				}
-				versions[key] = v
-			}
-			// Пакет одному новичку — с паузой между сообщениями (не в машине времени).
-			if !test && last == ev.EmployeeID && s.packGap > 0 {
-				if err := s.sleep(ctx, s.packGap); err != nil {
-					return err
-				}
-			}
-			ok, err = s.sendEvent(ctx, tx, e, v, ev, test)
+			byEmp[ev.EmployeeID] = append(byEmp[ev.EmployeeID], ev)
+		}
+		for _, id := range order {
+			paused := false
+			n, err := s.runEmployee(ctx, tx, id, byEmp[id], test, start, &paused)
+			sent += n
 			if err != nil {
 				return err
-			}
-			if ok {
-				sent++
-				last = ev.EmployeeID
 			}
 		}
 		return nil
@@ -185,15 +173,24 @@ func (s *SchedulerService) dispatch(ctx context.Context, f repositories.DueFilte
 
 // sendEvent — одно событие: пропустить, отправить или отметить сбой. Ошибка — только от БД;
 // сбой MAX — это статус события, а не причина откатить весь такт.
-func (s *SchedulerService) sendEvent(ctx context.Context, tx *repositories.Repos, e *domain.Employee, v *domain.ScenarioVersion, ev *domain.ScheduledEvent, test bool) (bool, error) {
+// cont — шаг без вопроса, за которым в блоке есть ещё реплики: кнопка «Дальше →».
+func (s *SchedulerService) sendEvent(ctx context.Context, tx *repositories.Repos, e *domain.Employee, v *domain.ScenarioVersion, ev *domain.ScheduledEvent, test bool, cont bool) (bool, error) {
 	var step domain.ScenarioStep
 	found := false
-	if v != nil {
+	if ev.Snapshot != nil {
+		step, found = domain.ScenarioStep(*ev.Snapshot), true
+	} else if v != nil {
 		step, found = v.Step(ev.StepID)
 	}
 	switch {
 	case !found:
 		ev.Status, ev.Answer = domain.EventFailed, strPtr(failNoStep)
+		return false, tx.Events.Save(ctx, ev)
+	case step.HRTask:
+		ev.Status, ev.Answer = domain.EventSkipped, strPtr(skipHRTask)
+		return false, tx.Events.Save(ctx, ev)
+	case step.FlagRequired != nil && *step.FlagRequired != "" && !flagOn(e, *step.FlagRequired):
+		ev.Status, ev.Answer = domain.EventHeld, strPtr("ждёт отмашки: флаг "+*step.FlagRequired)
 		return false, tx.Events.Save(ctx, ev)
 	case ev.Kind == domain.KindSurvey && (e.Consent == nil || *e.Consent != domain.ConsentGiven):
 		ev.Status, ev.Answer = domain.EventSkipped, strPtr(skipNoConsent)
@@ -213,9 +210,38 @@ func (s *SchedulerService) sendEvent(ctx context.Context, tx *repositories.Repos
 		msg = surveyMessage(to, step, e, ev, s.now())
 	} else {
 		msg = stepMessage(to, step, e, ev.ID, test, s.now())
+		if cont {
+			msg = withContinue(msg, ev.ID)
+		}
+	}
+	atts, planMissing := s.attachFor(ctx, e, step.Media, step.Title)
+	if planMissing {
+		msg.Text += "\n\n" + textPlanMissing
+	}
+	if groups := GroupAttachments(atts); len(groups) > 0 {
+		// MAX: файл — одно вложение на сообщение; лишние группы уходят перед текстом
+		for _, g := range groups[:len(groups)-1] {
+			if _, err := s.max.Send(ctx, max.OutMessage{ChatID: msg.ChatID, UserID: msg.UserID, Attachments: g}); err != nil {
+				logger.Warn("планировщик: вложение события %s не ушло: %v", ev.ID, err)
+			}
+		}
+		msg.Attachments = groups[len(groups)-1]
 	}
 
 	mid, err := s.max.Send(ctx, msg)
+	if err != nil && len(msg.Attachments) > 0 && s.media != nil {
+		// MAX мог отказать по протухшему токену: забыть токены, загрузить заново, один повтор
+		var toks []string
+		for _, a := range msg.Attachments {
+			toks = append(toks, a.Token)
+		}
+		s.media.ForgetTokens(ctx, toks)
+		if atts, _ := s.attachFor(ctx, e, step.Media, step.Title); len(atts) > 0 {
+			groups := GroupAttachments(atts)
+			msg.Attachments = groups[len(groups)-1]
+			mid, err = s.max.Send(ctx, msg)
+		}
+	}
 	if err != nil {
 		ev.Attempts++
 		logger.Warn("планировщик: событие %s не отправлено (попытка %d): %v", ev.ID, ev.Attempts, err)
@@ -228,6 +254,25 @@ func (s *SchedulerService) sendEvent(ctx context.Context, tx *repositories.Repos
 	}
 	now := s.now()
 	ev.Status, ev.MessageID, ev.SentAt, ev.Text = domain.EventSent, mid, &now, &msg.Text
+	switch {
+	case step.Kind == domain.KindInput:
+		ev.Waiting = domain.WaitInput
+		if err := tx.Employees.SetAwaitFreeText(ctx, e.ID, &domain.FreeTextWait{EventID: ev.ID, Label: step.Title, Input: true}); err != nil {
+			return false, err
+		}
+	case isQuestion(step):
+		ev.Waiting = domain.WaitAnswer
+	case cont:
+		ev.Waiting = domain.WaitContinue
+	default:
+		ev.Waiting = ""
+	}
+	if isSurvey(step) && ev.Survey.Q < len(step.Survey.Questions) && qType(step.Survey.Questions[ev.Survey.Q]) == qText {
+		// вопрос «своими словами» — следующий текст новичка и есть ответ
+		if err := tx.Employees.SetAwaitSurvey(ctx, e.ID, &ev.ID, ev.Survey.Q); err != nil {
+			return false, err
+		}
+	}
 	return true, tx.Events.Save(ctx, ev)
 }
 

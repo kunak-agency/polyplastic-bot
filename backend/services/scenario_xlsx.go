@@ -10,73 +10,120 @@ import (
 
 	"main/domain"
 	"main/pkg/errs"
+	"main/repositories"
 
+	"github.com/google/uuid"
 	"github.com/xuri/excelize/v2"
 )
 
-// Импорт Excel-таймлайна ТЗ. Файла кейса ещё нет, поэтому колонки предварительные
-// (api_contract.md): «когда / повод / метка / макет / текст / обязательный / изображение».
-// Заголовок ищется в первых строках первого листа по вхождению слова, регистр не важен.
-// «обязательный» и «изображение» пока не ложатся ни в одно поле шага — читаются и
-// игнорируются (TODO: сверить с файлом кейса).
-
-// importColumns — колонка → слово в заголовке.
-var importColumns = map[string]string{
-	"when":  "когда",
-	"title": "повод",
-	"sites": "метка",
-	"kind":  "макет",
-	"text":  "текст",
-}
+// Импорт Excel-таймлайна: файл ТЗ заказчика (шапка «Месяц/день/время информирования … Текст
+// сообщения …») и прежний формат кабинета («Когда / Повод / Метка / Макет / Текст»). Колонки
+// ищутся по словам в шапке (tzColumns), разбор строк — scenario_xlsx_tz.go, ячейки —
+// scenario_xlsx_cell.go, «когда» — scenario_xlsx_when.go.
 
 const (
 	msgImportFile    = "Файл не читается как Excel (.xlsx)"
-	msgImportHeader  = "Не найдена строка заголовка с колонкой «когда»"
+	msgImportHeader  = "Не найдена строка заголовка с колонкой «когда» («Месяц/день/время информирования»)"
 	msgImportNoText  = "Нужна колонка «текст» или «повод»"
-	msgImportRows    = "Некоторые строки не разобраны"
 	msgImportEmpty   = "В файле нет ни одного шага"
 	headerSearchRows = 10
-	maxImportErrors  = 20
 )
 
-// ImportExcel — сценарий-черновик из Excel. name пусто — имя по файлу.
-func (s *ScenarioService) ImportExcel(ctx context.Context, name string, r io.Reader) (*ScenarioDetail, error) {
+// ImportResult — сценарий после импорта и отчёт по файлу.
+type ImportResult struct {
+	Detail *ScenarioDetail
+	Report ImportReport
+}
+
+// ImportExcel — сценарий-черновик из Excel. name пусто — имя по умолчанию.
+func (s *ScenarioService) ImportExcel(ctx context.Context, name string, r io.Reader) (*ImportResult, error) {
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	steps, sites, err := ParseScenarioExcel(r)
+	imp, err := parseScenarioFile(r)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(name) == "" {
 		name = "Импорт из Excel"
 	}
-	return s.Create(ctx, name, sites, steps)
+	var id uuid.UUID
+	err = s.repos.Transaction(ctx, func(tx *repositories.Repos) error {
+		sc := domain.Scenario{Name: name, Sites: imp.sites, Status: domain.ScenarioDraft,
+			Rules: imp.rules, Commands: imp.commands}
+		if sc.Sites == nil {
+			sc.Sites = domain.StringList{}
+		}
+		if err := tx.Scenarios.Create(ctx, &sc); err != nil {
+			return err
+		}
+		id = sc.ID
+		return tx.Scenarios.ReplaceSteps(ctx, sc.ID, prepareSteps(sc.ID, imp.steps, nil))
+	})
+	if err != nil {
+		return nil, err
+	}
+	d, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &ImportResult{Detail: d, Report: imp.report}, nil
 }
 
-// ParseScenarioExcel — шаги и объединение меток площадок из файла.
+// ParseScenarioExcel — шаги и площадки из файла (без отчёта; сид и тесты).
 func ParseScenarioExcel(r io.Reader) ([]domain.ScenarioStep, []string, error) {
+	imp, err := parseScenarioFile(r)
+	if err != nil {
+		return nil, nil, err
+	}
+	return imp.steps, imp.sites, nil
+}
+
+// ParseScenarioImport — шаги, правила, команды и отчёт (ручная проверка на файле заказчика).
+func ParseScenarioImport(r io.Reader) ([]domain.ScenarioStep, []domain.ScenarioRule, []domain.Command, ImportReport, error) {
+	imp, err := parseScenarioFile(r)
+	if err != nil {
+		return nil, nil, nil, ImportReport{}, err
+	}
+	return imp.steps, imp.rules, imp.commands, imp.report, nil
+}
+
+func parseScenarioFile(r io.Reader) (*tzImport, error) {
 	f, err := excelize.OpenReader(r)
 	if err != nil {
-		return nil, nil, errs.NewValidationError(msgImportFile).WithCause(err)
+		return nil, errs.NewValidationError(msgImportFile).WithCause(err)
 	}
 	defer func() { _ = f.Close() }()
 	sheets := f.GetSheetList()
 	if len(sheets) == 0 {
-		return nil, nil, errs.NewValidationError(msgImportEmpty)
+		return nil, errs.NewValidationError(msgImportEmpty)
 	}
+	// Первый лист — таймлайн; остальные (у заказчика «Лист1» — черновой дубль) пропускаем.
 	rows, err := f.GetRows(sheets[0])
 	if err != nil {
-		return nil, nil, errs.NewValidationError(msgImportFile).WithCause(err)
+		return nil, errs.NewValidationError(msgImportFile).WithCause(err)
 	}
 
 	header, cols := -1, map[string]int{}
 	for i := 0; i < len(rows) && i < headerSearchRows && header < 0; i++ {
 		for j, cell := range rows[i] {
 			c := strings.ToLower(strings.TrimSpace(cell))
-			for key, word := range importColumns {
-				if _, seen := cols[key]; !seen && strings.Contains(c, word) {
-					cols[key] = j
+			if c == "" {
+				continue
+			}
+			for _, col := range tzColumns {
+				if _, seen := cols[col.key]; seen {
+					continue
+				}
+				hit := false
+				for _, w := range col.words {
+					if strings.Contains(c, w) {
+						hit = true
+					}
+				}
+				if hit {
+					cols[col.key] = j
+					break
 				}
 			}
 		}
@@ -87,70 +134,17 @@ func ParseScenarioExcel(r io.Reader) ([]domain.ScenarioStep, []string, error) {
 		}
 	}
 	if header < 0 {
-		return nil, nil, errs.NewValidationError(msgImportHeader)
+		return nil, errs.NewValidationError(msgImportHeader)
 	}
 	_, hasText := cols["text"]
 	_, hasTitle := cols["title"]
 	if !hasText && !hasTitle {
-		return nil, nil, errs.NewValidationError(msgImportNoText)
+		return nil, errs.NewValidationError(msgImportNoText)
 	}
-
-	cell := func(row []string, key string) string {
-		j, ok := cols[key]
-		if !ok || j >= len(row) {
-			return ""
-		}
-		return strings.TrimSpace(row[j])
+	if !hasText {
+		cols["text"] = cols["title"]
 	}
-	var steps []domain.ScenarioStep
-	var problems []errs.FieldError
-	siteSet := map[string]bool{}
-	for i := header + 1; i < len(rows); i++ {
-		row := rows[i]
-		when, title, text := cell(row, "when"), cell(row, "title"), cell(row, "text")
-		if when == "" && title == "" && text == "" {
-			continue
-		}
-		day, hhmm, ok := parseWhen(when)
-		if !ok {
-			if len(problems) < maxImportErrors {
-				problems = append(problems, errs.FieldError{
-					Field: fmt.Sprintf("row %d", i+1), Code: errs.CodeInvalidFormat,
-					Message: fmt.Sprintf("строка %d: не разобрано «когда» — ожидается вида D−3, D0 10:00, D+14", i+1),
-				})
-			}
-			continue
-		}
-		if title == "" {
-			title = truncateRunes(text, 40)
-		}
-		sites := parseSites(cell(row, "sites"))
-		for _, s := range sites {
-			siteSet[s] = true
-		}
-		st := domain.ScenarioStep{
-			DayOffset: day, Time: hhmm, Stage: domain.StageForDay(day), Sites: sites,
-			Kind: parseKind(cell(row, "kind")), Title: title, TextTy: text, TextVy: text,
-			WorkHoursOnly: true,
-		}
-		if st.Kind == domain.KindSurvey {
-			st.Survey = DefaultImportSurvey(text, title)
-		}
-		steps = append(steps, st)
-	}
-	if len(problems) > 0 {
-		return nil, nil, errs.NewValidationError(msgImportRows).WithDetails(problems...)
-	}
-	if len(steps) == 0 {
-		return nil, nil, errs.NewValidationError(msgImportEmpty)
-	}
-	var sites []string
-	for _, code := range domain.SiteCodes {
-		if siteSet[code] {
-			sites = append(sites, code)
-		}
-	}
-	return steps, sites, nil
+	return parseTZRows(rows, header, cols)
 }
 
 var (
@@ -220,7 +214,7 @@ func parseSites(s string) domain.StringList {
 func parseKind(s string) string {
 	s = strings.ToLower(s)
 	switch {
-	case strings.Contains(s, "опрос"), strings.Contains(s, "survey"):
+	case reSurveyWord.MatchString(s):
 		return domain.KindSurvey
 	case strings.Contains(s, "файл"), strings.Contains(s, "pdf"), strings.Contains(s, "file"):
 		return domain.KindFile

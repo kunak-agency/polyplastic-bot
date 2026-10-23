@@ -184,6 +184,9 @@ func TestLLMFlagRepeatInPulses(t *testing.T) {
 	c := e.launch(t, date(2026, 11, 3))
 	e.connect(t, c, domain.AddressVy, true)
 	ctx := context.Background()
+	// вопрос 10:00 держит поток блока (api_contract v4): ответ — и пульс 18:00 уходит
+	first := eventByTitle(t, e.events(t, c.Employee.ID), "С первым днём")
+	e.press(preStepButton + first.ID.String() + ":0")
 
 	pulse := eventByTitle(t, e.events(t, c.Employee.ID), "Итог дня")
 	id := pulse.ID.String()

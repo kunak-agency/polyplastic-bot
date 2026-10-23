@@ -37,6 +37,8 @@ type RAGFlagger interface {
 const (
 	flagViaRegex = "в свободном тексте (regex)"
 	flagViaLLM   = "по LLM-разметке"
+	// flagViaOption — сигнал варианта ответа опроса (option_flags сценария), без LLM.
+	flagViaOption = "по варианту ответа"
 )
 
 // flagInput — текст на разметку и где он написан.
@@ -47,6 +49,7 @@ type flagInput struct {
 	eventID        *uuid.UUID // ответ на опрос: коды пишутся в ответ, повтор считается по пульсам
 	questionNo     int        // номер вопроса опроса, с единицы
 	where          string     // «в сообщении новичка», «в ответе на опрос»
+	via            string     // откуда сигнал; пусто — LLM-разметка
 }
 
 // Что код делает с LLM-флагом.
@@ -183,7 +186,7 @@ func (b *BotService) applyFlagDecisions(ctx context.Context, empID uuid.UUID, in
 			}
 		}
 		if len(risk) > 0 {
-			markRisk(e, domain.RiskYellow, fmt.Sprintf("возможный сигнал %s %s (LLM-разметка, на ручной просмотр HR)", strings.Join(risk, ", "), in.where))
+			markRisk(e, domain.RiskYellow, fmt.Sprintf("возможный сигнал %s %s (%s, на ручной просмотр HR)", strings.Join(risk, ", "), in.where, orDefault(in.via, "LLM-разметка")))
 			if err := tx.Employees.Save(ctx, e); err != nil {
 				return err
 			}
@@ -230,7 +233,7 @@ func (b *BotService) applyFlagDecisions(ctx context.Context, empID uuid.UUID, in
 	if consented(emp) {
 		q.Question = strings.TrimSpace(in.text)
 	}
-	return b.flagSignal(ctx, recipientOf(emp), emp, q, signal, flagViaLLM+" "+in.where)
+	return b.flagSignal(ctx, recipientOf(emp), emp, q, signal, orDefault(in.via, flagViaLLM)+" "+in.where)
 }
 
 // riskLabel — «F6 «Перегрузка, выгорание»», с пометкой повтора.
@@ -253,7 +256,7 @@ func (b *BotService) flagTicket(ctx context.Context, emp *domain.Employee, in fl
 		}
 		now := b.now()
 		e.LastActivityAt = &now
-		markRisk(e, domain.RiskRed, fmt.Sprintf("сигнал %s «%s» %s (LLM-разметка)", d.code, d.cat.Name, in.where))
+		markRisk(e, domain.RiskRed, fmt.Sprintf("сигнал %s «%s» %s (%s)", d.code, d.cat.Name, in.where, orDefault(in.via, "LLM-разметка")))
 		if err := tx.Employees.Save(ctx, e); err != nil {
 			return err
 		}
@@ -261,7 +264,7 @@ func (b *BotService) flagTicket(ctx context.Context, emp *domain.Employee, in fl
 		if err := tx.Employees.AddHumanRequest(ctx, &h); err != nil {
 			return err
 		}
-		what := fmt.Sprintf("Сигнал %s %s %s (уверенность %.2f, серьёзность %d", d.code, flagViaLLM, in.where, d.confidence, d.severity)
+		what := fmt.Sprintf("Сигнал %s %s %s (уверенность %.2f, серьёзность %d", d.code, orDefault(in.via, flagViaLLM), in.where, d.confidence, d.severity)
 		if d.repeated {
 			what += ", повтор во втором пульсе подряд"
 		}

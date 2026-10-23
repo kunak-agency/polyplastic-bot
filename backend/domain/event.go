@@ -53,6 +53,16 @@ type ScheduledEvent struct {
 	Text   *string
 	IsTest bool
 	Survey *SurveyState `gorm:"type:jsonb"`
+
+	// Block — ключ блока (день + время, «12:01» после «12:00» — тот же блок): реплики блока
+	// идут по очереди, вопрос держит поток (api_contract.md v4, «Исполнение блока»).
+	Block string
+	// Waiting — чего ждёт отправленное событие (domain.Wait*); "" — ничего, поток идёт дальше.
+	Waiting string
+	// Reminded — сколько напоминаний no_answer ушло.
+	Reminded int
+	// Snapshot — шаг «Отправить себе» (send-test): резолвится из снимка, а не из версии.
+	Snapshot *StepSnap `gorm:"type:jsonb"`
 }
 
 // SurveyState — где новичок в «живом опросе»: одно сообщение, которое правится после каждого
@@ -78,6 +88,7 @@ type SurveyResult struct {
 	Skipped bool   `json:"skipped,omitempty"`
 	Reason  string `json:"reason,omitempty"` // подпись кнопки причины (наш текст)
 	Wrote   bool   `json:"wrote,omitempty"`  // причина написана своими словами
+	Multi   []int  `json:"multi,omitempty"`  // multi: отмеченные варианты (с единицы)
 }
 
 func (s *SurveyState) Value() (driver.Value, error) {

@@ -52,6 +52,12 @@ func AllModels() []any {
 		&KBDocument{},
 		&KBDocumentVersion{},
 		&KBDocumentFile{},
+		&ManagerInvite{},
+		&ManagerNudge{},
+		&Media{},
+		&MediaFile{},
+		&MediaFileData{},
+		&NewcomerFile{},
 	}
 }
 

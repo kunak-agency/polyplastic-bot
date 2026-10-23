@@ -113,10 +113,16 @@ func (c *SDKClient) GetUpdates(ctx context.Context, marker int64) ([]Update, int
 	if err != nil {
 		return nil, marker, err
 	}
-	audio := audioByMid(c.doer.takeUpdates())
+	body := c.doer.takeUpdates()
+	audio := audioByMid(body)
+	images := imagesByMid(body)
 	out := make([]Update, 0, len(ups))
 	for _, u := range ups {
-		out = append(out, fromSDK(u, audio))
+		x := fromSDK(u, audio)
+		if x.MessageID != "" {
+			x.Images = images[x.MessageID]
+		}
+		out = append(out, x)
 	}
 	return out, next, nil
 }

@@ -33,6 +33,7 @@ type Repos struct {
 	Questions *QuestionRepo
 	Tickets   *TicketRepo
 	Documents *DocumentRepo
+	Media     *MediaRepo
 }
 
 // newRepos — репозитории поверх db (база или транзакция).
@@ -46,6 +47,7 @@ func newRepos(db *gorm.DB) *Repos {
 		Questions: &QuestionRepo{db: db},
 		Tickets:   &TicketRepo{db: db},
 		Documents: &DocumentRepo{db: db},
+		Media:     &MediaRepo{db: db},
 	}
 }
 

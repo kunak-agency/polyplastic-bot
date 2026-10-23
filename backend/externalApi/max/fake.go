@@ -20,6 +20,8 @@ type Fake struct {
 	uploads []string
 	typing  []int64
 	nextMid int
+	// commands — последний PATCH /me/commands (commands.go).
+	commands []BotCommand
 
 	// Журнал ленты для демо-чата (fake_journal.go).
 	journal     []JournalEntry

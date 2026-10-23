@@ -68,6 +68,8 @@ func main() {
 		Taxonomy:   tax,
 		HRChatID:   cfg.Max.HRChatID,
 		SBChatID:   cfg.Max.SBChatID,
+		Digest:     services.DigestOptions{UserIDs: cfg.Digest.UserIDs, CabinetURL: cfg.Digest.CabinetURL, LLM: cfg.LLM},
+		Media:      services.MediaOptions{MaxUploadMB: cfg.Docs.MediaMaxMB},
 		Docs:       services.DocsOptions{MaxUploadMB: cfg.Docs.MaxUploadMB, UploadTimeout: cfg.Docs.UploadTimeout, OperatorToken: cfg.Docs.OperatorToken},
 	})
 	h := handlers.NewHandlerManager(svc)
@@ -98,6 +100,8 @@ func main() {
 	// Планировщик таймлайна: без базы ему нечего читать, без бота — некому отправлять.
 	if repos.Enabled() && ext.Max != nil {
 		go svc.Scheduler.Run(ctx, cfg.Scheduler.Interval)
+		go svc.Digest().RunWeekly(ctx) // дайджест руководителю подбора, пн 9:00
+		go svc.Manager().Run(ctx)      // push руководителю подразделения
 	}
 
 	// База знаний: rag держит загрузки в памяти — дождаться его и перезалить сохранённые документы.

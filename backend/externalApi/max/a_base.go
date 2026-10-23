@@ -54,6 +54,7 @@ type Update struct {
 	MessageID string // mid: message_created, message_callback
 	Text      string
 	Audio     []Audio
+	Images    []Image // фото от новичка (шаг kind=input, ТЗ r34)
 
 	// Payload — bot_started: параметр deep link (invite-токен новичка); message_callback —
 	// payload нажатой кнопки.
@@ -69,6 +70,12 @@ type Audio struct {
 	// Transcription — расшифровка от MAX. Пусто — поля не было или оно null; тогда нужен
 	// свой ASR. [проверить]: присылает ли его MAX вообще (в схеме v0.0.30 поле есть).
 	Transcription string
+}
+
+// Image — фото во входящем сообщении: ссылка и токен MAX (токен годится для пересылки).
+type Image struct {
+	URL   string
+	Token string
 }
 
 // OutMessage — исходящее сообщение. Указывается ChatID или UserID.

@@ -34,6 +34,7 @@ type BotService struct {
 	scheduler *SchedulerService
 	rag       RAGAsker // nil — на вопросы бот отвечает «не могу проверить по документам»
 	tickets   *TicketService
+	media     MediaAttacher // nil — вложения веток не уходят (branch_media.go)
 	now       func() time.Time
 
 	wg sync.WaitGroup // фоновые отправки пакета после согласия
@@ -105,6 +106,9 @@ func (b *BotService) answer(ctx context.Context, callbackID string, a max.Answer
 
 // started — открыта ссылка-приглашение (payload inv_<token>) или бот перезапущен.
 func (b *BotService) started(ctx context.Context, u max.Update) error {
+	if ok, err := b.managerStart(ctx, u); ok { // ссылка руководителя mgr_<token> (manager_bot.go)
+		return err
+	}
 	to := recipient{ChatID: u.ChatID, UserID: u.UserID}
 	now := b.now()
 	var emp *domain.Employee
@@ -204,6 +208,9 @@ func (b *BotService) callback(ctx context.Context, u max.Update) error {
 	if b.groupChat(ctx, u.ChatID) {
 		return nil
 	}
+	if ok, err := b.managerCallback(ctx, u); ok { // кнопки push руководителю (manager_bot.go)
+		return err
+	}
 	emp, err := b.repos.Employees.ByMaxUser(ctx, u.UserID)
 	if err != nil {
 		return err
@@ -232,8 +239,12 @@ func (b *BotService) callback(ctx context.Context, u max.Update) error {
 		return b.human(ctx, u, emp, strings.TrimPrefix(p, preHuman))
 	case strings.HasPrefix(p, preStepButton):
 		return b.stepButton(ctx, u, emp.ID, strings.TrimPrefix(p, preStepButton))
+	case strings.HasPrefix(p, preTerminal):
+		return b.terminalButton(ctx, u, emp.ID, strings.TrimPrefix(p, preTerminal))
+	case strings.HasPrefix(p, preContinue):
+		return b.continuePress(ctx, u, emp.ID, strings.TrimPrefix(p, preContinue))
 	case strings.HasPrefix(p, preReason), strings.HasPrefix(p, preWrite), strings.HasPrefix(p, preSkip),
-		strings.HasPrefix(p, preRemind), strings.HasPrefix(p, preAnswer):
+		strings.HasPrefix(p, preRemind), strings.HasPrefix(p, preAnswer), strings.HasPrefix(p, preDone):
 		return b.surveyCallback(ctx, u, emp.ID)
 	}
 	logger.Info("бот: неизвестная кнопка от user=%d", u.UserID)
@@ -322,52 +333,6 @@ func (b *BotService) consent(ctx context.Context, u max.Update, id uuid.UUID, gi
 	return nil
 }
 
-// stepButton — кнопка обычного шага: ответ записывается, сообщение правится в итог.
-func (b *BotService) stepButton(ctx context.Context, u max.Update, empID uuid.UUID, rest string) error {
-	evRaw, idxRaw, _ := strings.Cut(rest, ":")
-	evID, err1 := uuid.Parse(evRaw)
-	idx, err2 := strconv.Atoi(idxRaw)
-	if err1 != nil || err2 != nil {
-		b.answer(ctx, u.CallbackID, max.Answer{Notification: "Эта кнопка больше не работает"})
-		return nil
-	}
-	var reply max.Answer
-	err := b.repos.Transaction(ctx, func(tx *repositories.Repos) error {
-		ev, e, step, err := b.loadEvent(ctx, tx, evID, empID)
-		if err != nil {
-			return err
-		}
-		if ev == nil || ev.Status != domain.EventSent || idx < 0 || idx >= len(step.Buttons) {
-			reply = max.Answer{Notification: "Уже записал"}
-			return nil
-		}
-		btn := step.Buttons[idx]
-		if accessMissing(btn) {
-			// «Чего-то нет» (UX 2.3, D0 12:00): сначала причины, обращение F2 — после выбора.
-			m := accessReasonsMessage(recipientOf(e), step, e, ev, sentAt(ev, b.now()))
-			reply = max.Answer{Notification: "Что именно?", Message: &m}
-			return nil
-		}
-		ev.Status, ev.Answer = domain.EventAnswered, &btn.Label
-		if btn.Action == "skip" {
-			ev.Status = domain.EventSkipped
-		}
-		now := b.now()
-		e.LastActivityAt = &now
-		if err := tx.Employees.Save(ctx, e); err != nil {
-			return err
-		}
-		done := recipientOf(e).msg(stepAnsweredText(step, e, btn.Label, ev.IsTest, sentAt(ev, now)), "", nil)
-		reply = max.Answer{Notification: "Записал", Message: &done}
-		return tx.Events.Save(ctx, ev)
-	})
-	if err != nil {
-		return err
-	}
-	b.answer(ctx, u.CallbackID, reply)
-	return nil
-}
-
 // loadEvent — событие сотрудника под блокировкой, карточка под блокировкой и шаг из снимка
 // версии. ev == nil — события нет или оно чужое.
 func (b *BotService) loadEvent(ctx context.Context, tx *repositories.Repos, evID, empID uuid.UUID) (*domain.ScheduledEvent, *domain.Employee, domain.ScenarioStep, error) {
@@ -379,6 +344,9 @@ func (b *BotService) loadEvent(ctx context.Context, tx *repositories.Repos, evID
 	ev, err := tx.Events.ByIDForUpdate(ctx, evID)
 	if err != nil || ev == nil || ev.EmployeeID != empID {
 		return nil, e, step, err
+	}
+	if ev.Snapshot != nil { // «Отправить себе»: шаг черновика в самом событии
+		return ev, e, domain.ScenarioStep(*ev.Snapshot), nil
 	}
 	v, err := tx.Scenarios.Version(ctx, e.ScenarioID, ev.ScenarioVersion)
 	if err != nil || v == nil {
@@ -416,6 +384,8 @@ func parseSurveyPayload(p string) (uuid.UUID, surveyAction, bool) {
 		a.kind, rest = "remind", strings.TrimPrefix(p, preRemind)
 	case strings.HasPrefix(p, preAnswer):
 		a.kind, rest = "answer", strings.TrimPrefix(p, preAnswer)
+	case strings.HasPrefix(p, preDone):
+		a.kind, rest = "done", strings.TrimPrefix(p, preDone)
 	default:
 		return uuid.Nil, a, false
 	}
@@ -446,6 +416,20 @@ type surveyOutcome struct {
 	stale        bool // сообщение старше суток: продолжение — новым сообщением
 	eventID      uuid.UUID
 	flag         *flagInput // текст причины без regex-флагов — на LLM-разметку (bot_flags.go)
+	release      bool       // опрос закрыт: следующие реплики блока (branch_flow.go)
+	// ветки и сигналы вариантов, правила после опроса (branch_survey.go)
+	branch    *domain.Branch
+	branchSrc string
+	flagged   bool
+	freeText  bool
+	next      *max.OutMessage // экран опроса после сообщений ветки — новым сообщением
+	optFlags  []domain.OptionFlag
+	optLabel  string
+	flagQ     int
+	outcomes  []int
+	emp       *domain.Employee
+	ev        *domain.ScheduledEvent
+	step      domain.ScenarioStep
 }
 
 func (b *BotService) surveyCallback(ctx context.Context, u max.Update, empID uuid.UUID) error {
@@ -463,9 +447,10 @@ func (b *BotService) surveyCallback(ctx context.Context, u max.Update, empID uui
 		if out.msg != nil {
 			b.resend(ctx, out)
 		}
-		return nil
+	} else {
+		b.answer(ctx, u.CallbackID, max.Answer{Notification: orDefault(out.notification, "Записал"), Message: out.msg})
 	}
-	b.answer(ctx, u.CallbackID, max.Answer{Notification: orDefault(out.notification, "Записал"), Message: out.msg})
+	b.afterSurvey(ctx, empID, out)
 	return nil
 }
 
@@ -509,10 +494,11 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 		}
 		sv := step.Survey
 		q := sv.Questions[st.Q]
+		qi := st.Q
 		now := b.now()
 		e.LastActivityAt = &now
 		answer := domain.SurveyAnswer{
-			EmployeeID: e.ID, EventID: ev.ID, QuestionNo: st.Q + 1, Scale: sv.Scale,
+			EmployeeID: e.ID, EventID: ev.ID, QuestionNo: st.Q + 1, Scale: qScale(sv, q),
 			Flags: domain.StringList{}, IsTest: ev.IsTest,
 		}
 		if prev, err := tx.Events.Answer(ctx, ev.ID, st.Q+1); err != nil {
@@ -529,17 +515,62 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 				return nil
 			}
 			v := act.value
+			if qScale(sv, q) == qMulti { // переключатель: вопрос остаётся на экране до «Готово»
+				for len(st.Results) <= st.Q {
+					st.Results = append(st.Results, domain.SurveyResult{})
+				}
+				st.Results[st.Q].Multi = toggle(st.Results[st.Q].Multi, v)
+				saveAnswer = false
+				out.notification = "Отмечено"
+				break
+			}
 			setResult(st, domain.SurveyResult{Value: &v})
 			answer.Value, answer.Skipped = &v, false
-			if scaleMax(sv.Scale) > 0 {
+			if scaleMax(qScale(sv, q)) > 0 {
 				e.LastPulse = &v
 			}
-			if lowScore(sv, v) {
-				st.Screen = domain.ScreenReasons
+			if lowValue(sv, q, v) {
 				markRisk(e, domain.RiskYellow, fmt.Sprintf("оценка %s в «%s»", valueLabel(sv, q, v), step.Title))
-			} else {
+			}
+			switch scr := commentScreen(sv, q, v); scr {
+			case domain.ScreenReasons, screenComment:
+				st.Screen = scr
+			case domain.ScreenWrite:
+				st.Screen = domain.ScreenWrite
+				e.AwaitEventID, e.AwaitQuestion = &ev.ID, st.Q
+			default:
 				advance(st)
 			}
+			// ветка и сигнал варианта (06 §1.1, §1.3)
+			if br := optionBranch(q, v); br != nil {
+				out.branch, out.branchSrc = br, branchSrcOption(qi, v)
+				out.flagged, out.freeText = applySilent(e, br.Actions, ev.ID, valueLabel(sv, q, v), nil)
+			}
+			if f, ok := q.OptionFlags[strconv.Itoa(v)]; ok && f.Code != "" {
+				out.optFlags, out.flagQ = append(out.optFlags, f), qi+1
+				out.optLabel = valueLabel(sv, q, v)
+			}
+		case "done":
+			if st.Screen != domain.ScreenQuestion || qScale(sv, q) != qMulti {
+				out.notification = "Этот вопрос уже позади"
+				return nil
+			}
+			var picks []int
+			if st.Q < len(st.Results) {
+				picks = st.Results[st.Q].Multi
+			}
+			if len(picks) == 0 {
+				out.notification = "Отметьте хотя бы один вариант"
+				return nil
+			}
+			answer.Reason, answer.Skipped = strings.Join(multiLabels(q, picks), "; "), false
+			for _, v := range picks {
+				if f, ok := q.OptionFlags[strconv.Itoa(v)]; ok && f.Code != "" {
+					out.optFlags, out.flagQ = append(out.optFlags, f), qi+1
+					out.optLabel = strings.Join(multiLabels(q, []int{v}), "")
+				}
+			}
+			advance(st)
 		case "reason":
 			reasons := q.Options
 			if len(reasons) == 0 || sv.Scale == domain.ScaleChoice {
@@ -555,12 +586,18 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 			}
 			advance(st)
 		case "write":
+			if st.Screen == domain.ScreenWrite {
+				return nil
+			}
 			st.Screen = domain.ScreenWrite
 			e.AwaitEventID, e.AwaitQuestion = &ev.ID, st.Q
 			saveAnswer = false
 		case "text":
-			if st.Screen != domain.ScreenWrite && st.Screen != domain.ScreenReasons {
+			if st.Screen != domain.ScreenWrite && st.Screen != domain.ScreenReasons && st.Screen != screenComment && qType(q) != qText {
 				return nil
+			}
+			for len(st.Results) <= st.Q {
+				st.Results = append(st.Results, domain.SurveyResult{})
 			}
 			answer.Text = act.text
 			codes := flags.Codes(act.text)
@@ -577,6 +614,12 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 			}
 			advance(st)
 		case "skip":
+			mandatory := (st.Screen == domain.ScreenQuestion && q.Required) ||
+				(st.Screen == domain.ScreenWrite && (q.Comment == "below" || q.Comment == "on_no"))
+			if mandatory {
+				out.notification = "Этот вопрос обязательный"
+				return nil
+			}
 			if st.Screen == domain.ScreenQuestion {
 				setResult(st, domain.SurveyResult{Skipped: true})
 				answer.Skipped = true
@@ -599,8 +642,11 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 				out.msg = &m
 			}
 		}
-		if act.kind != "write" {
+		if act.kind != "write" && st.Screen != domain.ScreenWrite {
 			e.AwaitEventID, e.AwaitQuestion = nil, 0
+		}
+		if st.Q < len(sv.Questions) && st.Screen == domain.ScreenQuestion && qType(sv.Questions[st.Q]) == qText && ev.Status == domain.EventSent {
+			e.AwaitEventID, e.AwaitQuestion = &ev.ID, st.Q // вопрос «своими словами»: ждём текст
 		}
 		if saveAnswer {
 			if err := tx.Events.UpsertAnswer(ctx, &answer); err != nil {
@@ -610,10 +656,29 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 		if ev.Status == domain.EventSent && st.Q >= len(sv.Questions) {
 			ev.Status, ev.Answer = domain.EventAnswered, strPtr(surveySummary(sv, st))
 		}
+		if ev.Status == domain.EventAnswered || ev.Status == domain.EventSkipped {
+			out.release = ev.Waiting != ""
+			ev.Waiting = ""
+		}
+		if ev.Status == domain.EventAnswered {
+			out.outcomes = evalOutcomes(sv, st)
+		}
 		if out.msg == nil {
 			m := surveyMessage(recipientOf(e), step, e, ev, sentAt(ev, now))
 			out.msg = &m
+			if out.branch != nil && ev.Status == domain.EventSent {
+				// ветка варианта: итоги без вопроса → сообщения ветки → вопрос новым сообщением
+				out.next = out.msg
+				frozen := *ev
+				fs := *st
+				fs.Screen = screenFrozen
+				frozen.Survey = &fs
+				f := surveyMessage(recipientOf(e), step, e, &frozen, sentAt(ev, now))
+				out.msg = &f
+			}
 		}
+		ec, evc := *e, *ev
+		out.emp, out.ev, out.step = &ec, &evc, step
 		out.messageID = ev.MessageID
 		out.stale = ev.SentAt != nil && now.Sub(*ev.SentAt) > editWindow
 		if err := tx.Employees.Save(ctx, e); err != nil {
@@ -652,11 +717,19 @@ func surveySummary(sv *domain.Survey, st *domain.SurveyState) string {
 		switch {
 		case r.Skipped:
 			parts = append(parts, "—")
+		case len(r.Multi) > 0 && i < len(sv.Questions):
+			parts = append(parts, strings.Join(multiLabels(sv.Questions[i], r.Multi), ", "))
+		case r.Value == nil && r.Wrote:
+			parts = append(parts, "свой ответ")
 		case r.Value != nil:
 			s := strconv.Itoa(*r.Value)
-			switch sv.Scale {
+			sc := sv.Scale
+			if i < len(sv.Questions) {
+				sc = qScale(sv, sv.Questions[i])
+			}
+			switch sc {
 			case domain.Scale10, domain.Scale5:
-				s = fmt.Sprintf("%d/%d", *r.Value, scaleMax(sv.Scale))
+				s = fmt.Sprintf("%d/%d", *r.Value, scaleMax(sc))
 			case domain.ScaleYesNo:
 				s = map[int]string{1: "да", 0: "нет"}[*r.Value]
 			case domain.ScaleChoice:
@@ -705,6 +778,13 @@ func (b *BotService) message(ctx context.Context, u max.Update) error {
 		return err
 	}
 
+	// «Другое» / open_free_text ветки: текст → флаги → обращение (branch.go).
+	if w := emp.AwaitFreeText; w != nil && w.Input && (strings.TrimSpace(u.Text) != "" || len(u.Images) > 0) {
+		return b.inputAnswer(ctx, emp, u)
+	}
+	if emp.AwaitFreeText != nil && strings.TrimSpace(u.Text) != "" {
+		return b.freeText(ctx, emp, u.Text)
+	}
 	if emp.AwaitEventID != nil && strings.TrimSpace(u.Text) != "" {
 		out, err := b.applySurvey(ctx, emp.ID, *emp.AwaitEventID, surveyAction{kind: "text", q: emp.AwaitQuestion, text: u.Text})
 		if err != nil {
@@ -714,6 +794,7 @@ func (b *BotService) message(ctx context.Context, u max.Update) error {
 		if out.flag != nil {
 			b.classifyAsync(ctx, emp, *out.flag)
 		}
+		b.afterSurvey(ctx, emp.ID, out)
 		return nil
 	}
 	// Обращение в human_active или «Добавить детали»: текст — человеку, не в RAG (UX 2.7).
@@ -732,6 +813,7 @@ func (b *BotService) message(ctx context.Context, u max.Update) error {
 			}
 			if out.msg != nil {
 				b.deliverEdit(ctx, out)
+				b.afterSurvey(ctx, emp.ID, out)
 				return nil
 			}
 		}

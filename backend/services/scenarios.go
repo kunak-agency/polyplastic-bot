@@ -16,6 +16,8 @@ type ScenarioService struct {
 	repos     *repositories.Repos
 	scheduler *SchedulerService
 	now       func() time.Time
+	// onPublish — после публикации: список команд бота в MAX (branch_commands.go).
+	onPublish func(ctx context.Context)
 }
 
 // ScenarioSummary — строка списка сценариев.
@@ -200,7 +202,7 @@ func (s *ScenarioService) Publish(ctx context.Context, id uuid.UUID, comment, ap
 		}
 		v := domain.ScenarioVersion{
 			ScenarioID: id, Number: sc.Version + 1, Comment: comment, Apply: apply,
-			Steps: steps, PublishedAt: s.now(),
+			Steps: steps, PublishedAt: s.now(), Commands: sc.Commands, Rules: sc.Rules,
 		}
 		if err := tx.Scenarios.CreateVersion(ctx, &v); err != nil {
 			return err
@@ -216,6 +218,9 @@ func (s *ScenarioService) Publish(ctx context.Context, id uuid.UUID, comment, ap
 	})
 	if err != nil {
 		return nil, err
+	}
+	if s.onPublish != nil {
+		s.onPublish(ctx)
 	}
 	return s.Get(ctx, id)
 }

@@ -36,7 +36,21 @@ type Config struct {
 	RAG       RAG
 	LLM       LLM
 	Docs      Docs
+	Digest    Digest
 }
+
+// Digest — еженедельный дайджест руководителю подбора и ссылки из MAX в кабинет
+// (services/digest.go, services/manager.go).
+type Digest struct {
+	// UserIDs — получатели дайджеста в MAX (MAX_DIGEST_USER_IDS, user_id через запятую). Пусто —
+	// дайджест только в лог.
+	UserIDs []int64
+	// CabinetURL — адрес кабинета для кнопок-ссылок «Открыть аналитику», «Подробнее» (CABINET_URL).
+	CabinetURL string
+}
+
+// DefaultCabinetURL — кабинет в разработке (dev-сервер Vite).
+const DefaultCabinetURL = "http://localhost:5173"
 
 // Bot — то, что видит новичок: ссылка-приглашение и сроки её жизни.
 type Bot struct {
@@ -115,6 +129,8 @@ type Docs struct {
 	// вне development загрузка и проверка базы знаний открыты только с этим заголовком.
 	// Пусто — вне development раздел закрыт (403).
 	OperatorToken string
+	// MediaMaxMB — потолок файла медиатеки (MEDIA_MAX_MB, 20; не больше 25 — тело запроса API 26 МБ).
+	MediaMaxMB int
 }
 
 // LLM — модель на поде RunPod (vLLM, OpenAI-совместимый API), как в hack-ru-clinik. В каркасе
@@ -161,6 +177,7 @@ func Load() (Config, error) {
 			MaxUploadMB:   int(integer("KB_MAX_UPLOAD_MB")),
 			UploadTimeout: duration("KB_UPLOAD_TIMEOUT", 3*time.Minute),
 			OperatorToken: strings.TrimSpace(os.Getenv("KB_OPERATOR_TOKEN")),
+			MediaMaxMB:    int(integer("MEDIA_MAX_MB")),
 		},
 		LLM: LLM{
 			BaseURL:         os.Getenv("LLM_BASE_URL"),
@@ -170,9 +187,13 @@ func Load() (Config, error) {
 			PresencePenalty: float("LLM_PRESENCE_PENALTY", 1.0),
 		},
 	}
+	c.Digest = Digest{UserIDs: ids(os.Getenv("MAX_DIGEST_USER_IDS")), CabinetURL: strings.TrimRight(env("CABINET_URL", DefaultCabinetURL), "/")}
 	c.Bot.Fake = c.AppEnv == EnvDevelopment && !c.Max.Enabled()
 	if c.Docs.MaxUploadMB <= 0 || c.Docs.MaxUploadMB > 25 {
 		c.Docs.MaxUploadMB = 20 // больше лимита rag (25) не имеет смысла: он всё равно откажет
+	}
+	if c.Docs.MediaMaxMB <= 0 || c.Docs.MediaMaxMB > 25 {
+		c.Docs.MediaMaxMB = 20
 	}
 	return c, c.Validate()
 }
@@ -219,6 +240,7 @@ func (c Config) Summary() []string {
 		fmt.Sprintf("база знаний: файл до %d МБ, срок загрузки %v, токен оператора %s", c.Docs.MaxUploadMB, c.Docs.UploadTimeout, set(c.Docs.OperatorToken)),
 		fmt.Sprintf("LLM: модель %s, адрес %s, ключ %s, temperature %.2f, presence_penalty %.2f",
 			c.LLM.Model, orNone(c.LLM.BaseURL), set(c.LLM.APIKey), c.LLM.Temperature, c.LLM.PresencePenalty),
+		fmt.Sprintf("дайджест: получателей в MAX %d, кабинет %s", len(c.Digest.UserIDs), c.Digest.CabinetURL),
 	}
 }
 
@@ -243,6 +265,17 @@ func list(raw string) []string {
 		}
 	}
 	return items
+}
+
+// ids — user_id MAX через запятую; мусор пропускается (сколько взято — в Summary).
+func ids(raw string) []int64 {
+	var out []int64
+	for _, p := range strings.Split(raw, ",") {
+		if n, err := strconv.ParseInt(strings.TrimSpace(p), 10, 64); err == nil && n != 0 {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func env(key, def string) string {

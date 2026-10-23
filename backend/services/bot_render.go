@@ -370,9 +370,9 @@ func lowScore(sv *domain.Survey, v int) bool {
 
 // valueLabel — как ответ выглядит в строке итога.
 func valueLabel(sv *domain.Survey, q domain.SurveyQuestion, v int) string {
-	switch sv.Scale {
+	switch sc := qScale(sv, q); sc {
 	case domain.Scale10, domain.Scale5:
-		return fmt.Sprintf("%d/%d", v, scaleMax(sv.Scale))
+		return fmt.Sprintf("%d/%d", v, scaleMax(sc))
 	case domain.ScaleYesNo:
 		if v == 1 {
 			return "да"
@@ -427,9 +427,16 @@ func surveyMessage(to recipient, s domain.ScenarioStep, e *domain.Employee, ev *
 			} else if r.Wrote {
 				b.WriteString(" (причина записана)")
 			}
+		case len(r.Multi) > 0 && i < st.Q:
+			fmt.Fprintf(&b, "✅ %d. %s: %s", i+1, shortQuestion(q.Text), escapeMarkdown(strings.Join(multiLabels(q, r.Multi), ", ")))
+			if r.Wrote {
+				b.WriteString(" + свой вариант")
+			}
+		case r.Wrote:
+			fmt.Fprintf(&b, "✅ %d. %s: ответ записан", i+1, shortQuestion(q.Text))
 		}
 	}
-	if done {
+	if done || st.Screen == screenFrozen {
 		return to.msg(b.String(), formatMarkdown, nil)
 	}
 
@@ -456,12 +463,43 @@ func surveyMessage(to recipient, s domain.ScenarioStep, e *domain.Employee, ev *
 		}
 		rows = append(rows, []max.Button{{Text: btnWriteOwn, Payload: preWrite + id + ":" + qn}, {Text: btnSkip, Payload: preSkip + id + ":" + qn}})
 	case domain.ScreenWrite:
-		b.WriteString("\n\n" + textWriteOwn)
-		rows = append(rows, []max.Button{{Text: btnSkip, Payload: preSkip + id + ":" + qn}})
+		ask := textWriteOwn
+		switch {
+		case qType(q) == qChoice || qType(q) == qMulti:
+			ask = textOwnAnswer
+		case qType(q) != qLegacy:
+			ask = textComment
+		}
+		b.WriteString("\n\n" + ask)
+		if q.Comment != "below" && q.Comment != "on_no" { // причина при низкой оценке / «нет» — обязательна
+			rows = append(rows, []max.Button{{Text: btnSkip, Payload: preSkip + id + ":" + qn}})
+		}
+	case screenComment:
+		b.WriteString("\n\n" + textCommentOffer)
+		rows = append(rows, []max.Button{{Text: btnAddComment, Payload: preWrite + id + ":" + qn}, {Text: continueLabel, Payload: preSkip + id + ":" + qn}})
 	default:
 		fmt.Fprintf(&b, "\n\n**Вопрос %d из %d**\n%s", st.Q+1, len(sv.Questions), escapeMarkdown(q.Text))
-		rows = append(rows, scaleRows(sv, q, id, qn)...)
-		rows = append(rows, []max.Button{{Text: btnSkip, Payload: preSkip + id + ":" + qn}, {Text: btnRemind, Payload: preRemind + id}})
+		switch qScale(sv, q) {
+		case qMulti:
+			var picks []int
+			if st.Q < len(st.Results) {
+				picks = st.Results[st.Q].Multi
+			}
+			b.WriteString("\nМожно выбрать несколько, затем «" + btnDone + "».")
+			rows = append(rows, multiRows(q, picks, id, qn)...)
+		case qText:
+			b.WriteString("\n" + textTextAsk)
+		default:
+			rows = append(rows, scaleRows(sv, q, id, qn)...)
+		}
+		if q.Other && (qType(q) == qChoice || qType(q) == qMulti) {
+			rows = append(rows, []max.Button{{Text: btnOther, Payload: preWrite + id + ":" + qn}})
+		}
+		if q.Required {
+			rows = append(rows, []max.Button{{Text: btnRemind, Payload: preRemind + id}})
+		} else {
+			rows = append(rows, []max.Button{{Text: btnSkip, Payload: preSkip + id + ":" + qn}, {Text: btnRemind, Payload: preRemind + id}})
+		}
 	}
 	rows = append(rows, humanRow(&ev.ID))
 	return to.msg(b.String(), formatMarkdown, rows)
@@ -474,7 +512,7 @@ func scaleRows(sv *domain.Survey, q domain.SurveyQuestion, id, qn string) [][]ma
 		return max.Button{Text: label, Payload: preAnswer + id + ":" + qn + ":" + strconv.Itoa(v)}
 	}
 	var rows [][]max.Button
-	switch sv.Scale {
+	switch qScale(sv, q) {
 	case domain.Scale10:
 		for start := 1; start <= 10; start += 5 {
 			var row []max.Button
@@ -508,7 +546,9 @@ func scaleRows(sv *domain.Survey, q domain.SurveyQuestion, id, qn string) [][]ma
 
 // validValue — значение допустимо для шкалы вопроса.
 func validValue(sv *domain.Survey, q domain.SurveyQuestion, v int) bool {
-	switch sv.Scale {
+	switch qScale(sv, q) {
+	case qMulti:
+		return v >= 1 && v <= len(q.Options)
 	case domain.Scale10:
 		return v >= 1 && v <= 10
 	case domain.Scale5:

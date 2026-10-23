@@ -120,7 +120,7 @@ func excelUpload(c *fiber.Ctx) (*multipart.FileHeader, multipart.File, error) {
 }
 
 // ImportScenario — POST /api/scenarios/import (multipart: file, необязательно name) →
-// 201 + сценарий-черновик.
+// 201 + сценарий-черновик с import_report.
 func (h *Handler) ImportScenario(c *fiber.Ctx) error {
 	fh, f, err := excelUpload(c)
 	if err != nil {
@@ -135,7 +135,7 @@ func (h *Handler) ImportScenario(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	return c.Status(http.StatusCreated).JSON(out.ScenarioDetailFrom(*d))
+	return c.Status(http.StatusCreated).JSON(out.ScenarioImportFrom(*d))
 }
 
 // ImportSteps — POST /api/scenarios/{id}/import (multipart: file) → шаги из Excel заменяют
@@ -154,7 +154,7 @@ func (h *Handler) ImportSteps(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(out.ScenarioDetailFrom(*d))
+	return c.JSON(out.ScenarioImportFrom(*d))
 }
 
 // CreateScenario — POST /api/scenarios {"name","sites","from_scenario_id"} → 201 + черновик.

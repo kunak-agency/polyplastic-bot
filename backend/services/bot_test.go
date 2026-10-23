@@ -207,9 +207,16 @@ func TestBotStartByInvite(t *testing.T) {
 	if emp.Consent == nil || *emp.Consent != domain.ConsentGiven || *emp.AddressForm != domain.AddressTy {
 		t.Fatalf("согласие: %+v", emp)
 	}
+	// Блок D−3 — диалог: вопрос держит поток (api_contract v4, «Исполнение блока»).
 	sent = e.fake.Sent()
-	if len(sent) != 2 || sent[0].Text != "Возьми паспорт, Пётр" || sent[1].Text != "Три факта" {
+	if len(sent) != 1 || sent[0].Text != "Возьми паспорт, Пётр" {
 		t.Fatalf("пакет D−3 на «ты»: %+v", sent)
+	}
+	docs := eventByTitle(t, e.events(t, c.Employee.ID), "Документы")
+	e.press(preStepButton + docs.ID.String() + ":0")
+	sent = e.fake.Sent()
+	if len(sent) != 2 || sent[1].Text != "Три факта" {
+		t.Fatalf("после ответа — следующая реплика: %+v", sent)
 	}
 	// Повторный такт ничего не дублирует.
 	if n, _ := e.svc.Scheduler.Tick(ctx); n != 0 {
@@ -335,6 +342,9 @@ func TestSurveyRemindTomorrow(t *testing.T) {
 	e := newEnv(t, msk(2026, 11, 3, 18, 30)) // D0 вечер, вторник
 	c := e.launch(t, date(2026, 11, 3))
 	e.connect(t, c, domain.AddressVy, true)
+	// Подключился вечером: шаг 10:00 (вопрос) держит поток, пульс 18:00 — после ответа.
+	first := eventByTitle(t, e.events(t, c.Employee.ID), "С первым днём")
+	e.press(preStepButton + first.ID.String() + ":0")
 	pulse := eventByTitle(t, e.events(t, c.Employee.ID), "Итог дня")
 	if pulse.Status != domain.EventSent {
 		t.Fatalf("пульс D0 18:00: %s", pulse.Status)

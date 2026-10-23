@@ -24,8 +24,12 @@ type Services struct {
 	Scenarios *ScenarioService  // конструктор сценариев (scenarios.go)
 	Tickets   *TicketService    // обращения (tickets.go)
 	Documents *DocumentService  // база знаний (documents.go)
+	Media     *MediaService     // медиатека и вложения для бота (media.go, media_max.go)
 	// Bot — обработка событий MAX (bot.go); nil, если бот выключен (нет токена и не подделка).
 	Bot *BotService
+	// digestOpts — получатели дайджеста, ссылка на кабинет, LLM (digest.go, manager.go).
+	digestOpts DigestOptions
+	botCfg     config.Bot
 }
 
 // Options — настройки слоя.
@@ -42,6 +46,10 @@ type Options struct {
 	SBChatID int64
 	// Docs — база знаний: потолок файла, срок загрузки в rag, токен оператора.
 	Docs DocsOptions
+	// Media — медиатека: потолок файла (MEDIA_MAX_MB), срок токена вложения MAX.
+	Media MediaOptions
+	// Digest — дайджест и руководитель: получатели в MAX, адрес кабинета, LLM.
+	Digest DigestOptions
 }
 
 // NewServices — репозитории могут быть выключены (nil): каркас поднимается без базы.
@@ -50,6 +58,7 @@ func NewServices(r *repositories.Repos, ext *externalApi.ExternalAPI, o Options)
 	if now == nil {
 		now = time.Now
 	}
+	managerCabinetURL = cabinetBase(o.Digest.CabinetURL) // кнопки бота руководителю (manager_bot.go)
 	sch := NewSchedulerService(r, ext.Max, now, o.PackGap)
 	tax := o.Taxonomy
 	if tax == nil {
@@ -68,12 +77,20 @@ func NewServices(r *repositories.Repos, ext *externalApi.ExternalAPI, o Options)
 		Newcomers: &NewcomerService{repos: r, scheduler: sch, bot: o.Bot, now: now, botReady: ext.Max != nil},
 		Scenarios: &ScenarioService{repos: r, scheduler: sch, now: now},
 		Tickets:   tickets,
+		// дайджест и руководитель (digest.go, manager.go)
+		digestOpts: o.Digest,
+		botCfg:     o.Bot,
 	}
 	var docsRAG DocsRAG
 	if ext.RAG != nil { // nil-указатель в интерфейсе выглядел бы подключённым клиентом
 		docsRAG = ext.RAG
 	}
 	s.Documents = newDocumentService(r, docsRAG, o.Docs, now)
+	var mediaUp MediaUploader
+	if ext.Max != nil { // nil-интерфейс в интерфейсе выглядел бы подключённым клиентом
+		mediaUp = ext.Max
+	}
+	s.Media = newMediaService(r, mediaUp, o.Media, now)
 	if ext.Max != nil {
 		s.Bot = NewBotService(ext.Max, r, sch, now)
 		s.Bot.tickets = tickets
@@ -81,5 +98,6 @@ func NewServices(r *repositories.Repos, ext *externalApi.ExternalAPI, o Options)
 			s.Bot.rag = ext.RAG
 		}
 	}
+	s.SetMedia(s.Media) // вложения шагов и веток (branch_media.go)
 	return s
 }

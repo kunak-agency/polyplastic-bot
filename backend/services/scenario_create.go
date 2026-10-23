@@ -132,14 +132,31 @@ func (s *ScenarioService) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 // ImportExcelInto — шаги из Excel заменяют черновик существующего сценария (пустой редактор:
-// «Загрузить Excel»). Площадки сценария не меняются.
-func (s *ScenarioService) ImportExcelInto(ctx context.Context, id uuid.UUID, r io.Reader) (*ScenarioDetail, error) {
+// «Загрузить Excel»), правила и команды файла — правила и команды сценария. Площадки сценария
+// не меняются.
+func (s *ScenarioService) ImportExcelInto(ctx context.Context, id uuid.UUID, r io.Reader) (*ImportResult, error) {
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	steps, _, err := ParseScenarioExcel(r)
+	imp, err := parseScenarioFile(r)
 	if err != nil {
 		return nil, err
 	}
-	return s.PutSteps(ctx, id, steps)
+	d, err := s.PutSteps(ctx, id, imp.steps)
+	if err != nil {
+		return nil, err
+	}
+	err = s.repos.Transaction(ctx, func(tx *repositories.Repos) error {
+		sc, err := tx.Scenarios.ByID(ctx, id)
+		if err != nil || sc == nil {
+			return err
+		}
+		sc.Rules, sc.Commands = imp.rules, imp.commands
+		return tx.Scenarios.Save(ctx, sc)
+	})
+	if err != nil {
+		return nil, err
+	}
+	d.Scenario.Rules, d.Scenario.Commands = imp.rules, imp.commands
+	return &ImportResult{Detail: d, Report: imp.report}, nil
 }

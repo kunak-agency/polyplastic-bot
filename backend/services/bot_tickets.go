@@ -225,6 +225,7 @@ func (b *BotService) accessReason(ctx context.Context, u max.Update, empID uuid.
 		label := "Чего-то нет: " + reason
 		now := b.now()
 		ev.Status, ev.Answer = domain.EventAnswered, &label
+		ev.Waiting = ""
 		e.LastActivityAt = &now
 		if err := tx.Employees.Save(ctx, e); err != nil {
 			return err
@@ -250,6 +251,7 @@ func (b *BotService) accessReason(ctx context.Context, u max.Update, empID uuid.
 	b.answer(ctx, u.CallbackID, reply)
 	if emp != nil {
 		b.afterHandoff(ctx, emp, &res)
+		b.applyThen(ctx, emp.ID, evID, nil) // ответ получен — поток блока дальше
 	}
 	return nil
 }
@@ -363,6 +365,9 @@ func (b *BotService) command(ctx context.Context, u max.Update, emp *domain.Empl
 	to := recipientOf(emp)
 	if to.ChatID == 0 && to.UserID == 0 {
 		to = recipient{ChatID: u.ChatID, UserID: u.UserID}
+	}
+	if ok, err := b.scenarioCommand(ctx, emp, cmd); ok || err != nil { // команды сценария (branch_input.go)
+		return true, err
 	}
 	switch cmd {
 	case "/human", "/hr":

@@ -22,6 +22,9 @@ type Scenario struct {
 type ScenarioDetail struct {
 	Scenario
 	Steps []Step `json:"steps"`
+	// v4: команды бота (/food, /hr) и глобальные правила (ТЗ r69, r70) черновика.
+	Commands domain.CommandList `json:"commands"`
+	Rules    domain.RuleList    `json:"rules"`
 }
 
 // Step — шаг сценария по контракту v1.
@@ -39,11 +42,23 @@ type Step struct {
 	Survey        *domain.Survey `json:"survey"`
 	Condition     *string        `json:"condition"`
 	WorkHoursOnly bool           `json:"work_hours_only"`
+	// v4
+	Key          string               `json:"key"`
+	Required     bool                 `json:"required"`
+	Media        domain.MediaRefList  `json:"media"`
+	Gallery      bool                 `json:"gallery"`
+	AltText      *string              `json:"alt_text"`
+	HRTask       bool                 `json:"hr_task"`
+	FlagRequired *string              `json:"flag_required"`
+	NoAnswer     *domain.NoAnswerRule `json:"no_answer"`
+	Advance      *string              `json:"advance"`
 }
 
 type Button struct {
-	Label  string `json:"label"`
-	Action string `json:"action"`
+	Label         string         `json:"label"`
+	Action        string         `json:"action"`
+	Branch        *domain.Branch `json:"branch"`
+	OpensFreeText bool           `json:"opens_free_text"`
 }
 
 func ScenarioFrom(s services.ScenarioSummary) Scenario {
@@ -75,7 +90,11 @@ func ScenarioDetailFrom(d services.ScenarioDetail) ScenarioDetail {
 		}
 		buttons := make([]Button, len(s.Buttons))
 		for j, b := range s.Buttons {
-			buttons[j] = Button{Label: b.Label, Action: b.Action}
+			buttons[j] = Button{Label: b.Label, Action: b.Action, Branch: b.Branch, OpensFreeText: b.OpensFreeText}
+		}
+		media := s.Media
+		if media == nil {
+			media = domain.MediaRefList{}
 		}
 		hhmm := s.Time
 		if hhmm == "" {
@@ -85,9 +104,18 @@ func ScenarioDetailFrom(d services.ScenarioDetail) ScenarioDetail {
 			ID: s.ID.String(), DayOffset: s.DayOffset, Time: hhmm, Stage: s.Stage, Sites: sites,
 			Kind: s.Kind, Title: s.Title, TextTy: s.TextTy, TextVy: s.TextVy, Buttons: buttons,
 			Survey: surveyOut(s.Survey), Condition: s.Condition, WorkHoursOnly: s.WorkHoursOnly,
+			Key: s.Key, Required: s.Required, Media: media, Gallery: s.Gallery, AltText: s.AltText,
+			HRTask: s.HRTask, FlagRequired: s.FlagRequired, NoAnswer: s.NoAnswer, Advance: s.Advance,
 		}
 	}
-	return ScenarioDetail{Scenario: ScenarioFrom(d.ScenarioSummary), Steps: steps}
+	cmds, rules := d.Scenario.Commands, d.Scenario.Rules
+	if cmds == nil {
+		cmds = domain.CommandList{}
+	}
+	if rules == nil {
+		rules = domain.RuleList{}
+	}
+	return ScenarioDetail{Scenario: ScenarioFrom(d.ScenarioSummary), Steps: steps, Commands: cmds, Rules: rules}
 }
 
 // surveyOut — копия опроса, где у каждого вопроса options — массив, а не null.

@@ -35,12 +35,24 @@ type StepIn struct {
 	TextTy    string   `json:"text_ty"`
 	TextVy    string   `json:"text_vy"`
 	Buttons   []struct {
-		Label  string `json:"label"`
-		Action string `json:"action"`
+		Label         string         `json:"label"`
+		Action        string         `json:"action"`
+		Branch        *domain.Branch `json:"branch"`
+		OpensFreeText bool           `json:"opens_free_text"`
 	} `json:"buttons"`
 	Survey        *domain.Survey `json:"survey"`
 	Condition     *string        `json:"condition"`
 	WorkHoursOnly *bool          `json:"work_hours_only"` // нет поля — true
+	// v4 (api_contract.md): проходят как есть.
+	Key          string               `json:"key"`
+	Required     bool                 `json:"required"`
+	Media        domain.MediaRefList  `json:"media"`
+	Gallery      bool                 `json:"gallery"`
+	AltText      *string              `json:"alt_text"`
+	HRTask       bool                 `json:"hr_task"`
+	FlagRequired *string              `json:"flag_required"`
+	NoAnswer     *domain.NoAnswerRule `json:"no_answer"`
+	Advance      *string              `json:"advance"`
 }
 
 // ParseSteps — тело PUT: {"steps":[…]} по контракту («Уточнения v1»); голый массив тоже
@@ -84,6 +96,14 @@ func ValidateSteps(list []StepIn) ([]domain.ScenarioStep, error) {
 			Buttons:   domain.ButtonList{},
 			Survey:    s.Survey,
 			Condition: s.Condition,
+			Key:       strings.TrimSpace(s.Key), Required: s.Required, Media: s.Media, Gallery: s.Gallery,
+			AltText: s.AltText, HRTask: s.HRTask, FlagRequired: s.FlagRequired, NoAnswer: s.NoAnswer, Advance: s.Advance,
+		}
+		if st.Media == nil {
+			st.Media = domain.MediaRefList{}
+		}
+		if s.Advance != nil && *s.Advance != domain.AdvanceButton && *s.Advance != domain.AdvanceAuto {
+			f.add(p+"advance", errs.CodeOutOfRange, "advance: button | auto | null")
 		}
 		if s.ID != "" {
 			if id, err := uuid.Parse(s.ID); err == nil {
@@ -133,7 +153,10 @@ func ValidateSteps(list []StepIn) ([]domain.ScenarioStep, error) {
 			if label == "" || utf8.RuneCountInString(label) > maxButtonLabel {
 				f.add(fmt.Sprintf("%sbuttons[%d].label", p, j), errs.CodeInvalidFormat, fmt.Sprintf("Подпись от 1 до %d символов", maxButtonLabel))
 			}
-			st.Buttons = append(st.Buttons, domain.StepButton{Label: label, Action: strings.TrimSpace(b.Action)})
+			if b.Branch != nil && len(b.Branch.Messages) > 2 {
+				f.add(fmt.Sprintf("%sbuttons[%d].branch.messages", p, j), errs.CodeOutOfRange, "В ветке не больше двух сообщений")
+			}
+			st.Buttons = append(st.Buttons, domain.StepButton{Label: label, Action: strings.TrimSpace(b.Action), Branch: b.Branch, OpensFreeText: b.OpensFreeText})
 		}
 		validateSurvey(&f, p, st.Kind, st.Survey)
 		st.WorkHoursOnly = s.WorkHoursOnly == nil || *s.WorkHoursOnly
