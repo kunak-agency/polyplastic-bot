@@ -18,13 +18,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// fakeRAG — httptest-подделка rag-сервиса: отдаёт заданный ответ и запоминает запросы.
+// fakeRAG — httptest-подделка rag-сервиса: отдаёт заданный ответ и запоминает запросы. POST
+// /flags — отдельно (flagsReply, flagReqs): по умолчанию разметка пустая.
 type fakeRAGServer struct {
-	srv   *httptest.Server
-	mu    sync.Mutex
-	reqs  []map[string]any
-	reply string
-	delay time.Duration
+	srv        *httptest.Server
+	mu         sync.Mutex
+	reqs       []map[string]any
+	reply      string
+	delay      time.Duration
+	flagsReply string
+	flagReqs   []map[string]any
 }
 
 func newFakeRAG(t *testing.T) *fakeRAGServer {
@@ -33,6 +36,17 @@ func newFakeRAG(t *testing.T) *fakeRAGServer {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.mu.Lock()
+		if r.URL.Path == "/flags" {
+			f.flagReqs = append(f.flagReqs, body)
+			reply := f.flagsReply
+			f.mu.Unlock()
+			if reply == "" {
+				reply = `{"flags":[],"sentiment":"neu","quote":"","degraded":false}`
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(reply))
+			return
+		}
 		f.reqs = append(f.reqs, body)
 		reply, delay := f.reply, f.delay
 		f.mu.Unlock()
@@ -334,6 +348,7 @@ func TestAskFlagNotSentToRAG(t *testing.T) {
 
 // Таймаут rag — честное «не могу проверить по документам» и «Передать HR».
 func TestAskRAGTimeout(t *testing.T) {
+	defer setLateWindow(300 * time.Millisecond)()
 	e, f, _ := askEnv(t, 100*time.Millisecond)
 	f.set(ragAnswer)
 	f.delay = time.Second
@@ -341,6 +356,10 @@ func TestAskRAGTimeout(t *testing.T) {
 	e.ask("когда зарплата")
 	if d := time.Since(start); d > 900*time.Millisecond {
 		t.Fatalf("ждали %v", d)
+	}
+	sent := e.fake.Sent()
+	if len(sent) < 2 || sent[len(sent)-2].Text != textAskLateVy {
+		t.Fatalf("до отказа — «ищу дольше обычного»: %+v", sent)
 	}
 	m := lastSent(t, e.fake)
 	if m.Text != textRAGDown || !sameRows(labels(m), []string{btnToHR, btnNoNeed}) {
@@ -411,5 +430,31 @@ func TestSplitLead(t *testing.T) {
 		if l, r := splitLead(c[0]); l != c[1] || r != c[2] {
 			t.Errorf("%q → %q / %q", c[0], l, r)
 		}
+	}
+}
+
+// setLateWindow — подменить lateAskWindow на время теста.
+func setLateWindow(d time.Duration) func() {
+	old := lateAskWindow
+	lateAskWindow = d
+	return func() { lateAskWindow = old }
+}
+
+// rag ответил позже RAG_ASK_TIMEOUT, но в окне досылки: «ищу дольше обычного», затем ответ.
+func TestAskLateAnswerDelivered(t *testing.T) {
+	defer setLateWindow(2 * time.Second)()
+	e, f, _ := askEnv(t, 100*time.Millisecond)
+	f.set(ragAnswer)
+	f.delay = 400 * time.Millisecond
+	e.ask("когда отпуск")
+	sent := e.fake.Sent()
+	if len(sent) != 2 || sent[0].Text != textAskLateVy {
+		t.Fatalf("%+v", sent)
+	}
+	if !strings.Contains(sent[1].Text, "Отпуск можно взять") {
+		t.Fatalf("поздний ответ не дослан: %q", sent[1].Text)
+	}
+	if q := e.question(t, questionID(t, sent[1])); q.Kind != domain.QuestionAnswer {
+		t.Fatalf("%+v", q)
 	}
 }

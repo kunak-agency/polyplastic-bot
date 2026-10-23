@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // AskRequest — тело POST /ask (api_contract.md). Site и AddressForm — nil, если неизвестны:
@@ -63,6 +64,17 @@ const maxAskBody = 1 << 20
 // Ask — POST /ask со сроком askTimeout. Любая ошибка (нет адреса, сеть, срок, не 2xx, мусор в
 // теле, ответ без источника) — повод для честного «не могу проверить по документам».
 func (c *Client) Ask(ctx context.Context, req AskRequest) (*AskResponse, error) {
+	if c == nil {
+		return nil, fmt.Errorf("rag: адрес не задан (RAG_BASE_URL)")
+	}
+	return c.AskWithin(ctx, req, c.askTimeout)
+}
+
+// AskTimeout — срок POST /ask (RAG_ASK_TIMEOUT).
+func (c *Client) AskTimeout() time.Duration { return c.askTimeout }
+
+// AskWithin — POST /ask со сроком d: бот ждёт дольше RAG_ASK_TIMEOUT, чтобы дослать поздний ответ.
+func (c *Client) AskWithin(ctx context.Context, req AskRequest, d time.Duration) (*AskResponse, error) {
 	if c == nil || c.baseURL == "" {
 		return nil, fmt.Errorf("rag: адрес не задан (RAG_BASE_URL)")
 	}
@@ -73,7 +85,10 @@ func (c *Client) Ask(ctx context.Context, req AskRequest) (*AskResponse, error) 
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, c.askTimeout)
+	if d <= 0 {
+		d = c.askTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
 	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/ask", bytes.NewReader(body))
 	if err != nil {

@@ -30,12 +30,7 @@ import { useNow } from '@/composables/useNow'
 import { useTicketFormat } from '@/composables/useTicketFormat'
 import { errorMessage } from '@/lib/apiError'
 import { formatDayOffset } from '@/lib/calendar'
-import {
-  canNotifyManager,
-  isRestricted,
-  signatureRole,
-  ticketsOfNewcomer,
-} from '@/lib/tickets'
+import { canNotifyManager, isRestricted, signatureRole, ticketsOfNewcomer } from '@/lib/tickets'
 import { useOperatorStore } from '@/stores/operator'
 import { useTicketsStore } from '@/stores/tickets'
 import type {
@@ -272,7 +267,9 @@ async function toggleNotify(e: Event): Promise<void> {
     const updated = await apiPatchTicket(tk.id, { notify_manager: el.checked })
     if (ticket.value?.id === updated.id) ticket.value = updated
     toast.success(
-      t(updated.notify_manager ? 'tickets.detail.toast.notifyOn' : 'tickets.detail.toast.notifyOff'),
+      t(
+        updated.notify_manager ? 'tickets.detail.toast.notifyOn' : 'tickets.detail.toast.notifyOff',
+      ),
     )
   } catch (err) {
     el.checked = tk.notify_manager
@@ -428,7 +425,9 @@ function when(iso: string): string {
                 class="textarea composer__input"
                 :placeholder="
                   mode === 'reply'
-                    ? t('tickets.detail.composer.replyPlaceholder', { operator: me })
+                    ? t(`tickets.detail.composer.replyPlaceholderRole.${signatureRole(ticket)}`, {
+                        operator: ticket.assignee_name || me,
+                      })
                     : t('tickets.detail.composer.notePlaceholder')
                 "
                 :aria-label="

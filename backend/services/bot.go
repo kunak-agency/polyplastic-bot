@@ -10,6 +10,7 @@ import (
 
 	"main/domain"
 	"main/externalApi/max"
+	"main/externalApi/rag"
 	"main/pkg/flags"
 	"main/pkg/logger"
 	"main/repositories"
@@ -298,9 +299,9 @@ func (b *BotService) consent(ctx context.Context, u max.Update, id uuid.UUID, gi
 	if err != nil || emp == nil {
 		return err
 	}
-	text := textConsentDeclined
+	text := byForm(emp, textConsentDeclinedTy, textConsentDeclined)
 	if given {
-		text = textConsentGiven
+		text = byForm(emp, textConsentGivenTy, textConsentGiven)
 	}
 	done := recipientOf(emp).msg(text, "", nil)
 	b.answer(ctx, u.CallbackID, max.Answer{Notification: "Записал", Message: &done})
@@ -439,6 +440,7 @@ type surveyOutcome struct {
 	messageID    string
 	stale        bool // сообщение старше суток: продолжение — новым сообщением
 	eventID      uuid.UUID
+	flag         *flagInput // текст причины без regex-флагов — на LLM-разметку (bot_flags.go)
 }
 
 func (b *BotService) surveyCallback(ctx context.Context, u max.Update, empID uuid.UUID) error {
@@ -560,6 +562,10 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 			if codes != nil {
 				answer.Flags = codes
 				markRisk(e, domain.RiskRed, "сигнал "+strings.Join(codes, ", ")+" в ответе на опрос")
+			} else {
+				evID := ev.ID
+				out.flag = &flagInput{text: act.text, context: rag.FlagsContextPulse(ev.DayOffset), surveyQuestion: q.Text,
+					eventID: &evID, questionNo: st.Q + 1, where: "в ответе на опрос «" + step.Title + "»"}
 			}
 			if len(st.Results) > st.Q {
 				st.Results[st.Q].Wrote = true
@@ -700,6 +706,9 @@ func (b *BotService) message(ctx context.Context, u max.Update) error {
 			return err
 		}
 		b.deliverEdit(ctx, out)
+		if out.flag != nil {
+			b.classifyAsync(ctx, emp, *out.flag)
+		}
 		return nil
 	}
 	// Обращение в human_active или «Добавить детали»: текст — человеку, не в RAG (UX 2.7).

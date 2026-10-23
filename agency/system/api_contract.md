@@ -47,6 +47,13 @@ UX-спецификации (п. 2.5). Проверку цитат (`clause_id` 
 ```
 `survey_question` необязателен.
 → `{"flags":[{"code":"F4","severity":2,"confidence":0.8}],"sentiment":"neg|neu|pos","quote":"..."}`
+С 24.10 `/flags` работает на LLM (промпт `agency/prompts/flags-classify.md` v1, копия в
+`services/rag/prompts/`). В ответе добавлено поле `"degraded": true|false`. `degraded=true` значит, что
+LLM не задан, не ответил или дважды ответил не по схеме: `flags` тогда пустой, потому что текст
+не размечен, а не потому что флагов нет. Код `F0`–`F10` берётся из таксономии, `severity` 1–3,
+флаги с `confidence` < 0.3 отбрасываются. `quote` — дословная подстрока текста или `""`; у F10
+и при телефоне, e-mail или паспорте в цитате она всегда пустая. Маршрут и порог решает backend по
+`data/taxonomy.yaml`.
 
 `POST /documents` (multipart: `file` — `.pdf|.pptx|.xlsx|.txt|.md` ≤ 25 МБ, `doc` — имя
 документа, необязательно) → `{"doc_id","chunks","clauses","low_confidence_pages":[3]}`. Документ
@@ -198,6 +205,24 @@ production-сборке её нет, а сервер с `APP_ENV=production` о�
   («Спросить человека» — payload `h`; сигнал F9 — текст со словом «откат»). Ошибки: 422 — нужно
   ровно одно из `text`/`payload`; 404 — новичка нет; 409 — бот выключен или новичок не подключён
   (сначала `simulate-start`).
+
+- Демо-чат — только `APP_ENV=development` **и** бот на подделке MAX (нет `MAX_BOT_TOKEN`); с
+  настоящим MAX маршруты отвечают 404. Подделка ведёт журнал диалога: исходящие бота, их правки
+  (`Edit` и `AnswerCallback` с message — то же сообщение, `edited:true`), всплывающие уведомления
+  (`AnswerCallback` notification — отдельная запись `from:"toast"`), «печатает» (5 с после
+  `typing_on`, гаснет с новым сообщением). Входящие новичка в журнал пишут dev-хуки
+  (`simulate-start` — «Начать» и нажатия ты/вы и согласия, `simulate-message`, `press`). Журнал
+  в памяти процесса API: перезапуск его очищает. Страница кабинета `/dev/chat` есть только в
+  `pnpm dev`.
+  - `GET /api/dev/chat/{newcomer_id}` →
+    `{"messages":[{"id":"mid.fake.7|in.8|toast.9","from":"bot|newcomer|toast","kind":"text|press|start","text":"…","format":"|markdown|html","buttons":[[{"text":"…","type":"callback|link|request_contact","payload":"…","url":"…"}]],"attachments":[{"type":"image|file|…","url":"токен подделки"}],"notify":true,"payload":"нажатая кнопка","reply_to":"mid","edited":false,"at":"…","edited_at":"…|null"}],"typing":false}`
+    — только диалог этого новичка (его `user_id`/`chat_id`; до подключения — синтетический
+    `user_id` из `simulate-start`). Ошибки: 422 — не UUID; 404 — новичка нет или не подделка.
+  - `POST /api/dev/chat/{newcomer_id}/press` `{"message_id":"mid…","payload":"…"}` →
+    `{"status":"ok"}` после обработки (как `simulate-message` с payload), но с `callback_id`,
+    по которому ответ бота правит именно это сообщение. Ошибки: 422 — пустые поля; 404 — нет
+    сообщения в диалоге новичка; 409 — новичок не подключён. Текст новичка — через
+    `simulate-message`.
   Необязательное `"flag":"F0…F10"` (только вместе с `text`, сведение 24.10) — текст считается
   размеченным этим кодом, как ответ `/flags`, который бот пока не вызывает: риск, `HumanRequest` и
   обращение этой категории сразу. Так в dev показываются F4, F10 и др., у которых нет regex.
@@ -297,6 +322,16 @@ production-сборке её нет, а сервер с `APP_ENV=production` о�
   рекрутеру» или прислал детали: UX 2.7 даёт ему выбор, «Пока не надо» обращения не создаёт (риск
   в карточке и `HumanRequest` остаются, как раньше). `POST /flags` бот пока не вызывает —
   обращений из LLM-разметки нет.
+- **С 24.10 бот вызывает `POST /flags`** (`services/bot_flags.go`). Вызов идёт в фоне на свободный
+  вопрос и на текст причины или комментарий к опросу (`pulse_dN` + `survey_question`), только если
+  regex не сработал. Флаг считается выше порога, если `confidence ≥ auto_escalation_threshold`
+  категории и выполнено `escalate_if`. Тогда F5 и F9 передаются сразу, как regex; F7 становится
+  предложением новичку (обращение — после его согласия); остальные коды — обращение сразу с OPEN.
+  Ниже порога, но не ниже `manual_review_floor`, — только жёлтая зона риска с кодом и категорией
+  в причине. Повтор кода в прошлом пульсе даёт severity +1. В ответ опроса пишутся коды флагов.
+- В ответах `/api/tickets*` добавлено поле `category_name` — заголовок категории из
+  `data/taxonomy.yaml`. Подпись исполнителя: F5 и F9 — «служба безопасности», F3 и F4 —
+  «HR-партнёр», маршрут recruiter — «рекрутер».
 - `HumanRequest` остаётся записью намерения; у обращения ссылки `human_request_id`,
   `question_id` (`bot_questions`), `event_id` — в API не отдаются.
 - Повторное «Спросить человека» при открытом обращении той же категории новое не создаёт: новичку
@@ -324,3 +359,146 @@ production-сборке её нет, а сервер с `APP_ENV=production` о�
 - Номера — последовательность с 1001.
 
 База знаний и аналитика описываются здесь в итерациях 4–5.
+
+### v3 — итерация 4 (обзор)
+
+Экран «Обзор» (UX 3.1) и агрегаты аналитики (UX 3.7). Всё считает код из `employees`,
+`scheduled_events`, `survey_answers`, `tickets`; LLM нет. Тексты ответов новичков, цитаты и
+переписка в обзор не попадают никогда — только числа, коды категорий и причины, которые пишет код.
+Тестовые ответы и обращения (`is_test`, машина времени) в пульс, heat map и тренд не входят.
+
+`GET /api/overview?site=GrPP|Luzhniki|GTP` (пусто — все площадки; чужое значение → 422) →
+```json
+{
+  "site": "GTP|null",
+  "generated_at": "2026-10-24T01:11:46+03:00",
+  "week": {"from": "2026-10-19", "to": "2026-10-25"},
+  "tiles": {
+    "in_adaptation": 47, "starting_this_week": 6, "overdue": 4,
+    "tickets_open": 9, "tickets_sla_overdue": 2,
+    "pulse_response": {"percent": 78, "answered": 39, "sent": 50, "period_days": 30}
+  },
+  "stages": [{"stage": "before|day0|week1|month1|probation", "count": 8}],
+  "risk_zones": {"total": 7, "items": [{
+    "newcomer_id": "uuid", "full_name": "…", "site": "GTP", "day": 12, "stage": "month1",
+    "zone": "red|yellow", "reason": "низкий пульс 2 раза подряд + обращение «…»",
+    "reasons": ["низкий пульс 2 раза подряд", "обращение «…»"],
+    "overdue": false, "last_pulse": 2, "open_tickets": 1
+  }]},
+  "action_today": [{"kind": "tickets_sla_overdue|tickets_unassigned|red_zones|tickets_sla_today|not_connected_soon|surveys_overdue|starting_today|probation_decisions", "count": 3}],
+  "heatmap": {
+    "min_group": 5, "period_days": 30, "sites": ["GrPP", "Luzhniki", "GTP"],
+    "categories": [{"code": "F1", "name": "Непонимание задач и ожиданий"}],
+    "respondents": {"GTP": 19},
+    "cells": [{"category": "F2", "site": "GTP", "count": 6, "share": 0.32, "hidden": false}]
+  },
+  "trend": {
+    "weeks": ["2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19"], "min_group": 5,
+    "series": [{"site": "GTP|GrPP|Luzhniki|all", "points": [
+      {"week": "2026-10-19", "avg": 6.3, "respondents": 11, "hidden": false}]}]
+  }
+}
+```
+Правила (код, `backend/services/overview.go`):
+- Неделя — пн–вс по Москве. День и этап — как у сотрудника v1 (`day`, `stage`).
+- `in_adaptation` — все с этапом не `done` (до D+90 включительно, вместе с `before`).
+  `stages` — та же выборка по этапам, всегда пять строк. `starting_this_week` — `start_date`
+  в пределах `week`.
+- `overdue` — новичков с просрочкой: опрос `sent` без ответа ≥ 48 ч или событие `failed`
+  (у отключившихся не считается).
+- `tickets_open` — не `resolved`. `tickets_sla_overdue` — `open|assigned` с `sla_due_at` в
+  прошлом (в `human_active` таймер стоит).
+- `pulse_response` — из опросов, ушедших за 30 дней, доля `answered`; `percent: null`, если
+  опросов не было.
+- `risk_zones.items` — все новички в адаптации с хотя бы одной причиной, красные первыми, затем
+  по числу причин. Причины: риск, отмеченный ботом (`risk_reason`); «низкий пульс 2 раза подряд»
+  (среднее двух последних опросов на шкале 10 ≤ 5, шкала 1–5 удваивается) → red; приглашение не
+  открыто за ≤ 3 дня до выхода; «опрос «…» без ответа N дней» (несколько — «не отвечает боту N
+  дней: опросов без ответа K»); «сообщение «…» не доставлено»; «обращение «<категория>»» на
+  каждое незакрытое (P0 → red). F5/F9 названы «конфиденциальное», без категории.
+  `zone` — максимум из причин. `reason` — `reasons` через « + ».
+- `action_today` — только ненулевые, в этом порядке: просрочен SLA, не назначены, красная зона,
+  SLA истекает сегодня, приглашение не открыто (выход ≤ 3 дней), опросы без ответа, выходят
+  сегодня, решение по испытательному сроку (D+90 на этой неделе, ещё не прошёл).
+- `heatmap` — F1–F10 × площадки (при `site` — одна колонка). Тема новичка — код флага в ответе
+  опроса или категория обращения за 30 дней; `count` — разных новичков, не упоминаний.
+  `respondents` — новичков площадки с любым сигналом за окно (ответ опроса или обращение).
+  **Порог анонимности 5** (`taxonomy.yaml` `anonymity_min_group`): ячейка с 1–4 новичками —
+  `hidden: true`, `count` и `share` = null; колонка площадки с `respondents < 5` скрыта целиком
+  (и нули тоже). Ноль при открытой колонке показывается. `share` = `count / respondents`.
+- `trend` — средний пульс (шкала 10) по 4 неделям, по каждой площадке и `all` (`all` — только
+  без `site`). Точка с
+  `respondents < 5` — `hidden: true`, `avg: null`; нет ответов — `avg: null`, `hidden: false`.
+
+Кабинет: плитки ведут в реестр с фильтром (`/newcomers?chips=startsThisWeek`,
+`/tickets?view=overdue` и т. п.); «Просрочки» фильтруют зоны риска на месте (`overdue`).
+
+Демо-данные: `cd backend && APP_ENV=development go run ./cmd/seed-demo` (после `cmd/seed`) —
+50 синтетических новичков из `data/personas.yaml` с ответами, кодами сигналов и обращениями по
+`hidden_flags`. Только `APP_ENV=development`; повторный запуск пропускает существующих.
+
+### v3 — база знаний (итерация 4)
+
+Кабинет ходит в rag **только через backend**: у rag нет авторизации, права HR проверяет backend.
+
+⚠ Ограничение (ролей пока нет): все маршруты раздела пускают только при `APP_ENV=development`
+или с заголовком `X-Operator-Token: <KB_OPERATOR_TOKEN>`; иначе 403 `PERMISSION_DENIED`. Пустой
+`KB_OPERATOR_TOKEN` вне development закрывает раздел целиком. Кабинет токен не знает и не шлёт —
+на стенде с `APP_ENV=production` его ставит прокси перед API (например, после basic-auth). Когда
+появятся роли, проверка станет «роль HR», форма запросов не меняется.
+
+Документ (строка таблицы):
+```json
+{"id": "uuid | corpus:<rag_doc_id>", "rag_doc_id": "6ec3792d15de4816", "doc": "Памятка (синтетика)",
+ "filename": "memo.pdf|null", "kind": "pdf|pptx|xlsx|text|corpus", "source": "upload|corpus",
+ "sites": ["GTP"], "version": 2, "status": "ready|needs_review|not_indexed", "indexed": true,
+ "chunks": 14, "clauses": 22, "low_confidence_pages": [3], "size": 482133,
+ "uploaded_by": "…|null", "updated_at": "…|null", "index_error": "…|null"}
+```
+- `source: corpus` — документ корпуса rag (`RAG_CORPUS_DIR`, сейчас синтетика): показывается, но
+  версий и файла у backend нет, `size`/`uploaded_by` = null. Загрузка с тем же `doc` его заменяет.
+- `status`: `ready` — в поиске; `needs_review` — в поиске, есть `low_confidence_pages` (страницы,
+  для PPTX — слайды, на вычитку); `not_indexed` — файл сохранён, но rag его сейчас не видит.
+  `indexed` — документ в индексе rag в момент ответа (rag не ответил — false, статус как
+  сохранён). `sites: []` — все площадки (rag пока площадку не учитывает).
+- `GET /api/documents` → `{"items":[…],"total":N,"rag":"ok|down"}`. Загруженные — из таблицы
+  backend, сверенные с `GET /documents` rag (срок 3 с); корпус — из rag. Если загруженного в rag
+  нет, backend в фоне перезаливает его (см. ниже).
+- `POST /api/documents` (multipart: `file`; необязательно `doc` — имя ≤ 200 символов, иначе имя
+  файла без расширения; `sites` — `GrPP,GTP` через запятую; `uploaded_by` — имя оператора, ролей
+  нет) → 201 + документ. Документ с тем же `doc` — новая версия (`version+1`), прежняя сразу
+  выходит из поиска (rag заменяет по имени). Проверки backend до rag: `.pdf|.pptx|.xlsx|.txt|.md`,
+  непустой, ≤ `KB_MAX_UPLOAD_MB` (20; у rag 25), начало файла совпадает с расширением (`%PDF-`,
+  zip, UTF-8) → 422 `VALIDATION_FAILED` с `details[{field:"file"}]`. Отказ rag по файлу
+  (415/422/413) → 422 с нашим текстом («в файле не найден текст…»); rag не отвечает → 503, ответил
+  не 2xx → 502, не уложился в `KB_UPLOAD_TIMEOUT` (3 мин) → 504 — в базе в этих случаях ничего не
+  меняется. Индекс rag пересобирается синхронно: с hybrid ответ — до десятков секунд.
+  Тело любого запроса API — до 26 МБ (fiber `BodyLimit`).
+- `GET /api/documents/{id}/versions` → `{"items":[{"version":2,"current":true,"filename","kind",
+  "size","sha256","chunks","clauses","low_confidence_pages":[],"uploaded_by":"…|null",
+  "uploaded_at":"…"}],"total":N}`, новые первыми. 404 — нет документа (у корпусного версий нет).
+- `POST /api/documents/ask` `{"question":"…","doc":"имя|null","site":"GTP|null"}` → ответ rag
+  `/ask` как есть (`answer`, `sources[{doc,clause_id,page,quote}]`, `confidence`,
+  `needs_escalation`, `topic`, `abstain_reason`) + `"from_doc": true|false|null` — есть ли цитата
+  из документа `doc` (у XLSX `sources[].doc` = «имя / лист»). Обращение «вы», тот же конвейер, что
+  у новичка. rag ищет по всей базе: фильтра по документу у него нет. Вопрос никуда не пишется (ни в
+  `bot_questions`, ни в лог). `question` — 3…1000 символов, иначе 422. Ответ без источника → 502.
+- `GET /api/knowledge/unanswered?site=&days=30&include_test=` → `{"items":[{"key":"пропуск
+  родственник","title":"…","keywords":["пропуск","родственника"],"count":7,"newcomers":5,
+  "reasons":{"no_source":6,"below_threshold":1},"examples":["…"],"first_at":"…","last_at":"…"}],
+  "total":N,"questions":M,"since":"…"}`. Источник — `bot_questions` с `kind=abstain` и
+  `abstain_reason` `no_source|below_threshold` (`routed_topic` — намеренная передача человеку, не
+  пробел базы). Только вопросы с текстом (он хранится лишь при согласии) **и** у новичков, чьё
+  согласие действует сейчас; `is_test` — только с `include_test=true|1`; `days` 1…365. Группировка
+  без LLM: стоп-слова, грубый стемминг окончаний, одиночная связь «≥ 2 общих ключевых слова или
+  Жаккар ≥ 0.5». `title` — самый типичный вопрос группы, `examples` — до трёх других, свежие
+  первыми; всё обезличено: почта, телефоны, числа от 5 цифр, части ФИО самого новичка и слова с
+  заглавной не в начале предложения → `[почта]`, `[телефон]`, `[номер]`, `[имя]`. До 50 групп,
+  крупные первыми.
+
+Хранение: rag держит загрузки в памяти. Метаданные, версии и **байты файлов** — в Postgres
+(`kb_documents`, `kb_document_versions`, `kb_document_files` bytea): одна транзакция на
+метаданные и файл, бэкап базы уносит и файлы, контейнеру API не нужен том. При старте backend ждёт
+rag (паузы до 30 с) и перезаливает текущие версии, которых нет в `GET /documents` (сверка по
+`doc_id`); то же в фоне, если список кабинета увидел пропажу. Не принял — `not_indexed` и
+`index_error`.

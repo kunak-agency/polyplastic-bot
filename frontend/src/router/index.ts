@@ -116,6 +116,17 @@ const routes: RouteRecordRaw[] = [
       crumbs: [{ key: 'common.nav.items.settings' }],
     },
   },
+  // Dev-only emulator of the newcomer's MAX dialog; absent from production builds.
+  ...(import.meta.env.DEV
+    ? [
+        {
+          path: '/dev/chat',
+          name: 'dev-chat',
+          component: () => import('@/pages/dev/DevChatPage.vue'),
+          meta: { title: 'devchat.title', crumbs: [{ key: 'devchat.nav' }] },
+        },
+      ]
+    : []),
   {
     path: '/:pathMatch(.*)*',
     name: 'not-found',

@@ -61,11 +61,13 @@ func (b *BotService) question(ctx context.Context, u max.Update, emp *domain.Emp
 	}
 
 	if codes := flags.Codes(text); codes != nil {
-		return b.flagSignal(ctx, to, emp, q, codes)
+		return b.flagSignal(ctx, to, emp, q, codes, flagViaRegex)
 	}
 	if err := b.touch(ctx, emp.ID, nil); err != nil {
 		return err
 	}
+	// regex не сработал — LLM-разметка (bot_flags.go) в фоне, параллельно с rag: ответ не ждёт её.
+	b.classifyAsync(ctx, emp, flagInput{text: text, context: rag.FlagsContextFreeText, where: "в сообщении новичка"})
 	// rag отвечает до RAG_ASK_TIMEOUT: ждём в фоне, чтобы не держать чтение апдейтов остальных.
 	b.wg.Add(1)
 	go func() {
@@ -105,7 +107,8 @@ func (b *BotService) touch(ctx context.Context, empID uuid.UUID, codes []string)
 // шагов. В rag вопрос не уходит. F5 и F9 (критические, «Передаю…» по UX 2.7) — сразу
 // обращение и карточка в чат СБ; F7 — обращение, когда новичок выберет «Передать рекрутеру» или
 // напишет детали (UX 2.7 даёт ему выбор).
-func (b *BotService) flagSignal(ctx context.Context, to recipient, emp *domain.Employee, q *domain.BotQuestion, codes []string) error {
+// via — откуда сигнал: flagViaRegex или LLM-разметка /flags (для сводки обращения).
+func (b *BotService) flagSignal(ctx context.Context, to recipient, emp *domain.Employee, q *domain.BotQuestion, codes []string, via string) error {
 	q.Kind, q.Flags = domain.QuestionFlag, codes
 	cat := b.flagCategory(q.Flags)
 	immediate := cat.SecurityChat
@@ -136,7 +139,7 @@ func (b *BotService) flagSignal(ctx context.Context, to recipient, emp *domain.E
 		}
 		t, created, err := b.tickets.open(ctx, tx, e, ticketDraft{
 			cat: cat, source: domain.TicketFromFlag, quote: q.Question, questionID: &q.ID, humanRequestID: &h.ID,
-			what: fmt.Sprintf("Сработал сигнал %s в свободном тексте (regex), передано сразу.", strings.Join(codes, ", ")),
+			what: fmt.Sprintf("Сработал сигнал %s %s, передано сразу.", strings.Join(codes, ", "), via),
 		})
 		if err != nil {
 			return err
@@ -149,7 +152,7 @@ func (b *BotService) flagSignal(ctx context.Context, to recipient, emp *domain.E
 	if err != nil {
 		return err
 	}
-	logger.Info("бот: сигнал %v от новичка %s, запись %s, в rag не отправлено", codes, emp.ID, q.ID)
+	logger.Info("бот: сигнал %v от новичка %s, запись %s (%s)", codes, emp.ID, q.ID, via)
 	if res.ticket != nil && res.created {
 		b.tickets.notify(ctx, res.ticket, emp)
 	}
@@ -170,7 +173,7 @@ func (b *BotService) ask(ctx context.Context, to recipient, emp *domain.Employee
 	err := errNoRAG
 	if b.rag != nil {
 		stop := b.typing(ctx, to.ChatID)
-		resp, err = b.rag.Ask(ctx, req)
+		resp, err = b.askPatiently(ctx, to, emp, req)
 		stop()
 	}
 	switch {
@@ -217,6 +220,49 @@ func (b *BotService) ask(ctx context.Context, to recipient, emp *domain.Employee
 	b.sendQuestion(ctx, to, emp, q)
 	return nil
 }
+
+// lateAskWindow — сколько бот ещё ждёт rag после RAG_ASK_TIMEOUT: под LLM бывает медленным, и
+// поздний ответ по документам лучше «справочная база не отвечает».
+var lateAskWindow = 20 * time.Second
+
+// patientAsker — rag-клиент, у которого можно задать срок запроса (rag.Client).
+type patientAsker interface {
+	AskWithin(ctx context.Context, req rag.AskRequest, d time.Duration) (*rag.AskResponse, error)
+	AskTimeout() time.Duration
+}
+
+// askPatiently — POST /ask. Не уложился в RAG_ASK_TIMEOUT — новичку «ищу дольше обычного», и
+// бот ждёт ещё lateAskWindow: пришёл ответ — он и уходит; нет — честный отказ, как раньше.
+func (b *BotService) askPatiently(ctx context.Context, to recipient, emp *domain.Employee, req rag.AskRequest) (*rag.AskResponse, error) {
+	pa, ok := b.rag.(patientAsker)
+	if !ok || lateAskWindow <= 0 {
+		return b.rag.Ask(ctx, req)
+	}
+	type result struct {
+		resp *rag.AskResponse
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		r, err := pa.AskWithin(ctx, req, pa.AskTimeout()+lateAskWindow)
+		ch <- result{r, err}
+	}()
+	timer := time.NewTimer(pa.AskTimeout())
+	defer timer.Stop()
+	select {
+	case r := <-ch:
+		return r.resp, r.err
+	case <-timer.C:
+	}
+	b.send(ctx, to.msg(byForm(emp, textAskLateTy, textAskLateVy), "", nil))
+	r := <-ch
+	return r.resp, r.err
+}
+
+const (
+	textAskLateVy = "Ищу в документах дольше обычного — пришлю ответ сюда же, подождите немного."
+	textAskLateTy = "Ищу в документах дольше обычного — пришлю ответ сюда же, подожди немного."
+)
 
 // typingEvery — «печатает» в MAX гаснет через несколько секунд; rag думает 4–8 с, поэтому
 // действие повторяется, пока ждём ответ.

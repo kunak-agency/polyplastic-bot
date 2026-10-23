@@ -275,3 +275,183 @@ export interface TicketPatchRequest {
 export interface TicketNoteRequest {
   text: string
 }
+
+// ── v3 — knowledge base (api_contract.md, section v3) ───────────────────────
+
+export type KnowledgeDocKind = 'pdf' | 'pptx' | 'xlsx' | 'text' | 'corpus'
+export type KnowledgeDocSource = 'upload' | 'corpus'
+export type KnowledgeDocStatus = 'ready' | 'needs_review' | 'not_indexed'
+
+export interface KnowledgeDocument {
+  // UUID of an uploaded document; "corpus:<rag_doc_id>" for the rag's own corpus.
+  id: string
+  rag_doc_id: string
+  doc: string
+  filename: string | null
+  kind: KnowledgeDocKind
+  source: KnowledgeDocSource
+  // Empty — every site.
+  sites: SiteCode[]
+  version: number
+  status: KnowledgeDocStatus
+  // In the rag index right now (false while the rag is down).
+  indexed: boolean
+  chunks: number
+  clauses: number
+  low_confidence_pages: number[]
+  size: number | null
+  uploaded_by: string | null
+  updated_at: string | null
+  index_error: string | null
+}
+
+export interface KnowledgeDocumentList extends ListResponse<KnowledgeDocument> {
+  rag: 'ok' | 'down'
+}
+
+export interface KnowledgeDocumentVersion {
+  version: number
+  current: boolean
+  filename: string
+  kind: KnowledgeDocKind
+  size: number
+  sha256: string
+  chunks: number
+  clauses: number
+  low_confidence_pages: number[]
+  uploaded_by: string | null
+  uploaded_at: string
+}
+
+export interface KnowledgeUploadRequest {
+  file: File
+  doc?: string
+  sites?: SiteCode[]
+  uploaded_by?: string
+}
+
+export interface KnowledgeSource {
+  doc: string
+  clause_id: string
+  page: number | null
+  quote: string
+}
+
+export type KnowledgeAbstainReason = 'no_source' | 'below_threshold' | 'routed_topic'
+
+export interface KnowledgeAskRequest {
+  question: string
+  doc?: string | null
+  site?: SiteCode | null
+}
+
+export interface KnowledgeAskResponse {
+  answer: string | null
+  sources: KnowledgeSource[]
+  confidence: 'high' | 'medium' | 'low'
+  needs_escalation: boolean
+  topic: string
+  abstain_reason: KnowledgeAbstainReason | null
+  // null — no document was named in the request.
+  from_doc: boolean | null
+}
+
+export interface KnowledgeUnansweredCluster {
+  key: string
+  title: string
+  keywords: string[]
+  count: number
+  newcomers: number
+  reasons: Partial<Record<KnowledgeAbstainReason, number>>
+  examples: string[]
+  first_at: string
+  last_at: string
+}
+
+export interface KnowledgeUnansweredResponse extends ListResponse<KnowledgeUnansweredCluster> {
+  questions: number
+  since: string
+}
+
+export interface KnowledgeUnansweredQuery {
+  site?: SiteCode | null
+  days?: number
+  include_test?: boolean
+}
+
+// ── v3: overview (api_contract.md, section v3) ──────────────────────
+
+export type OverviewStage = Exclude<Stage, 'done'>
+export type RiskZoneLevel = 'red' | 'yellow'
+export type OverviewActionKind =
+  | 'tickets_sla_overdue'
+  | 'tickets_unassigned'
+  | 'red_zones'
+  | 'tickets_sla_today'
+  | 'not_connected_soon'
+  | 'surveys_overdue'
+  | 'starting_today'
+  | 'probation_decisions'
+export type HeatCategoryCode = 'F1' | 'F2' | 'F3' | 'F4' | 'F5' | 'F6' | 'F7' | 'F8' | 'F9' | 'F10'
+
+export interface OverviewTiles {
+  in_adaptation: number
+  starting_this_week: number
+  overdue: number
+  tickets_open: number
+  tickets_sla_overdue: number
+  pulse_response: { percent: number | null; answered: number; sent: number; period_days: number }
+}
+
+export interface OverviewRiskZone {
+  newcomer_id: string
+  full_name: string
+  site: SiteCode
+  day: number
+  stage: Stage
+  zone: RiskZoneLevel
+  reason: string
+  reasons: string[]
+  overdue: boolean
+  last_pulse: number | null
+  open_tickets: number
+}
+
+export interface OverviewHeatCell {
+  category: HeatCategoryCode
+  site: SiteCode
+  // null when hidden: fewer than min_group people behind the cell.
+  count: number | null
+  share: number | null
+  hidden: boolean
+}
+
+export interface OverviewTrendPoint {
+  week: string
+  avg: number | null
+  respondents: number
+  hidden: boolean
+}
+
+export interface Overview {
+  site: SiteCode | null
+  generated_at: string
+  week: { from: string; to: string }
+  tiles: OverviewTiles
+  stages: { stage: OverviewStage; count: number }[]
+  risk_zones: { items: OverviewRiskZone[]; total: number }
+  action_today: { kind: OverviewActionKind; count: number }[]
+  heatmap: {
+    min_group: number
+    period_days: number
+    sites: SiteCode[]
+    categories: { code: HeatCategoryCode; name: string }[]
+    respondents: Partial<Record<SiteCode, number>>
+    cells: OverviewHeatCell[]
+  }
+  trend: {
+    weeks: string[]
+    min_group: number
+    series: { site: SiteCode | 'all'; points: OverviewTrendPoint[] }[]
+  }
+}

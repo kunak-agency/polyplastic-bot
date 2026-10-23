@@ -35,6 +35,7 @@ type Config struct {
 	Scheduler Scheduler
 	RAG       RAG
 	LLM       LLM
+	Docs      Docs
 }
 
 // Bot — то, что видит новичок: ссылка-приглашение и сроки её жизни.
@@ -97,9 +98,23 @@ func (m Max) Enabled() bool { return m.Token != "" }
 type RAG struct {
 	BaseURL       string        // http://localhost:8093
 	HealthTimeout time.Duration // GET /health; короткий — health кабинета не должен висеть
-	// AskTimeout — POST /ask (RAG_ASK_TIMEOUT, 8 с). Дольше бот не ждёт и отвечает новичку
-	// «сейчас не могу проверить по документам».
+	// AskTimeout — POST /ask (RAG_ASK_TIMEOUT, 12 с). Дольше бот не ждёт молча: пишет новичку
+	// «ищу дольше обычного» и досылает поздний ответ (services/bot_ask.go, lateAskWindow).
 	AskTimeout time.Duration
+}
+
+// Docs — база знаний (api_contract.md, «v3 — база знаний»): загрузка документов HR через backend в rag.
+type Docs struct {
+	// MaxUploadMB — потолок файла на backend (KB_MAX_UPLOAD_MB, 20). У rag свой (25): наш ниже,
+	// чтобы отказ «файл большой» приходил от нас понятным текстом, а не 413 от rag.
+	MaxUploadMB int
+	// UploadTimeout — сколько ждём POST /documents rag (KB_UPLOAD_TIMEOUT, 3 мин): индекс
+	// пересобирается синхронно, с bge-m3 регламент на сотню пунктов — десятки секунд.
+	UploadTimeout time.Duration
+	// OperatorToken — секрет заголовка X-Operator-Token (KB_OPERATOR_TOKEN). Ролей пока нет:
+	// вне development загрузка и проверка базы знаний открыты только с этим заголовком.
+	// Пусто — вне development раздел закрыт (403).
+	OperatorToken string
 }
 
 // LLM — модель на поде RunPod (vLLM, OpenAI-совместимый API), как в hack-ru-clinik. В каркасе
@@ -140,7 +155,12 @@ func Load() (Config, error) {
 		RAG: RAG{
 			BaseURL:       strings.TrimRight(env("RAG_BASE_URL", "http://localhost:8093"), "/"),
 			HealthTimeout: duration("RAG_HEALTH_TIMEOUT", 2*time.Second),
-			AskTimeout:    duration("RAG_ASK_TIMEOUT", 8*time.Second),
+			AskTimeout:    duration("RAG_ASK_TIMEOUT", 12*time.Second),
+		},
+		Docs: Docs{
+			MaxUploadMB:   int(integer("KB_MAX_UPLOAD_MB")),
+			UploadTimeout: duration("KB_UPLOAD_TIMEOUT", 3*time.Minute),
+			OperatorToken: strings.TrimSpace(os.Getenv("KB_OPERATOR_TOKEN")),
 		},
 		LLM: LLM{
 			BaseURL:         os.Getenv("LLM_BASE_URL"),
@@ -151,6 +171,9 @@ func Load() (Config, error) {
 		},
 	}
 	c.Bot.Fake = c.AppEnv == EnvDevelopment && !c.Max.Enabled()
+	if c.Docs.MaxUploadMB <= 0 || c.Docs.MaxUploadMB > 25 {
+		c.Docs.MaxUploadMB = 20 // больше лимита rag (25) не имеет смысла: он всё равно откажет
+	}
 	return c, c.Validate()
 }
 
@@ -193,6 +216,7 @@ func (c Config) Summary() []string {
 		fmt.Sprintf("обращения: HR-чат %s, чат СБ %s, таксономия %s", chat(c.Max.HRChatID), chat(c.Max.SBChatID), orNone(c.TaxonomyPath)),
 		fmt.Sprintf("планировщик: такт %v, пауза в пакете %v", c.Scheduler.Interval, c.Scheduler.PackGap),
 		fmt.Sprintf("rag: %s, срок /ask %v", c.RAG.BaseURL, c.RAG.AskTimeout),
+		fmt.Sprintf("база знаний: файл до %d МБ, срок загрузки %v, токен оператора %s", c.Docs.MaxUploadMB, c.Docs.UploadTimeout, set(c.Docs.OperatorToken)),
 		fmt.Sprintf("LLM: модель %s, адрес %s, ключ %s, temperature %.2f, presence_penalty %.2f",
 			c.LLM.Model, orNone(c.LLM.BaseURL), set(c.LLM.APIKey), c.LLM.Temperature, c.LLM.PresencePenalty),
 	}

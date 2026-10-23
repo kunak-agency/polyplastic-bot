@@ -16,6 +16,7 @@ type Ticket struct {
 	Site          string  `json:"site"`
 	Day           int     `json:"day"`
 	Category      string  `json:"category"`
+	CategoryName  string  `json:"category_name"` // заголовок из data/taxonomy.yaml
 	Priority      string  `json:"priority"`
 	Status        string  `json:"status"`
 	Route         string  `json:"route"`
@@ -54,7 +55,7 @@ func TicketFrom(v services.TicketView) Ticket {
 	t := v.Ticket
 	o := Ticket{
 		ID: t.ID.String(), Number: t.Number, NewcomerID: t.EmployeeID.String(), NewcomerName: v.NewcomerName,
-		Site: v.Site, Day: t.Day, Category: t.Category, Priority: t.Priority, Status: t.Status, Route: t.Route,
+		Site: v.Site, Day: t.Day, Category: t.Category, CategoryName: v.CategoryName, Priority: t.Priority, Status: t.Status, Route: t.Route,
 		AssigneeName: t.AssigneeName, Anonymous: t.Anonymous, Summary: t.Summary, Quote: t.Quote,
 		CreatedAt: ticketTime(t.CreatedAt, v.Site), UpdatedAt: ticketTime(t.UpdatedAt, v.Site),
 		NotifyManager: t.NotifyManager && !t.Restricted, Restricted: t.Restricted,

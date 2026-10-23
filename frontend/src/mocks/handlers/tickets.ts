@@ -42,9 +42,7 @@ function restricted(t: Ticket): boolean {
 function listItem(t: TicketDetail): Ticket {
   const { messages: _messages, ...rest } = t
   void _messages
-  return restricted(t)
-    ? { ...rest, quote: null, restricted: true }
-    : { ...rest, restricted: false }
+  return restricted(t) ? { ...rest, quote: null, restricted: true } : { ...rest, restricted: false }
 }
 
 function detail(t: TicketDetail): TicketDetail {
@@ -146,7 +144,11 @@ function patch(req: MockRequest): MockResult {
   if (typeof notify !== 'boolean')
     return error(422, 'VALIDATION_FAILED', 'Нужно notify_manager', 'notify_manager')
   if (notify && MANAGER_HIDDEN.has(t.category))
-    return error(422, 'VALIDATION_FAILED', 'Эта категория руководителю не показывается — уведомить его нельзя')
+    return error(
+      422,
+      'VALIDATION_FAILED',
+      'Эта категория руководителю не показывается — уведомить его нельзя',
+    )
   t.notify_manager = notify
   t.updated_at = new Date().toISOString()
   return { status: 200, data: detail(t) }

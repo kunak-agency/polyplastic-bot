@@ -69,10 +69,13 @@ def test_ask_whitespace_question_abstains(client):
     assert body["needs_escalation"] is True and body["answer"] is None
 
 
-def test_flags_stub_contract(client):
+def test_flags_without_llm_degraded(client):
+    # LLM в тестах не задан (conftest): пустая разметка с degraded=true, а не «флагов нет»
+    import flags
+    flags.reset_classifier(None)
     r = client.post("/flags", json={"text": "наставник третью смену не объясняет", "context": "pulse_d5"})
     assert r.status_code == 200
-    assert r.json() == {"flags": [], "sentiment": "neu", "quote": ""}
+    assert r.json() == {"flags": [], "sentiment": "neu", "quote": "", "degraded": True}
 
 
 def test_flags_validation(client):

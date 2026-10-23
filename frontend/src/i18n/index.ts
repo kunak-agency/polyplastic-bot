@@ -29,6 +29,18 @@ for (const path in modules) {
 
 const dev = import.meta.env.DEV
 
+// Dev-only screens (the /dev/chat emulator) keep their copy in ./locales/dev:
+// loaded only in `pnpm dev`, so a production build carries none of it.
+if (dev) {
+  const devModules = import.meta.glob<{ default: MessageTree }>('./locales/dev/*.json', {
+    eager: true,
+  })
+  for (const path in devModules) {
+    const match = path.match(/\.\/locales\/dev\/(.+)\.json$/)
+    if (match) messages.ru[match[1]] = devModules[path].default
+  }
+}
+
 export const i18n = createI18n({
   legacy: false,
   locale: APP_LOCALE,

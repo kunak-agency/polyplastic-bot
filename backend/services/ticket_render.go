@@ -81,12 +81,14 @@ func ticketTo(cat taxonomy.Category) string {
 	return "HR"
 }
 
-// staffRole — подпись роли в ответе и статусе: «Анна Смирнова, HR».
+// staffRole — подпись роли в ответе и статусе: «Анна Смирнова, HR». F9 ведёт СБ; F5 — HR-партнёр
+// с комплаенсом (таксономия), хотя его карточка тоже уходит в чат СБ; F3/F4 — HR-партнёр (hr_bp);
+// F7/F8 с маршрутом recruiter — рекрутер.
 func staffRole(cat taxonomy.Category) string {
 	switch {
 	case cat.Route == taxonomy.RouteSecurity:
 		return "служба безопасности"
-	case cat.PartnerOnly:
+	case cat.PartnerOnly || cat.SecurityChat:
 		return "HR-партнёр"
 	case cat.Route == taxonomy.RouteRecruiter:
 		return "рекрутер"
@@ -137,14 +139,23 @@ func ticketOpenButtons(t *domain.Ticket) [][]max.Button {
 	}}
 }
 
-// ticketAssignedText — ASSIGNED: «👀 Вашим вопросом занимается Анна, HR».
+// ticketAssignedText — ASSIGNED: «👀 Вашим вопросом занимается Анна, HR». Без имени — роль
+// («занимается служба безопасности»), а не безликое «команда, HR».
 func ticketAssignedText(e *domain.Employee, t *domain.Ticket, cat taxonomy.Category) string {
-	name := "команда"
-	if t.AssigneeName != nil {
-		name = *t.AssigneeName
+	who := staffPlaceholder(cat)
+	if t.AssigneeName != nil && strings.TrimSpace(*t.AssigneeName) != "" {
+		who = escapeMarkdown(*t.AssigneeName) + ", " + staffRole(cat)
 	}
-	return fmt.Sprintf("👀 **%s вопросом занимается %s, %s.** Обращение #%d.",
-		byForm(e, "Твоим", "Вашим"), escapeMarkdown(name), staffRole(cat), t.Number)
+	return fmt.Sprintf("👀 **%s вопросом занимается %s.** Обращение #%d.",
+		byForm(e, "Твоим", "Вашим"), who, t.Number)
+}
+
+// staffPlaceholder — кто занимается, пока имени исполнителя нет: роль по маршруту.
+func staffPlaceholder(cat taxonomy.Category) string {
+	if r := staffRole(cat); r != "HR" {
+		return r
+	}
+	return "команда HR"
 }
 
 // staffSignature — «**Анна Смирнова, HR** (по обращению #1042):».

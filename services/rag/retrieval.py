@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -101,11 +103,74 @@ class PairScorer(Protocol):
 
 _MODEL_LOCK = threading.Lock()  # torch-модели не гоняем из нескольких потоков пула FastAPI разом
 
+QUERY_CACHE_SIZE = 512  # вопросов в LRU-кэше эмбеддингов и скоров реранкера
 
-def load_sentence_transformer(model_name: str, device: str = "cpu") -> Encoder:
-    """Грузит bge-m3 из кэша HF_HOME (если его нет — качает с Hugging Face). FP32 на CPU."""
+
+class LRU:
+    """Маленький потокобезопасный LRU: вопрос → эмбеддинг, (вопрос, пункт) → логит."""
+
+    def __init__(self, size: int = QUERY_CACHE_SIZE):
+        self.size = size
+        self._d: OrderedDict = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key):
+        with self._lock:
+            if key not in self._d:
+                return None
+            self._d.move_to_end(key)
+            return self._d[key]
+
+    def put(self, key, value) -> None:
+        with self._lock:
+            self._d[key] = value
+            self._d.move_to_end(key)
+            while len(self._d) > self.size:
+                self._d.popitem(last=False)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._d.clear()
+
+    def __len__(self) -> int:
+        return len(self._d)
+
+
+def resolve_device(name: str | None = None) -> str:
+    """RAG_DEVICE: auto | cpu | mps | cuda. auto — cuda, затем mps (Apple GPU на хосте), иначе cpu.
+
+    В Linux-контейнере mps нет, auto там даёт cpu. На M4 реранкер на mps в ~10 раз быстрее
+    CPU при тех же скорах (README, «Скорость»)."""
+    name = (name or os.getenv("RAG_DEVICE") or "auto").strip().lower()
+    if name != "auto":
+        return name
+    try:
+        import torch  # noqa: PLC0415
+    except ImportError:
+        return "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def configure_torch_threads() -> None:
+    """RAG_TORCH_THREADS — потоки intra-op torch на CPU. Не задан — оставляем torch по умолчанию."""
+    n = os.getenv("RAG_TORCH_THREADS")
+    if not n:
+        return
+    import torch  # noqa: PLC0415
+    torch.set_num_threads(int(n))
+    log.info("torch threads: %d", torch.get_num_threads())
+
+
+def load_sentence_transformer(model_name: str, device: str | None = None) -> Encoder:
+    """Грузит bge-m3 из кэша HF_HOME (если его нет — качает с Hugging Face). FP32."""
     from sentence_transformers import SentenceTransformer  # noqa: PLC0415 — тяжёлый импорт только по флагу
 
+    configure_torch_threads()
+    device = resolve_device(device)
     t0 = time.perf_counter()
     model = SentenceTransformer(model_name, device=device)
     model.max_seq_length = min(model.max_seq_length or 8192, DENSE_MAX_TOKENS)
@@ -113,9 +178,11 @@ def load_sentence_transformer(model_name: str, device: str = "cpu") -> Encoder:
     return model
 
 
-def load_cross_encoder(model_name: str, device: str = "cpu") -> PairScorer:
+def load_cross_encoder(model_name: str, device: str | None = None) -> PairScorer:
     from sentence_transformers import CrossEncoder  # noqa: PLC0415
 
+    configure_torch_threads()
+    device = resolve_device(device)
     t0 = time.perf_counter()
     model = CrossEncoder(model_name, device=device, max_length=RERANK_MAX_TOKENS)
     log.info("reranker %s loaded on %s in %.1fs", model_name, device, time.perf_counter() - t0)
@@ -129,15 +196,18 @@ class DenseRetriever:
     «отвечает на вопрос», и как вероятность не откалиброван, поэтому решение принимает
     реранкер. Без реранкера гибрид гейтится лексическим покрытием BM25.
     Эмбеддинги кэшируются по тексту чанка, чтобы пересборка индекса после загрузки
-    документа считала только новые чанки.
+    документа считала только новые чанки. Эмбеддинг вопроса — в LRU (`query_cache`): он не
+    зависит от корпуса и переживает пересборку индекса.
     """
 
     def __init__(self, chunks: list[Chunk], model_name: str = "BAAI/bge-m3",
-                 encoder: Encoder | None = None, cache: dict[str, np.ndarray] | None = None):
+                 encoder: Encoder | None = None, cache: dict[str, np.ndarray] | None = None,
+                 query_cache: LRU | None = None):
         self.chunks = chunks
         self.model_name = model_name
         self.encoder = encoder if encoder is not None else load_sentence_transformer(model_name)
         self.cache = cache if cache is not None else {}
+        self.query_cache = query_cache if query_cache is not None else LRU()
         texts = [c.index_text for c in chunks]
         missing = list(dict.fromkeys(t for t in texts if t not in self.cache))
         if missing:
@@ -155,12 +225,20 @@ class DenseRetriever:
 
     def with_chunks(self, chunks: list[Chunk]) -> "DenseRetriever":
         """Новый индекс на той же модели и том же кэше эмбеддингов."""
-        return DenseRetriever(chunks, self.model_name, encoder=self.encoder, cache=self.cache)
+        return DenseRetriever(chunks, self.model_name, encoder=self.encoder, cache=self.cache,
+                              query_cache=self.query_cache)
+
+    def embed_query(self, query: str) -> np.ndarray:
+        q = self.query_cache.get(query)
+        if q is None:
+            q = self._encode([query])[0]
+            self.query_cache.put(query, q)
+        return q
 
     def search(self, query: str, k: int) -> list[Hit]:
         if not self.chunks:
             return []
-        q = self._encode([query])[0]
+        q = self.embed_query(query)
         sims = self.matrix @ q
         order = np.argsort(-sims)[:k]
         return [Hit(chunk=self.chunks[i], score=float(sims[i]), gate_score=0.0) for i in order]
@@ -214,11 +292,17 @@ class CrossEncoderReranker:
     sigmoid считаем сами из сырых логитов (activation_fn=Identity): поведение по умолчанию
     у CrossEncoder менялось между версиями sentence-transformers, а порог gate завязан
     именно на sigmoid.
+
+    Скорость: в модель идут только первые `max_candidates` чанков после RRF (None — все),
+    логиты кэшируются в LRU по паре (вопрос, текст пункта) — повтор вопроса модель не трогает.
     """
 
-    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3", model: PairScorer | None = None):
+    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3", model: PairScorer | None = None,
+                 max_candidates: int | None = None, cache: LRU | None = None):
         self.model_name = model_name
         self.model = model if model is not None else load_cross_encoder(model_name)
+        self.max_candidates = max_candidates
+        self.cache = cache if cache is not None else LRU(QUERY_CACHE_SIZE * 16)
 
     @staticmethod
     def pair_text(chunk: Chunk, clause) -> str:
@@ -231,12 +315,28 @@ class CrossEncoderReranker:
             kwargs["activation_fn"] = torch.nn.Identity()
         except ImportError:  # заглушка в тестах без torch
             pass
-        with _MODEL_LOCK:
-            return np.asarray(self.model.predict(pairs, **kwargs), dtype=np.float64).reshape(-1)
+        out = np.zeros(len(pairs), dtype=np.float64)
+        todo: list[int] = []
+        for i, p in enumerate(pairs):
+            v = self.cache.get(p)
+            if v is None:
+                todo.append(i)
+            else:
+                out[i] = v
+        if todo:
+            with _MODEL_LOCK:
+                logits = np.asarray(self.model.predict([pairs[i] for i in todo], **kwargs),
+                                    dtype=np.float64).reshape(-1)
+            for i, v in zip(todo, logits):
+                out[i] = v
+                self.cache.put(pairs[i], float(v))
+        return out
 
     def rerank(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
         if not hits:
             return []
+        if self.max_candidates:
+            hits = hits[:self.max_candidates]
         owners: list[tuple[int, str]] = []
         pairs: list[tuple[str, str]] = []
         for i, h in enumerate(hits):

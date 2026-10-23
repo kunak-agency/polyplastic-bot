@@ -148,3 +148,22 @@ func TestStartDayPhrase(t *testing.T) {
 		t.Fatalf("вторник: %q", got)
 	}
 }
+
+// Согласие и отказ — в выбранной форме обращения («Если передумаешь» на «ты»).
+func TestConsentTextsByForm(t *testing.T) {
+	for _, form := range []string{domain.AddressTy, domain.AddressVy} {
+		e := newEnv(t, msk(2026, 11, 2, 12, 0))
+		c := e.launch(t, date(2026, 11, 3))
+		e.connect(t, c, form, false)
+		var got string
+		for _, a := range e.fake.Answers() {
+			if a.Answer.Message != nil && strings.HasPrefix(a.Answer.Message.Text, "Понял. Опросы") {
+				got = a.Answer.Message.Text
+			}
+		}
+		want := map[string]string{domain.AddressTy: "Если передумаешь, напиши HR-команде.", domain.AddressVy: "Если передумаете, напишите HR-команде."}[form]
+		if !strings.HasSuffix(got, want) {
+			t.Fatalf("%s: %q", form, got)
+		}
+	}
+}

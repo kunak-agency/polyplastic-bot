@@ -18,7 +18,7 @@ import { ticketsOfNewcomer } from '@/lib/tickets'
 import type { SiteCode, Ticket } from '@/types/api'
 
 // "Tickets" block of the trajectory (ux-spec 3.3): GET /tickets?newcomer_id=
-// ("Уточнения v2"); the list is sorted here, the latest first.
+// (contract v2 clarifications); the list is sorted here, the latest first.
 const props = defineProps<{ newcomerId: string; site: SiteCode }>()
 const { t } = useI18n()
 const now = useNow()

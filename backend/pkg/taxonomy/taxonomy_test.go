@@ -16,7 +16,7 @@ func TestLoadRealFile(t *testing.T) {
 		t.Fatalf("коды %v", tx.Codes())
 	}
 	want := map[string]struct {
-		route, prio                        string
+		route, prio                                string
 		hidden, restricted, notify, sb, storeQuote bool
 	}{
 		// restricted (текст новичка скрыт) — только F5 и F9; F0, F4, F10 скрыты лишь от руководителя.
@@ -68,5 +68,24 @@ func TestLoadErrors(t *testing.T) {
 	_, err := Load(write("categories:\n  F5: {route: [mars], urgency: критическая, manager_visibility: none}\n"))
 	if err == nil || !strings.Contains(err.Error(), "F5") {
 		t.Fatalf("неизвестный получатель: %v", err)
+	}
+}
+
+func TestLLMThresholds(t *testing.T) {
+	tx, err := LoadDefault("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tx.ManualReviewFloor != 0.4 || tx.EscalateSeverityGte != 2 {
+		t.Fatalf("правила: floor %v, severity %d", tx.ManualReviewFloor, tx.EscalateSeverityGte)
+	}
+	for code, want := range map[string]float64{"F0": 0.5, "F1": 0.6, "F7": 0.5, "F9": 0.4, "F10": 0.6} {
+		if c, _ := tx.Get(code); c.AutoThreshold != want {
+			t.Errorf("%s: порог %v, want %v", code, c.AutoThreshold, want)
+		}
+	}
+	// escalate_if: severity ≥ 2 или критический код.
+	if !tx.Escalates("F1", 2) || tx.Escalates("F1", 1) || !tx.Escalates("F7", 1) || !tx.Escalates("F0", 1) {
+		t.Fatal("escalate_if разобран неверно")
 	}
 }

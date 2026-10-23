@@ -131,6 +131,7 @@ func (h *Handler) SimulateMessage(c *fiber.Ctx) error {
 		chat = *e.ChatID
 	}
 	if input.Flag != "" {
+		h.devIncoming(chat, *e.MaxUserID, max.JournalKindText, input.Text)
 		if err := bot.SimulateFlag(ctx, e.ID, input.Flag, input.Text); err != nil {
 			return err
 		}

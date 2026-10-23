@@ -68,6 +68,7 @@ func main() {
 		Taxonomy:   tax,
 		HRChatID:   cfg.Max.HRChatID,
 		SBChatID:   cfg.Max.SBChatID,
+		Docs:       services.DocsOptions{MaxUploadMB: cfg.Docs.MaxUploadMB, UploadTimeout: cfg.Docs.UploadTimeout, OperatorToken: cfg.Docs.OperatorToken},
 	})
 	h := handlers.NewHandlerManager(svc)
 
@@ -98,6 +99,9 @@ func main() {
 	if repos.Enabled() && ext.Max != nil {
 		go svc.Scheduler.Run(ctx, cfg.Scheduler.Interval)
 	}
+
+	// База знаний: rag держит загрузки в памяти — дождаться его и перезалить сохранённые документы.
+	go svc.Documents.Resync(ctx)
 
 	app := fiber.New(handlers.ServerConfig(handlers.DefaultTimeouts))
 	// Порядок: recover (самый внешний) → номер запроса → fiberlogger → cors → routes.

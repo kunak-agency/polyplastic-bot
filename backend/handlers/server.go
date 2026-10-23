@@ -23,5 +23,6 @@ func ServerConfig(t Timeouts) fiber.Config {
 		ReadTimeout:  t.Read,
 		WriteTimeout: t.Write,
 		IdleTimeout:  t.Idle,
+		BodyLimit:    MaxRequestBody, // загрузка документов базы знаний (documents.go)
 	}
 }

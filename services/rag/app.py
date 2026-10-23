@@ -2,7 +2,7 @@
 
 GET  /health -> {"status":"ok"}
 POST /ask    {"question", "site", "trace_id", "address_form"?} -> ответ с источниками или отказ
-POST /flags  {"text", "context"} -> флаги F1–F10 и тон (пока заглушка)
+POST /flags  {"text", "context", "survey_question"?} -> флаги F0–F10, тон, цитата, degraded
 POST /documents (multipart: file, doc?) -> {doc_id, chunks, clauses, low_confidence_pages}
 GET  /documents -> {"items": [...], "total": N}
 
@@ -62,6 +62,10 @@ def build_pipeline() -> tuple[Pipeline, list]:
 async def lifespan(app: FastAPI):
     state.pipeline, chunks = build_pipeline()
     state.store = DocumentStore(chunks)
+    # Прогрев до yield: uvicorn открывает порт только после старта lifespan, так что /health
+    # отвечает лишь когда модели и LLM прогреты и первый /ask не платит за холодный старт.
+    if os.getenv("RAG_WARMUP", "1") != "0":
+        state.pipeline.warmup()
     yield
     gen = state.pipeline.generator if state.pipeline else None
     if gen is not None and hasattr(gen, "close"):
@@ -186,16 +190,18 @@ def list_documents() -> DocumentList:
     return DocumentList(items=items, total=len(items))
 
 
-# --- /flags (заглушка) ---
+# --- /flags (разметка F0–F10, flags.py) ---
 
 class FlagsRequest(BaseModel):
     text: str = Field(max_length=MAX_FLAGS_TEXT_CHARS)
     # контракт: pulse_d5|free_text|voice; пульсы бывают и на другие дни, поэтому pulse_dN
-    context: str = Field(pattern=r"^(pulse_d\d{1,3}|free_text|voice)$")
+    context: str = Field(default="free_text", pattern=r"^(pulse_d\d{1,3}|free_text|voice)$")
+    # вопрос опроса, к которому относится ответ (промпт flags-classify, {survey_question})
+    survey_question: str | None = Field(default=None, max_length=500)
 
 
 class FlagOut(BaseModel):
-    code: Literal["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"]
+    code: Literal["F0", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"]
     severity: int = Field(ge=1, le=3)
     confidence: float = Field(ge=0.0, le=1.0)
 
@@ -204,12 +210,16 @@ class FlagsResponse(BaseModel):
     flags: list[FlagOut]
     sentiment: Literal["neg", "neu", "pos"]
     quote: str
+    # true — LLM не задан, не ответил или дважды ответил не по схеме: «не размечено», а не «флагов нет»
+    degraded: bool = False
 
 
 @app.post("/flags", response_model=FlagsResponse)
 def flags(req: FlagsRequest) -> FlagsResponse:
-    # TODO: LLM-разметка по таксономии F1–F10 (ресерч, блок C): vLLM structured outputs со схемой
-    #   {sentiment, flags[{code, severity 1–3, confidence 0–1}], quote, route}, та же обёртка с
-    #   temperature/presence_penalty, что в llm.py; второй сигнал — rubert-tiny-sentiment-balanced;
-    #   для F10 (здоровье/личное) quote не возвращать. Regex-триггеры живут в Go.
-    return FlagsResponse(flags=[], sentiment="neu", quote="")
+    # Regex-триггеры живут в Go; маршрут и порог решает Go по data/taxonomy.yaml.
+    from flags import get_classifier
+
+    res = get_classifier().classify(req.text, req.context, req.survey_question)
+    log.info("flags: context=%s → %s%s", req.context, [f["code"] for f in res.flags] or "[]",
+             " (degraded)" if res.degraded else "")
+    return FlagsResponse(**res.as_dict())

@@ -23,6 +23,7 @@ type Services struct {
 	Newcomers *NewcomerService  // реестр, запуск, машина времени (newcomers.go)
 	Scenarios *ScenarioService  // конструктор сценариев (scenarios.go)
 	Tickets   *TicketService    // обращения (tickets.go)
+	Documents *DocumentService  // база знаний (documents.go)
 	// Bot — обработка событий MAX (bot.go); nil, если бот выключен (нет токена и не подделка).
 	Bot *BotService
 }
@@ -39,6 +40,8 @@ type Options struct {
 	// HRChatID, SBChatID — чаты для карточек обращений; 0 — только лог.
 	HRChatID int64
 	SBChatID int64
+	// Docs — база знаний: потолок файла, срок загрузки в rag, токен оператора.
+	Docs DocsOptions
 }
 
 // NewServices — репозитории могут быть выключены (nil): каркас поднимается без базы.
@@ -66,6 +69,11 @@ func NewServices(r *repositories.Repos, ext *externalApi.ExternalAPI, o Options)
 		Scenarios: &ScenarioService{repos: r, scheduler: sch, now: now},
 		Tickets:   tickets,
 	}
+	var docsRAG DocsRAG
+	if ext.RAG != nil { // nil-указатель в интерфейсе выглядел бы подключённым клиентом
+		docsRAG = ext.RAG
+	}
+	s.Documents = newDocumentService(r, docsRAG, o.Docs, now)
 	if ext.Max != nil {
 		s.Bot = NewBotService(ext.Max, r, sch, now)
 		s.Bot.tickets = tickets

@@ -40,6 +40,18 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 	api.Post("/tickets/:id/note", h.NoteTicket)
 	api.Post("/tickets/:id/resolve", h.ResolveTicket)
 
+	// v3 — обзор (api_contract.md, «v3 — итерация 4»).
+	api.Get("/overview", h.Overview)
+
+	// v3 — база знаний (api_contract.md, «v3 — база знаний»). Права HR — hrOnly: ролей нет,
+	// пускаем в development или с X-Operator-Token. Мидлвар на каждом маршруте, а не группой без
+	// префикса: та повисла бы на всём /api, и неизвестный путь вне development стал бы 403.
+	api.Get("/documents", h.hrOnly, h.ListDocuments)
+	api.Post("/documents", h.hrOnly, h.UploadDocument)
+	api.Post("/documents/ask", h.hrOnly, h.AskDocuments)
+	api.Get("/documents/:id/versions", h.hrOnly, h.DocumentVersions)
+	api.Get("/knowledge/unanswered", h.hrOnly, h.Unanswered)
+
 	// dev — только APP_ENV=development, иначе 404 (api_contract.md, раздел «dev»).
 	dev := api.Group("/dev", devOnly)
 	dev.Post("/simulate-start", h.SimulateStart)

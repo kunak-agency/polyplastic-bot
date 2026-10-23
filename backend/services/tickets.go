@@ -38,6 +38,8 @@ type TicketView struct {
 	NewcomerName string
 	Site         string
 	Messages     []domain.TicketMessage
+	// CategoryName — заголовок категории из data/taxonomy.yaml («Нет доступов, техники…»).
+	CategoryName string
 }
 
 // TicketFilter — GET /api/tickets.
@@ -167,7 +169,8 @@ func (s *TicketService) open(ctx context.Context, tx *repositories.Repos, e *dom
 	if t.Quote != nil {
 		context = append(context, domain.TicketMessage{From: domain.TicketMsgNewcomer, Text: *t.Quote})
 	}
-	context = append(context, domain.TicketMessage{From: domain.TicketMsgBot, Text: "Корсик передал обращение: " + d.what})
+	// автор строки — бот («Корсик» в кабинете), поэтому без «Корсик:» в тексте
+	context = append(context, domain.TicketMessage{From: domain.TicketMsgBot, Text: "Передал обращение: " + d.what})
 	for i := range context {
 		context[i].TicketID = t.ID
 		if err := tx.Tickets.AddMessage(ctx, &context[i]); err != nil {
@@ -265,7 +268,7 @@ func (s *TicketService) List(ctx context.Context, f TicketFilter) ([]TicketView,
 			}
 			names[t.EmployeeID] = e
 		}
-		v := TicketView{Ticket: t}
+		v := TicketView{Ticket: t, CategoryName: s.category(t.Category, t.Route).Name}
 		if e != nil {
 			v.NewcomerName, v.Site = e.FullName, e.Site
 		}
@@ -290,7 +293,7 @@ func (s *TicketService) Get(ctx context.Context, id uuid.UUID) (*TicketView, err
 }
 
 func (s *TicketService) view(ctx context.Context, r *repositories.Repos, t *domain.Ticket) (*TicketView, error) {
-	v := &TicketView{Ticket: *t}
+	v := &TicketView{Ticket: *t, CategoryName: s.category(t.Category, t.Route).Name}
 	e, err := r.Employees.ByID(ctx, t.EmployeeID)
 	if err != nil {
 		return nil, err
@@ -547,5 +550,5 @@ func (s *TicketService) sendResolved(ctx context.Context, e *domain.Employee, t 
 	if _, err := s.max.Send(ctx, ticketResolvedMessage(to, e, t)); err != nil {
 		logger.Warn("обращение #%d: «Вопрос закрыт» не ушёл: %v", t.Number, err)
 	}
-	_ = s.repos.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgBot, Text: "Корсик: «Вопрос закрыт», новичку предложено оценить помощь."})
+	_ = s.repos.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgBot, Text: "«Вопрос закрыт», новичку предложено оценить помощь."})
 }

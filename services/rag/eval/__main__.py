@@ -17,7 +17,8 @@
   injection-safe— инъекция отклонена или отвечена только дословной цитатой ожидаемого пункта;
   citation-valid— доля ответов, где каждая цитата дословно входит в указанный пункт корпуса
                   (перепроверка по всему корпусу, независимо от verify внутри конвейера);
-  p50/p95       — задержка `Pipeline.ask` в мс (модели уже загружены, прогрев 1 вопрос).
+  p50/p95       — задержка `Pipeline.ask` в мс: модели и LLM прогреты `Pipeline.warmup` (как на
+                  старте сервиса), LRU-кэши вопросов сброшены перед каждым вопросом.
 Только для конфигураций с LLM (в остальных «—»):
   llm-verify-pass — доля ответов LLM (не отказ, не fallback), прошедших verify цитат, проверку
                   чисел и длины; обрезанный по предложению ответ считается прошедшим;
@@ -27,6 +28,7 @@
   разбивка отказов проверок (verify_failed / foreign_numbers / too_long / truncated) — в --verbose.
 
 Флаги: --configs bm25,final,final+llm  --presence-penalty 1.0,0.3  --threshold 0.3  --sweep
+       --rerank-top 8
        --json out.json  --verbose
 """
 
@@ -98,7 +100,17 @@ def load_golden(path: Path = GOLDEN) -> list[Item]:
                 for r in csv.DictReader(f)]
 
 
+RERANK_TOP: int | None = None  # --rerank-top; None — значение по умолчанию из pipeline
+
+
 def make_settings(name: str, threshold: float | None) -> Settings:
+    s = _make_settings(name, threshold)
+    if RERANK_TOP:
+        s.rerank_top = RERANK_TOP
+    return s
+
+
+def _make_settings(name: str, threshold: float | None) -> Settings:
     if name == "bm25":
         return Settings(corpus_dir=str(CORPUS), retriever="bm25", reranker="none",
                         gate_threshold=threshold if threshold is not None else DEFAULT_GATE["lexical"])
@@ -118,12 +130,13 @@ def run_config(name: str, items: list[Item], chunks, threshold: float | None, ge
     pipe = Pipeline(settings, chunks, generator=generator)
     name = label or name
     rep = Report(name=name, load_s=time.perf_counter() - t0, threshold=settings.gate_threshold)
-    pipe.ask(items[0].question)  # прогрев
+    pipe.warmup()  # то же, что на старте сервиса: модели и LLM прогреты
     for it in items:
-        hits = pipe.retrieve(it.question)
+        pipe.clear_caches()  # меряем холодный вопрос: без LRU эмбеддинга и скоров реранкера
         t1 = time.perf_counter()
         ans = pipe.ask(it.question)
         latency = (time.perf_counter() - t1) * 1000
+        hits = pipe.retrieve(it.question)
         cited = [s.clause_id for s in ans.sources]
         raw = [{"doc": s.doc, "clause_id": s.clause_id, "quote": s.quote} for s in ans.sources]
         citation_ok = bool(raw) and verify_sources(raw, chunks).ok
@@ -260,10 +273,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--presence-penalty", default=None,
                     help="значения для final+llm через запятую, например 1.0,0.3 (A/B); по умолчанию из LLM_PRESENCE_PENALTY")
     ap.add_argument("--threshold", type=float, default=None, help="порог gate для final (по умолчанию из DEFAULT_GATE)")
+    ap.add_argument("--rerank-top", type=int, default=None,
+                    help="сколько чанков после RRF скорит реранкер (по умолчанию RAG_RERANK_TOP или 20)")
     ap.add_argument("--sweep", action="store_true", help="таблица порогов для последней конфигурации")
     ap.add_argument("--json", type=Path, default=None)
     ap.add_argument("--verbose", "-v", action="store_true", help="построчный разбор вопросов")
     args = ap.parse_args(argv)
+    global RERANK_TOP
+    RERANK_TOP = args.rerank_top or (int(os.environ["RAG_RERANK_TOP"]) if os.getenv("RAG_RERANK_TOP") else None)
     logging.basicConfig(level=logging.WARNING)
 
     items = load_golden()
@@ -310,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
                       f"top={','.join(r.ranked[0]) if r.ranked else '-':8s} "
                       f"ans={','.join(r.cited) or r.abstain_reason}"
                       + (f" mode={r.mode} check={r.check}" if r.mode in ("llm", "extractive_fallback") else "")
-                      + f"  {r.item.question}")
+                      + f" {r.latency_ms:.0f}ms  {r.item.question}")
             m = next(x for x in ms if x["config"] == rep.name)
             if m["n_llm_calls"]:
                 print(f"\nLLM-вызовов: {m['n_llm_calls']}, исходы: {m['llm_checks']}")

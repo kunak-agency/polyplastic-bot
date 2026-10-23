@@ -27,7 +27,9 @@ log = logging.getLogger("rag.pipeline")
 # ловушек sigmoid ≤ 0.039, у 0.1 запас ~1 логит над худшей ловушкой (README, «Оценка»).
 DEFAULT_GATE = {"lexical": 0.5, "reranker": 0.1}
 RRF_K = 60
-FUSE_TOP = 20  # кандидатов после RRF → в реранкер
+FUSE_TOP = 20  # кандидатов после RRF
+RERANK_TOP = 20  # из них → в реранкер (RAG_RERANK_TOP); README, «Скорость»
+WARMUP_QUESTION = "Как устроен первый рабочий день?"
 
 
 @dataclass
@@ -39,6 +41,7 @@ class Settings:
     top_k: int = 5
     dense_model: str = "BAAI/bge-m3"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_top: int = RERANK_TOP   # сколько чанков после RRF скорит реранкер
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -52,6 +55,7 @@ class Settings:
             top_k=int(os.getenv("RAG_TOP_K", "5")),
             dense_model=os.getenv("RAG_DENSE_MODEL", "BAAI/bge-m3"),
             reranker_model=os.getenv("RAG_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"),
+            rerank_top=int(os.getenv("RAG_RERANK_TOP") or RERANK_TOP),
         )
 
 
@@ -149,7 +153,8 @@ class Pipeline:
         if self.settings.reranker == "none":
             return NoopReranker()
         if self.settings.reranker == "bge":
-            return CrossEncoderReranker(self.settings.reranker_model, model=self._pair_scorer)
+            return CrossEncoderReranker(self.settings.reranker_model, model=self._pair_scorer,
+                                        max_candidates=self.settings.rerank_top)
         raise ValueError(f"RAG_RERANKER={self.settings.reranker!r}: ожидается none|bge")
 
     def replace_chunks(self, chunks: list[Chunk]) -> None:
@@ -165,6 +170,37 @@ class Pipeline:
     def from_env(cls, chunks: list[Chunk]) -> "Pipeline":
         cfg = LLMConfig.from_env()
         return cls(Settings.from_env(), chunks, generator=LLMClient(cfg) if cfg else None)
+
+    def clear_caches(self) -> None:
+        """Сбрасывает LRU эмбеддингов вопросов и скоров реранкера (eval меряет холодный вопрос)."""
+        if self._dense is not None:
+            self._dense.query_cache.clear()
+        cache = getattr(self.reranker, "cache", None)
+        if cache is not None:
+            cache.clear()
+
+    def warmup(self, llm: bool = True) -> dict[str, float]:
+        """Прогрев на старте: первый прогон моделей (аллокации, ядра mps) и первый запрос к LLM
+        (соединение, префикс промпта в кэше vLLM). Ошибки не роняют старт. → время шагов, мс."""
+        times: dict[str, float] = {}
+        t0 = time.perf_counter()
+        hits: list[Hit] = []
+        try:
+            hits = self.retrieve(WARMUP_QUESTION)
+            self.retrieve(WARMUP_QUESTION + " И когда обед?")  # второй прогон: другая длина батча
+        except Exception as exc:  # noqa: BLE001
+            log.warning("warmup retrieve failed: %s", type(exc).__name__)
+        times["retrieve_ms"] = (time.perf_counter() - t0) * 1000
+        if llm and self.generator is not None:
+            t1 = time.perf_counter()
+            try:
+                self.generator.generate(WARMUP_QUESTION, [h.chunk for h in hits] or self.chunks[:1])
+            except Exception as exc:  # noqa: BLE001 — LLM недоступен: ответы пойдут fallback'ом
+                log.warning("warmup llm failed: %s", type(exc).__name__)
+            times["llm_ms"] = (time.perf_counter() - t1) * 1000
+        self.clear_caches()
+        log.info("warmup done: %s", {k: round(v) for k, v in times.items()})
+        return times
 
     # --- шаги ---
 
@@ -187,8 +223,10 @@ class Pipeline:
             raw = self.generator.generate(question, [h.chunk for h in hits], address_form=address_form, site=site)
             return raw, "llm", None
         except Exception as exc:  # LLM недоступен, не JSON, не по схеме — дословная цитата всё равно верна
-            log.warning("LLM failed (%s), fallback to extractive", type(exc).__name__)
-            return extractive_answer(question, hits), "extractive_fallback", type(exc).__name__
+            # TimeoutError — бюджет LLM_TIMEOUT (llm.LLMTimeout): /ask не ждёт медленный под
+            reason = "timeout" if isinstance(exc, TimeoutError) else type(exc).__name__
+            log.warning("LLM failed (%s), fallback to extractive", reason)
+            return extractive_answer(question, hits), "extractive_fallback", reason
 
     def ask(self, question: str, site: str | None = None, trace_id: str | None = None,
             address_form: str | None = None) -> Answer:

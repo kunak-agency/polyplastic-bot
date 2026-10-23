@@ -63,6 +63,9 @@ type Category struct {
 	SecurityChat bool
 	// PartnerOnly — новичку «эту переписку видит только он(а)»: получатель — HR-партнёр или СБ.
 	PartnerOnly bool
+	// AutoThreshold — auto_escalation_threshold: с такой уверенностью LLM-флаг (POST /flags)
+	// уходит по маршруту; ниже — только отметка риска в карточке (ручной просмотр HR).
+	AutoThreshold float64
 }
 
 // Taxonomy — категории по коду.
@@ -70,6 +73,18 @@ type Taxonomy struct {
 	Version    int
 	Path       string
 	categories map[string]Category
+	// Правила для LLM-флагов (rules в файле).
+	// ManualReviewFloor — ниже этой уверенности флаг только в агрегатах (thresholds.manual_review_floor).
+	ManualReviewFloor float64
+	// EscalateSeverityGte, EscalateCodes — escalate_if: флаг эскалируется, если severity ≥ порога
+	// или код из списка (и уверенность не ниже AutoThreshold категории).
+	EscalateSeverityGte int
+	EscalateCodes       []string
+}
+
+// Escalates — escalate_if для LLM-флага: severity или критический код.
+func (t *Taxonomy) Escalates(code string, severity int) bool {
+	return severity >= t.EscalateSeverityGte || slices.Contains(t.EscalateCodes, code)
 }
 
 // securityChatCodes — контракт v2: «карточка обращения уходит в HR-чат, а F5/F9 — в чат СБ».
@@ -103,6 +118,13 @@ type fileRoot struct {
 	Version int `yaml:"version"`
 	Rules   struct {
 		NeverToManager []string `yaml:"never_to_manager"`
+		EscalateIf     struct {
+			SeverityGte *int     `yaml:"severity_gte"`
+			AnyOfCodes  []string `yaml:"any_of_codes"`
+		} `yaml:"escalate_if"`
+		Thresholds struct {
+			ManualReviewFloor *float64 `yaml:"manual_review_floor"`
+		} `yaml:"thresholds"`
 	} `yaml:"rules"`
 	Categories map[string]struct {
 		Name              string   `yaml:"name"`
@@ -111,6 +133,7 @@ type fileRoot struct {
 		ManagerVisibility string   `yaml:"manager_visibility"`
 		StoreQuote        *bool    `yaml:"store_quote"`
 		Critical          bool     `yaml:"critical"`
+		AutoThreshold     *float64 `yaml:"auto_escalation_threshold"`
 	} `yaml:"categories"`
 }
 
@@ -128,8 +151,18 @@ func Load(path string) (*Taxonomy, error) {
 	if len(f.Categories) == 0 {
 		return nil, fmt.Errorf("таксономия флагов %s: нет categories", path)
 	}
-	t := &Taxonomy{Version: f.Version, Path: path, categories: map[string]Category{}}
+	t := &Taxonomy{Version: f.Version, Path: path, categories: map[string]Category{},
+		ManualReviewFloor: 0.4, EscalateSeverityGte: 2, EscalateCodes: f.Rules.EscalateIf.AnyOfCodes}
+	if v := f.Rules.Thresholds.ManualReviewFloor; v != nil {
+		t.ManualReviewFloor = *v
+	}
+	if v := f.Rules.EscalateIf.SeverityGte; v != nil {
+		t.EscalateSeverityGte = *v
+	}
 	var problems []string
+	if t.ManualReviewFloor < 0 || t.ManualReviewFloor > 1 {
+		problems = append(problems, fmt.Sprintf("rules.thresholds.manual_review_floor %v вне 0–1", t.ManualReviewFloor))
+	}
 	for code, c := range f.Categories {
 		cat := Category{Code: code, Name: c.Name, Recipients: c.Route, ManagerVisibility: c.ManagerVisibility, Critical: c.Critical, StoreQuote: true}
 		if c.StoreQuote != nil {
@@ -165,6 +198,14 @@ func Load(path string) (*Taxonomy, error) {
 		cat.SecurityChat = slices.Contains(securityChatCodes, code)
 		cat.Restricted = cat.SecurityChat && cat.ManagerHidden
 		cat.PartnerOnly = c.Route[0] == "hr_bp" || c.Route[0] == "security"
+		cat.AutoThreshold = 0.6 // ресерч: стартовый порог, если у категории не задан
+		if c.AutoThreshold != nil {
+			cat.AutoThreshold = *c.AutoThreshold
+		}
+		if cat.AutoThreshold <= 0 || cat.AutoThreshold > 1 {
+			problems = append(problems, fmt.Sprintf("%s: auto_escalation_threshold %v вне (0, 1]", code, cat.AutoThreshold))
+			continue
+		}
 		t.categories[code] = cat
 	}
 	if len(problems) > 0 {

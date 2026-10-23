@@ -2,6 +2,7 @@ import type { Component } from 'vue'
 import {
   BookOpen,
   ChartColumn,
+  MessagesSquare,
   Inbox,
   LayoutDashboard,
   Route,
@@ -47,5 +48,9 @@ export const NAV: NavItem[] = [
 
 // Bottom of the rail: the last sitemap item, set apart as in most admin shells.
 export const NAV_FOOTER: NavItem[] = [
+  // Dev-only emulator of the newcomer's MAX dialog (pnpm dev, never in a build).
+  ...(import.meta.env.DEV
+    ? [{ id: 'dev-chat', routeName: 'dev-chat', labelKey: 'devchat.nav', icon: MessagesSquare }]
+    : []),
   { id: 'settings', routeName: 'settings', labelKey: 'common.nav.items.settings', icon: Settings },
 ]

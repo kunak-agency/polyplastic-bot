@@ -23,6 +23,8 @@ import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -126,7 +128,8 @@ class LLMConfig:
     presence_penalty: float = 1.0
     top_p: float = 0.8
     max_tokens: int = 768
-    timeout_s: float = 20.0
+    # Бюджет на весь вызов LLM, с. Бот ждёт /ask 8 с; не уложились — дословная цитата (fallback:timeout).
+    timeout_s: float = 4.0
     structured: str = "json_schema"  # json_schema | structured_outputs | none
 
     def __post_init__(self):
@@ -150,7 +153,8 @@ class LLMConfig:
             presence_penalty=float(os.getenv("LLM_PRESENCE_PENALTY", "1.0")),
             top_p=float(os.getenv("LLM_TOP_P", "0.8")),
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", "768")),
-            timeout_s=float(os.getenv("LLM_TIMEOUT_S", "20")),
+            # LLM_TIMEOUT — бюджет вызова; LLM_TIMEOUT_S — прежнее имя, читается для совместимости
+            timeout_s=float(os.getenv("LLM_TIMEOUT") or os.getenv("LLM_TIMEOUT_S") or "4"),
             structured=os.getenv("LLM_STRUCTURED", "json_schema"),
         )
 
@@ -257,6 +261,10 @@ def parse_answer(content: str) -> dict:
     return data
 
 
+class LLMTimeout(TimeoutError):
+    """LLM не уложился в бюджет LLM_TIMEOUT: конвейер отдаёт дословную цитату (fallback:timeout)."""
+
+
 class LLMClient:
     def __init__(self, cfg: LLMConfig, transport: httpx.BaseTransport | None = None):
         self.cfg = cfg
@@ -264,11 +272,25 @@ class LLMClient:
         headers = {"Authorization": f"Bearer {cfg.api_key}"} if cfg.api_key else {}
         self._http = httpx.Client(base_url=cfg.base_url, headers=headers, timeout=cfg.timeout_s,
                                   transport=transport)
+        # Таймауты httpx — на каждую фазу (connect, read…), а не на весь запрос. Общий бюджет
+        # держим ожиданием future; опоздавший запрос дорабатывает в фоне и обрывается таймаутом httpx.
+        self._pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="llm")
+
+    def _post(self, payload: dict) -> httpx.Response:
+        try:
+            return self._http.post("/chat/completions", json=payload)
+        except httpx.TimeoutException as exc:
+            raise LLMTimeout(f"LLM: {type(exc).__name__}") from exc
 
     def generate(self, question: str, chunks: list[Chunk], *, address_form: str | None = None,
                  site: str | None = None) -> dict:
         payload = build_payload(self.cfg, question, chunks, address_form=address_form, site=site)
-        resp = self._http.post("/chat/completions", json=payload)
+        future = self._pool.submit(self._post, payload)
+        try:
+            resp = future.result(timeout=self.cfg.timeout_s)
+        except FutureTimeout as exc:
+            future.cancel()
+            raise LLMTimeout(f"LLM не ответил за {self.cfg.timeout_s:g} с") from exc
         resp.raise_for_status()
         choice = resp.json()["choices"][0]
         if choice.get("finish_reason") == "length":
@@ -276,4 +298,5 @@ class LLMClient:
         return parse_answer(choice["message"]["content"])
 
     def close(self) -> None:
+        self._pool.shutdown(wait=False, cancel_futures=True)
         self._http.close()

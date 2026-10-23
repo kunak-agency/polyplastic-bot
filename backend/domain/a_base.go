@@ -49,6 +49,9 @@ func AllModels() []any {
 		&Ticket{},
 		&TicketMessage{},
 		&BotChat{},
+		&KBDocument{},
+		&KBDocumentVersion{},
+		&KBDocumentFile{},
 	}
 }
 
