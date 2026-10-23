@@ -1,15 +1,16 @@
 // Команда seed-demo — синтетический поток новичков для раздела «Обзор»: 50 персон из
-// data/personas.yaml с ответами на опросы, сигналами и обращениями. Нужна, потому что трёх
-// новичков сида мало для heat map и тренда с порогом анонимности ≥ 5 человек.
+// data/personas.yaml и добор до -count (по умолчанию 150) из шаблонов extra.go, с ответами на
+// опросы, сигналами и обращениями. Нужна, потому что трёх новичков сида мало для heat map и
+// тренда с порогом анонимности ≥ 5 человек, а 50 открывают в heat map лишь пару ячеек.
 //
 //	cd backend && go run ./cmd/seed          # сначала обычный сид: из него берутся шаги сценария
-//	cd backend && APP_ENV=development go run ./cmd/seed-demo
+//	cd backend && APP_ENV=development go run ./cmd/seed-demo [-count 150]
 //
 // Только APP_ENV=development. Повторный запуск никого не дублирует: персона с тем же ФИО
-// пропускается. Чистая пересборка — `go run ./cmd/seed -reset -yes`, затем снова seed-demo.
+// пропускается (добор детерминирован: тот же -count — те же люди). Чистая пересборка — `go run ./cmd/seed -reset -yes`, затем снова seed-demo.
 //
-// Всё синтетическое: ФИО из personas.yaml помечены «(синтетика)», телефоны +7 000 100-…,
-// аккаунты MAX — несуществующие id 9100000xx. Текстов ответов нет: только оценки, кнопки
+// Всё синтетическое: ФИО из personas.yaml и добора помечены «(синтетика)», телефоны +7 000 100-…,
+// аккаунты MAX — несуществующие id 910000xxx. Текстов ответов нет: только оценки, кнопки
 // причин и коды сигналов (как после разметки), так что и в обзор текст попасть не может.
 // Значения шкал — по кривым траекторий из data/generator-spec.yaml (seed 20261023).
 package main
@@ -24,6 +25,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,21 +51,27 @@ const (
 )
 
 type persona struct {
-	ID          string `yaml:"id"`
-	FullName    string `yaml:"full_name"`
-	Site        string `yaml:"site"`
-	Department  string `yaml:"department"`
-	Position    string `yaml:"position"`
-	Shift       *int   `yaml:"shift"`
-	AddressForm string `yaml:"address_form"`
-	Laconic     bool   `yaml:"laconic"`
-	Trajectory  string `yaml:"trajectory"`
-	HiddenFlags []struct {
-		Code     string  `yaml:"code"`
-		Severity int     `yaml:"severity_peak"`
-		Onset    string  `yaml:"onset"`
-		Resolved *string `yaml:"resolved"`
-	} `yaml:"hidden_flags"`
+	ID          string       `yaml:"id"`
+	FullName    string       `yaml:"full_name"`
+	Site        string       `yaml:"site"`
+	Department  string       `yaml:"department"`
+	Position    string       `yaml:"position"`
+	Shift       *int         `yaml:"shift"`
+	AddressForm string       `yaml:"address_form"`
+	Laconic     bool         `yaml:"laconic"`
+	Trajectory  string       `yaml:"trajectory"`
+	HiddenFlags []hiddenFlag `yaml:"hidden_flags"`
+	// Day — день адаптации, заданный генератором добора (extra.go); у персон из yaml пусто —
+	// день выбирает dayPlan.
+	Day *int `yaml:"-"`
+}
+
+type hiddenFlag struct {
+	Code     string  `yaml:"code"`
+	Severity int     `yaml:"severity_peak"`
+	Onset    string  `yaml:"onset"`
+	Resolved *string `yaml:"resolved"`
+	open     bool    // добор: сигнал P0 намеренно не решён — красная зона
 }
 
 type flagSpan struct {
@@ -74,7 +82,7 @@ type flagSpan struct {
 }
 
 func main() {
-	limit := flag.Int("n", 50, "сколько персон взять (40–50)")
+	count := flag.Int("count", 150, "сколько новичков в демо-потоке: сначала персоны из data/personas.yaml, сверх них — добор из шаблонов (extra.go)")
 	flag.Parse()
 	_ = godotenv.Load()
 	cfg, err := config.Load()
@@ -102,8 +110,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("персоны: %v", err)
 	}
-	if *limit < len(people) {
-		people = people[:*limit]
+	if *count < len(people) {
+		people = people[:*count]
 	}
 	svc := services.NewServices(repos, &externalApi.ExternalAPI{}, services.Options{Bot: cfg.Bot, Taxonomy: tax})
 	ctx := context.Background()
@@ -111,6 +119,10 @@ func main() {
 
 	g := &gen{repos: repos, svc: svc, tax: tax, rng: rand.New(rand.NewSource(genSeed)), now: time.Now(), scenario: scID, surveys: surveys}
 	days := g.dayPlan(people)
+	for _, p := range extraPersonas(people, *count-len(people)) {
+		people = append(people, p)
+		days = append(days, *p.Day)
+	}
 	made := 0
 	for i, p := range people {
 		if g.person(ctx, i, p, days[i]) {
@@ -122,7 +134,7 @@ func main() {
 
 // loadPersonas — data/personas.yaml от рабочего каталога вверх.
 func loadPersonas() ([]persona, error) {
-	for _, p := range []string{"data/personas.yaml", "../data/personas.yaml", "../../data/personas.yaml"} {
+	for _, p := range []string{"data/personas.yaml", "../data/personas.yaml", "../../data/personas.yaml", "../../../data/personas.yaml"} {
 		b, err := os.ReadFile(p)
 		if err != nil {
 			continue
@@ -323,7 +335,7 @@ func (g *gen) person(ctx context.Context, i int, p persona, day int) bool {
 	if err != nil {
 		log.Fatalf("новичок: %v", err)
 	}
-	if len(list) > 0 {
+	if slices.ContainsFunc(list, func(e domain.Employee) bool { return e.FullName == p.FullName }) {
 		log.Printf("seed-demo: «%s» уже есть — пропускаю", p.FullName)
 		return false
 	}
@@ -337,7 +349,7 @@ func (g *gen) person(ctx context.Context, i int, p persona, day int) bool {
 		shift = strp(strconv.Itoa(*p.Shift))
 	}
 	c, err := g.svc.Newcomers.Create(ctx, services.NewcomerInput{
-		FullName: p.FullName, Phone: fmt.Sprintf("+7 000 100-00-%02d", i+1), Site: p.Site,
+		FullName: p.FullName, Phone: fmt.Sprintf("+7 000 100-%02d-%02d", (i+1)/100, (i+1)%100), Site: p.Site,
 		Department: p.Department, Position: p.Position,
 		ManagerName: "Руководитель " + p.Department + " (синтетика)", MentorName: "Наставник " + p.ID + " (синтетика)",
 		RecruiterName: "Рекрутер Демо (синтетика)", StartDate: start, Shift: shift, ScenarioID: g.scenario,
