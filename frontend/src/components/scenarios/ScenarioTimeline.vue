@@ -1,7 +1,18 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, Flag, GitBranch, ListChecks, Mail, TriangleAlert } from 'lucide-vue-next'
+import {
+  ArrowDown,
+  ArrowUp,
+  CircleAlert,
+  Flag,
+  GitBranch,
+  GripVertical,
+  ListChecks,
+  Mail,
+  Plus,
+  TriangleAlert,
+} from 'lucide-vue-next'
 import { formatDayOffset } from '@/lib/calendar'
 import { branchCount, groupBlocks, type Issue, type StepBlock } from '@/lib/scenarioBranches'
 import type { ScenarioStep } from '@/types/api'
@@ -9,13 +20,20 @@ import type { ScenarioStep } from '@/types/api'
 // The "Timeline" view (ux-spec v1, Enboarder): the same steps as the table,
 // laid out by day — a column per day, the blocks of the day by time, a card per
 // step with its kind, sites, branches and status. A click opens the step panel.
+// Inside a block a card is dragged to another place (or moved with the arrows
+// under the selected card, Alt+↑/↓ on the card); "+" inserts a message after.
 const props = defineProps<{
   steps: ScenarioStep[]
   selectedId: string | null
   issues: Map<string, Issue[]>
   legacy: Map<string, string[]>
 }>()
-const emit = defineEmits<{ select: [id: string] }>()
+const emit = defineEmits<{
+  select: [id: string]
+  move: [id: string, by: -1 | 1]
+  reorder: [id: string, targetId: string]
+  'insert-after': [id: string]
+}>()
 const { t } = useI18n()
 
 const days = computed(() => {
@@ -27,6 +45,42 @@ const days = computed(() => {
   }
   return out
 })
+
+// Drag and drop stays inside the block the card came from.
+// The dropped card takes the target's place: a line above the target when
+// it comes from below, under it when it comes from above.
+const drag = ref<{ id: string; block: string; index: number } | null>(null)
+const over = ref<string | null>(null)
+function blockOf(b: StepBlock): string {
+  return `${b.day_offset}|${b.time}`
+}
+function onDragStart(e: DragEvent, b: StepBlock, id: string): void {
+  drag.value = { id, block: blockOf(b), index: b.steps.findIndex((s) => s.id === id) }
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', id)
+  }
+}
+function onDragOver(e: DragEvent, b: StepBlock, id: string): void {
+  if (!drag.value || drag.value.block !== blockOf(b)) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  over.value = id === drag.value.id ? null : id
+}
+function onDrop(e: DragEvent, b: StepBlock, id: string): void {
+  const d = drag.value
+  onDragEnd()
+  if (!d || d.block !== blockOf(b) || d.id === id) return
+  e.preventDefault()
+  emit('reorder', d.id, id)
+}
+function onDragEnd(): void {
+  drag.value = null
+  over.value = null
+}
+function stepName(s: ScenarioStep): string {
+  return s.title || t('scenarios.editor.untitled')
+}
 
 function level(id: string): 'error' | 'warning' | 'ok' {
   const list = props.issues.get(id) ?? []
@@ -51,35 +105,89 @@ function sitesShort(s: ScenarioStep): string {
       </header>
       <div v-for="b in d.blocks" :key="`${b.day_offset}|${b.time}`" class="tl__block">
         <div class="tl__time tabular">{{ b.time }}</div>
-        <button
-          v-for="s in b.steps"
+        <div
+          v-for="(s, i) in b.steps"
           :key="s.id"
-          type="button"
           :class="[
-            'tl__card',
-            `tl__card--${level(s.id)}`,
-            { 'tl__card--on': s.id === selectedId, 'tl__card--hr': !!s.hr_task },
+            'tl__slot',
+            {
+              'tl__slot--before': over === s.id && (drag?.index ?? 0) > i,
+              'tl__slot--after': over === s.id && (drag?.index ?? 0) < i,
+              'tl__slot--dragging': drag?.id === s.id,
+            },
           ]"
-          :aria-pressed="s.id === selectedId"
-          :title="s.title || t('scenarios.editor.untitled')"
-          @click="emit('select', s.id)"
+          @dragover="onDragOver($event, b, s.id)"
+          @dragleave="over = over === s.id ? null : over"
+          @drop="onDrop($event, b, s.id)"
         >
-          <span class="tl__title">
-            <Mail v-if="s.hr_task" :size="12" class="tl__ico" />
-            <ListChecks v-else-if="s.kind === 'survey'" :size="12" class="tl__ico" />
-            <span class="tl__text">{{ s.title || t('scenarios.editor.untitled') }}</span>
-          </span>
-          <span class="tl__meta">
-            <span>{{ t(`common.stepKind.${s.kind}`) }}</span>
-            <span>{{ sitesShort(s) }}</span>
-            <span v-if="s.buttons.length > 0" class="tl__br">
-              <GitBranch :size="10" />{{ branchCount(s).withBranch }}/{{ branchCount(s).total }}
+          <button
+            type="button"
+            :class="[
+              'tl__card',
+              `tl__card--${level(s.id)}`,
+              { 'tl__card--on': s.id === selectedId, 'tl__card--hr': !!s.hr_task },
+            ]"
+            :draggable="b.steps.length > 1"
+            :aria-pressed="s.id === selectedId"
+            :title="
+              b.steps.length > 1 ? `${stepName(s)} · ${t('scenarios.order.dragHint')}` : stepName(s)
+            "
+            @click="emit('select', s.id)"
+            @keydown.alt.up.prevent="emit('move', s.id, -1)"
+            @keydown.alt.down.prevent="emit('move', s.id, 1)"
+            @dragstart="onDragStart($event, b, s.id)"
+            @dragend="onDragEnd"
+          >
+            <span class="tl__title">
+              <GripVertical v-if="b.steps.length > 1" :size="12" class="tl__grip" />
+              <Mail v-if="s.hr_task" :size="12" class="tl__ico" />
+              <ListChecks v-else-if="s.kind === 'survey'" :size="12" class="tl__ico" />
+              <span class="tl__text">{{ s.title || t('scenarios.editor.untitled') }}</span>
             </span>
-            <Flag v-if="s.flag_required" :size="10" />
-            <CircleAlert v-if="level(s.id) === 'error'" :size="11" class="tl__err" />
-            <TriangleAlert v-else-if="level(s.id) === 'warning'" :size="11" class="tl__warn" />
-          </span>
-        </button>
+            <span class="tl__meta">
+              <span>{{ t(`common.stepKind.${s.kind}`) }}</span>
+              <span>{{ sitesShort(s) }}</span>
+              <span v-if="s.buttons.length > 0" class="tl__br">
+                <GitBranch :size="10" />{{ branchCount(s).withBranch }}/{{ branchCount(s).total }}
+              </span>
+              <Flag v-if="s.flag_required" :size="10" />
+              <CircleAlert v-if="level(s.id) === 'error'" :size="11" class="tl__err" />
+              <TriangleAlert v-else-if="level(s.id) === 'warning'" :size="11" class="tl__warn" />
+            </span>
+          </button>
+          <div v-if="s.id === selectedId" class="tl__tools">
+            <template v-if="b.steps.length > 1">
+              <button
+                type="button"
+                class="tl__tool"
+                :disabled="i === 0"
+                :title="t('scenarios.order.up')"
+                :aria-label="t('scenarios.order.upNamed', { title: stepName(s) })"
+                @click="emit('move', s.id, -1)"
+              >
+                <ArrowUp :size="12" />
+              </button>
+              <button
+                type="button"
+                class="tl__tool"
+                :disabled="i === b.steps.length - 1"
+                :title="t('scenarios.order.down')"
+                :aria-label="t('scenarios.order.downNamed', { title: stepName(s) })"
+                @click="emit('move', s.id, 1)"
+              >
+                <ArrowDown :size="12" />
+              </button>
+            </template>
+            <button
+              type="button"
+              class="tl__tool tl__tool--wide"
+              :aria-label="t('scenarios.order.insertAfterNamed', { title: stepName(s) })"
+              @click="emit('insert-after', s.id)"
+            >
+              <Plus :size="12" />{{ t('scenarios.order.insertAfterShort') }}
+            </button>
+          </div>
+        </div>
       </div>
     </section>
   </div>
@@ -127,6 +235,57 @@ function sitesShort(s: ScenarioStep): string {
 .tl__time {
   font-size: var(--text-xs);
   color: var(--fg-muted);
+}
+.tl__slot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: var(--radius-md);
+}
+.tl__slot--before {
+  box-shadow: 0 -3px 0 var(--accent);
+}
+.tl__slot--after {
+  box-shadow: 0 3px 0 var(--accent);
+}
+.tl__slot--dragging {
+  opacity: 0.5;
+}
+.tl__grip {
+  flex: none;
+  color: var(--fg-faint);
+  cursor: grab;
+}
+.tl__tools {
+  display: flex;
+  gap: 2px;
+}
+.tl__tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 22px;
+  min-width: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.tl__tool--wide {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.tl__tool:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+.tl__tool:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 .tl__card {
   display: flex;

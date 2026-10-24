@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowRight, Flag, GitBranch, Mail, Zap } from 'lucide-vue-next'
+import { ArrowDown, ArrowRight, ArrowUp, Flag, GitBranch, Mail, Plus, Zap } from 'lucide-vue-next'
 import { formatDayOffset } from '@/lib/calendar'
 import {
   branchCount,
@@ -15,7 +15,8 @@ import type { ScenarioStep, StepStats } from '@/types/api'
 
 // Overview table of the scenario (verdict §Q3): day, time, sites, kind, text,
 // buttons, branches "2/3", status. Steps of one block (same day and time) are
-// grouped; branches are edited in the panel, never here.
+// grouped; branches are edited in the panel, never here. The last column moves
+// a message inside its block and inserts a new one after it.
 const props = defineProps<{
   steps: ScenarioStep[]
   selectedId: string | null
@@ -25,7 +26,11 @@ const props = defineProps<{
   stats: Map<string, StepStats>
   compact: boolean
 }>()
-const emit = defineEmits<{ select: [id: string] }>()
+const emit = defineEmits<{
+  select: [id: string]
+  move: [id: string, by: -1 | 1]
+  'insert-after': [id: string]
+}>()
 const { t } = useI18n()
 
 const blocks = computed(() => groupBlocks(props.steps))
@@ -51,6 +56,9 @@ function statusTitle(s: ScenarioStep): string {
   for (const l of props.legacy.get(s.id) ?? []) lines.push(t(`scenarios.issues.${l}`))
   return lines.join('\n')
 }
+function stepName(s: ScenarioStep): string {
+  return s.title || t('scenarios.editor.untitled')
+}
 function badge(s: ScenarioStep, label: string) {
   return statsBadge(props.stats.get(s.id)?.buttons.find((b) => b.label === label))
 }
@@ -69,6 +77,9 @@ function badge(s: ScenarioStep, label: string) {
           <th>{{ t('scenarios.editor.columns.buttons') }}</th>
           <th class="td-num">{{ t('scenarios.editor.columns.branches') }}</th>
           <th>{{ t('scenarios.editor.columns.status') }}</th>
+          <th class="td-order">
+            <span class="sr-only">{{ t('scenarios.order.column') }}</span>
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -169,6 +180,43 @@ function badge(s: ScenarioStep, label: string) {
               </span>
               <span v-else class="badge solid-success">{{ t('scenarios.issues.ok') }}</span>
             </td>
+            <td class="td-order" @click.stop>
+              <span class="order">
+                <!-- A lone step keeps the arrow space, so "+" stays in line. -->
+                <span v-if="b.steps.length === 1" class="order__gap" aria-hidden="true" />
+                <template v-else>
+                  <button
+                    type="button"
+                    class="order__btn"
+                    :disabled="i === 0"
+                    :title="t('scenarios.order.up')"
+                    :aria-label="t('scenarios.order.upNamed', { title: stepName(s) })"
+                    @click="emit('move', s.id, -1)"
+                  >
+                    <ArrowUp :size="13" />
+                  </button>
+                  <button
+                    type="button"
+                    class="order__btn"
+                    :disabled="i === b.steps.length - 1"
+                    :title="t('scenarios.order.down')"
+                    :aria-label="t('scenarios.order.downNamed', { title: stepName(s) })"
+                    @click="emit('move', s.id, 1)"
+                  >
+                    <ArrowDown :size="13" />
+                  </button>
+                </template>
+                <button
+                  type="button"
+                  class="order__btn"
+                  :title="t('scenarios.order.insertAfter')"
+                  :aria-label="t('scenarios.order.insertAfterNamed', { title: stepName(s) })"
+                  @click="emit('insert-after', s.id)"
+                >
+                  <Plus :size="13" />
+                </button>
+              </span>
+            </td>
           </tr>
         </template>
       </tbody>
@@ -177,6 +225,56 @@ function badge(s: ScenarioStep, label: string) {
 </template>
 
 <style scoped>
+.td-order {
+  width: 1%;
+  white-space: nowrap;
+  padding-left: 2px;
+  padding-right: 4px;
+}
+.order {
+  display: inline-flex;
+  gap: 1px;
+  opacity: 0.45;
+}
+.steps__row:hover .order,
+.steps__row:focus-within .order,
+.steps__row--on .order {
+  opacity: 1;
+}
+.order__gap {
+  width: 45px;
+}
+.order__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.order__btn:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  color: var(--fg);
+}
+.order__btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.order__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 .tbl-scroll {
   overflow-x: auto;
 }

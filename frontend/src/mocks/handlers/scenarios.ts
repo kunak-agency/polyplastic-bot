@@ -188,9 +188,11 @@ function putSteps(req: MockRequest): MockResult {
   if (problems.length > 0)
     return error(422, 'VALIDATION_FAILED', 'Проверьте данные запроса', problems)
   // The server keeps a client id and makes its own when there is none; an
-  // empty time comes back as 10:00, the absent flag as "work hours only".
-  s.steps = steps.map((st) => ({
+  // empty time comes back as 10:00, the absent flag as "work hours only";
+  // position is the index in the list, as on the server.
+  s.steps = steps.map((st, i) => ({
     ...st,
+    position: i,
     id: st.id || newId(),
     time: st.time || '10:00',
     sites: st.sites ?? [],

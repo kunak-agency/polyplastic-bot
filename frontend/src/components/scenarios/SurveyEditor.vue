@@ -2,10 +2,10 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDown, ArrowUp, Flag, GitBranch, Plus, X } from 'lucide-vue-next'
-import FormField from '@/components/common/FormField.vue'
 import { Button } from '@/components/ui/button'
 import BranchEditor from '@/components/scenarios/BranchEditor.vue'
 import OutcomesEditor from '@/components/scenarios/OutcomesEditor.vue'
+import { newQuestion, questionType, typedQuestion } from '@/lib/scenarioSteps'
 import {
   branchHasContent,
   optionKeys,
@@ -20,13 +20,14 @@ import type {
   QuestionType,
   StepSurvey,
   SurveyQuestion,
-  SurveyScale,
 } from '@/types/api'
 
-// Survey settings: the survey-wide scale (contract v1), per-question type,
-// scale, threshold, comment, options, "own answer", "required"; per option a
-// branch (text and actions before the next question) and a risk flag; the
-// rules after the survey (06-excel-tz §1.1–1.3, §2).
+// Survey settings, all per question: type, scale, threshold, comment, options,
+// "own answer", "required"; per option a branch (text and actions before the
+// next question) and a risk flag; the rules after the survey (06-excel-tz
+// §1.1–1.3, §2). There is no survey-wide scale on screen: a question of the old
+// format (no type) shows the type it takes from `survey.scale` and keeps it
+// until HR picks a type for that question.
 const props = defineProps<{
   survey: StepSurvey
   issues: Issue[]
@@ -65,7 +66,6 @@ function flagOf(qi: number, key: string): OptionFlag | undefined {
   return props.survey.questions[qi]?.option_flags?.[key]
 }
 
-const SCALES: SurveyScale[] = ['1-10', '1-5', 'yesno', 'choice']
 const TYPES: QuestionType[] = ['scale', 'yesno', 'choice', 'multi', 'text']
 
 function set(p: Partial<StepSurvey>): void {
@@ -75,7 +75,7 @@ function setQ(i: number, p: Partial<SurveyQuestion>): void {
   set({ questions: props.survey.questions.map((q, j) => (j === i ? { ...q, ...p } : q)) })
 }
 function addQ(): void {
-  set({ questions: [...props.survey.questions, { text: '', options: [] }] })
+  set({ questions: [...props.survey.questions, newQuestion(props.survey)] })
 }
 function removeQ(i: number): void {
   const q = props.survey.questions[i]
@@ -84,16 +84,20 @@ function removeQ(i: number): void {
   picked.value = null
   set({ questions: props.survey.questions.filter((_, j) => j !== i) })
 }
+// Picking a type gives the question its own settings; the old format is
+// never picked back, only kept while HR leaves it alone.
 function setType(i: number, raw: string): void {
-  const type = raw === '' ? undefined : (raw as QuestionType)
-  const p: Partial<SurveyQuestion> = { type }
-  if (type === 'scale') {
-    p.scale = props.survey.questions[i].scale ?? '1-10'
-    p.threshold = props.survey.questions[i].threshold ?? 8
-    p.comment = 'below'
-  } else if (type === 'yesno') p.comment = 'on_no'
-  else p.comment = ''
-  setQ(i, p)
+  if (raw === '') return
+  const q = typedQuestion(props.survey.questions[i], raw as QuestionType, props.survey)
+  set({ questions: props.survey.questions.map((x, j) => (j === i ? q : x)) })
+}
+// The old format's threshold: the question's own, else the survey's.
+function legacyThreshold(q: SurveyQuestion): number | null {
+  return q.threshold ?? props.survey.threshold
+}
+function legacyScaleLabel(): string {
+  const sc = props.survey.scale
+  return sc === '1-10' || sc === '1-5' ? t(`scenarios.panel.scales.${sc}`) : ''
 }
 function num(raw: string): number | null {
   const v = Number(raw)
@@ -151,45 +155,13 @@ function moveOption(qi: number, oi: number, by: -1 | 1): void {
   )
 }
 function effType(q: SurveyQuestion): QuestionType {
-  if (q.type) return q.type
-  if (props.survey.scale === 'yesno') return 'yesno'
-  if (props.survey.scale === 'choice') return 'choice'
-  return 'scale'
+  return questionType(q, props.survey.scale)
 }
 </script>
 
 <template>
   <fieldset class="survey">
     <legend class="fw-semi">{{ t('scenarios.panel.survey') }}</legend>
-    <FormField :label="t('scenarios.panel.scale')" :hint="t('scenarios.survey.scaleHint')">
-      <div class="checks" role="radiogroup" :aria-label="t('scenarios.panel.scale')">
-        <label v-for="sc in SCALES" :key="sc" class="check">
-          <input
-            type="radio"
-            name="sp-scale"
-            :checked="survey.scale === sc"
-            @change="set({ scale: sc })"
-          />
-          {{ t(`scenarios.panel.scales.${sc}`) }}
-        </label>
-      </div>
-    </FormField>
-    <FormField
-      v-if="survey.scale === '1-10' || survey.scale === '1-5'"
-      :label="t('scenarios.panel.threshold')"
-      :hint="t('scenarios.panel.thresholdHint')"
-    >
-      <input
-        class="input tabular narrow"
-        type="number"
-        min="1"
-        :max="survey.scale === '1-10' ? 10 : 5"
-        :value="survey.threshold ?? ''"
-        :aria-label="t('scenarios.panel.threshold')"
-        @change="set({ threshold: num(($event.target as HTMLInputElement).value) })"
-      />
-    </FormField>
-
     <div class="qs">
       <div v-for="(q, i) in survey.questions" :key="i" class="q">
         <div class="row">
@@ -221,14 +193,21 @@ function effType(q: SurveyQuestion): QuestionType {
           />
         </div>
         <div class="q__grid">
-          <label class="q__f">
+          <label :class="['q__f', { 'q__f--wide': !q.type }]">
             <span>{{ t('scenarios.survey.type') }}</span>
             <select
               class="input"
+              :aria-label="t('scenarios.survey.typeOf', { n: i + 1 })"
               :value="q.type ?? ''"
               @change="setType(i, ($event.target as HTMLSelectElement).value)"
             >
-              <option value="">{{ t('scenarios.survey.typeInherit') }}</option>
+              <option v-if="!q.type" value="">
+                {{
+                  t('scenarios.survey.typeLegacy', {
+                    type: t(`scenarios.survey.types.${effType(q)}`),
+                  })
+                }}
+              </option>
               <option v-for="ty in TYPES" :key="ty" :value="ty">
                 {{ t(`scenarios.survey.types.${ty}`) }}
               </option>
@@ -262,7 +241,18 @@ function effType(q: SurveyQuestion): QuestionType {
               />
             </label>
           </template>
-          <label v-if="effType(q) !== 'text'" class="q__f">
+          <label v-else-if="!q.type && effType(q) === 'scale'" class="q__f">
+            <span>{{ t('scenarios.survey.threshold') }}</span>
+            <input
+              class="input tabular"
+              type="number"
+              min="1"
+              :max="survey.scale === '1-5' ? 5 : 10"
+              :value="legacyThreshold(q) ?? ''"
+              @change="setQ(i, { threshold: num(($event.target as HTMLInputElement).value) })"
+            />
+          </label>
+          <label v-if="q.type && effType(q) !== 'text'" class="q__f">
             <span>{{ t('scenarios.survey.comment') }}</span>
             <select
               class="input"
@@ -280,6 +270,13 @@ function effType(q: SurveyQuestion): QuestionType {
             </select>
           </label>
         </div>
+        <p v-if="!q.type" class="muted txt-sm legacy">
+          {{
+            effType(q) === 'scale'
+              ? t('scenarios.survey.legacyScale', { scale: legacyScaleLabel() })
+              : t('scenarios.survey.legacy')
+          }}
+        </p>
         <div
           v-if="effType(q) === 'choice' || effType(q) === 'multi' || effType(q) === 'scale'"
           class="optlist"
@@ -472,11 +469,6 @@ function effType(q: SurveyQuestion): QuestionType {
   padding: 0 4px;
   font-size: var(--text-sm);
 }
-.checks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-}
 .check {
   display: inline-flex;
   align-items: center;
@@ -484,8 +476,8 @@ function effType(q: SurveyQuestion): QuestionType {
   font-size: var(--text-sm);
   cursor: pointer;
 }
-.narrow {
-  width: 100px;
+.legacy {
+  margin: 0;
 }
 .qs {
   display: flex;
@@ -527,6 +519,9 @@ function effType(q: SurveyQuestion): QuestionType {
   gap: 2px;
   font-size: var(--text-xs);
   color: var(--fg-muted);
+}
+.q__f--wide {
+  grid-column: span 2;
 }
 .add {
   align-self: flex-start;

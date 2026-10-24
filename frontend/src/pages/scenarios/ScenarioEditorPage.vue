@@ -50,7 +50,16 @@ import { useScenarioExport } from '@/composables/useScenarioExport'
 import { errorMessage, isApiError } from '@/lib/apiError'
 import { formatDayOffset } from '@/lib/calendar'
 import { uuidV4 } from '@/lib/ids'
-import { createStep, sortSteps, stepIssues } from '@/lib/scenarioSteps'
+import {
+  createStep,
+  insertAfter,
+  moveInBlock,
+  moveToStep,
+  relocateStep,
+  sortSteps,
+  stepIssues,
+  withPositions,
+} from '@/lib/scenarioSteps'
 import { countIssues, groupBlocks, validateScenario } from '@/lib/scenarioBranches'
 import type {
   PublishPreview,
@@ -323,9 +332,40 @@ async function onSendTest(button: number | null): Promise<void> {
 function patchSelected(p: Partial<ScenarioStep>): void {
   const s = selected.value
   if (!s) return
-  Object.assign(s, p)
-  // Day and time decide the row's place; re-sort so the table stays in plan order.
-  if ('day_offset' in p || 'time' in p) steps.value = sortSteps(steps.value)
+  const when =
+    ('day_offset' in p && p.day_offset !== s.day_offset) || ('time' in p && p.time !== s.time)
+  if (!when) {
+    Object.assign(s, p)
+    return
+  }
+  // Day and time decide the block: the step goes to the end of the block of
+  // its new day and time (or a block of its own), and HR hears about it.
+  const r = relocateStep(steps.value, s.id, p)
+  steps.value = r.steps
+  if (!r.moved) return
+  const { from, to, place } = r.moved
+  const where = (b: { day_offset: number; time: string }) =>
+    `${formatDayOffset(b.day_offset)} ${b.time}`
+  toast.warning(
+    to.size > 1
+      ? t('scenarios.order.joined', { block: where(to), place, size: to.size })
+      : t('scenarios.order.left', { from: where(from), block: where(to) }),
+  )
+}
+
+// ── Order inside a block: "up / down", drag and drop, "insert after" ──
+function onMove(stepId: string, by: -1 | 1): void {
+  steps.value = moveInBlock(steps.value, stepId, by)
+}
+function onReorder(stepId: string, targetId: string): void {
+  steps.value = moveToStep(steps.value, stepId, targetId)
+  selectedId.value = stepId
+}
+function onInsertAfter(stepId: string): void {
+  const r = insertAfter(steps.value, stepId, uuidV4())
+  if (!r) return
+  steps.value = r.steps
+  selectedId.value = r.step.id
 }
 
 function addStep(): void {
@@ -369,7 +409,7 @@ async function save(): Promise<boolean> {
   saving.value = true
   try {
     const sent = v4Weight(steps.value)
-    const res = await apiPutScenarioSteps(scenario.value.id, steps.value)
+    const res = await apiPutScenarioSteps(scenario.value.id, withPositions(steps.value))
     if (v4Weight(res.steps) < sent) toast.warning(t('scenarios.editor.v4Lost'))
     adopt(res)
     return true
@@ -607,6 +647,9 @@ async function onPublish(body: PublishRequest): Promise<void> {
             :issues="issues"
             :legacy="legacy"
             @select="selectedId = $event"
+            @move="onMove"
+            @reorder="onReorder"
+            @insert-after="onInsertAfter"
           />
           <StepsTable
             v-else
@@ -617,6 +660,8 @@ async function onPublish(body: PublishRequest): Promise<void> {
             :stats="stats"
             :compact="!!selected"
             @select="selectedId = $event"
+            @move="onMove"
+            @insert-after="onInsertAfter"
           />
         </SectionCard>
 
@@ -635,6 +680,7 @@ async function onPublish(body: PublishRequest): Promise<void> {
             :recipients="recipients"
             @patch="patchSelected"
             @remove="removeSelected"
+            @insert-after="onInsertAfter(selected.id)"
             @close="selectedId = null"
             @send-test="onSendTest"
           />

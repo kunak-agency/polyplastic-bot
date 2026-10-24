@@ -286,6 +286,9 @@ export interface StepSurvey {
 
 export interface ScenarioStep {
   id: string
+  // Order in the scenario (the order of the list in PUT …/steps): it is the
+  // order of the messages inside a block of one day and time.
+  position?: number
   day_offset: number
   time: string // HH:MM, local time of the site
   stage: Stage

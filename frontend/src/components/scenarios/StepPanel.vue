@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import {
   CircleAlert,
   GitBranch,
+  ListPlus,
   MessageSquareText,
   Plus,
   Send,
@@ -19,7 +20,7 @@ import SurveyEditor from '@/components/scenarios/SurveyEditor.vue'
 import AiRewriteBadge from '@/components/scenarios/AiRewriteBadge.vue'
 import { SITES } from '@/stores/site'
 import { formatDayOffset } from '@/lib/calendar'
-import { STAGES, STEP_KINDS, defaultSurvey } from '@/lib/scenarioSteps'
+import { STAGES, STEP_KINDS, defaultSurvey, textToFirstQuestion } from '@/lib/scenarioSteps'
 import {
   labelIsLong,
   asksSomething,
@@ -47,6 +48,7 @@ const tab = defineModel<number | null>('tab', { required: true })
 const emit = defineEmits<{
   patch: [patch: Partial<ScenarioStep>]
   remove: []
+  'insert-after': []
   close: []
   'send-test': [button: number | null]
 }>()
@@ -80,9 +82,14 @@ function toggleSite(code: SiteCode, on: boolean): void {
 }
 
 function setKind(kind: StepKind): void {
-  if (kind === 'survey') patch({ kind, survey: props.step.survey ?? defaultSurvey(props.step) })
+  // The step's text stays the intro of the survey; question 1 starts empty.
+  if (kind === 'survey') patch({ kind, survey: props.step.survey ?? defaultSurvey() })
   else patch({ kind, survey: null })
 }
+// Offered while question 1 is empty and the step has a text.
+const textToQuestion = computed(() =>
+  props.step.kind === 'survey' ? textToFirstQuestion(props.step) : null,
+)
 
 function setButton(i: number, p: Partial<StepButton>): void {
   patch({ buttons: props.step.buttons.map((b, j) => (j === i ? { ...b, ...p } : b)) })
@@ -501,8 +508,14 @@ function minutes(s: number | null): string {
 
       <div v-if="step.kind === 'survey' && !step.survey" class="survey--missing">
         <p class="muted txt-sm">{{ t('scenarios.panel.surveyMissing') }}</p>
-        <Button size="sm" @click="patch({ survey: defaultSurvey(step) })">
+        <Button size="sm" @click="patch({ survey: defaultSurvey() })">
           <Plus :size="14" />{{ t('scenarios.panel.surveyCreate') }}
+        </Button>
+      </div>
+      <div v-if="step.kind === 'survey' && step.survey" class="hint-box txt-sm intro">
+        <span>{{ t('scenarios.survey.introHint') }}</span>
+        <Button v-if="textToQuestion" size="sm" @click="patch(textToQuestion)">
+          {{ t('scenarios.survey.textToQuestion') }}
         </Button>
       </div>
       <SurveyEditor
@@ -581,6 +594,9 @@ function minutes(s: number | null): string {
           sending ? t('scenarios.test.sending') : t('scenarios.test.sendSelf')
         }}
       </Button>
+      <Button size="sm" :title="t('scenarios.order.insertAfterHint')" @click="emit('insert-after')">
+        <ListPlus :size="14" />{{ t('scenarios.order.insertAfter') }}
+      </Button>
       <Button variant="danger" size="sm" @click="emit('remove')">
         <Trash2 :size="14" />{{ t('scenarios.editor.deleteStep') }}
       </Button>
@@ -619,6 +635,8 @@ function minutes(s: number | null): string {
 }
 .panel__foot {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   padding: 10px 16px;
   border-top: 1px solid var(--border-subtle);
@@ -798,6 +816,13 @@ function minutes(s: number | null): string {
   padding: 8px 10px;
   border-radius: var(--radius-md);
   background: var(--info-soft);
+}
+.intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .survey--missing {
   display: flex;

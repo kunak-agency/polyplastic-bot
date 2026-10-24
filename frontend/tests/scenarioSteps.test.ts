@@ -41,11 +41,10 @@ test('a survey needs questions the server accepts', () => {
   assert.deepEqual(stepIssues(survey('1-10', [{ text: 'q', options: [] }])), [])
 })
 
-test('the default survey takes its question from the step text', () => {
-  assert.deepEqual(defaultSurvey({ text_ty: 'ty', text_vy: ' vy ' }).questions, [
-    { text: 'vy', options: [] },
+test('the default survey starts with one empty typed question', () => {
+  assert.deepEqual(defaultSurvey().questions, [
+    { text: '', options: [], type: 'scale', scale: '1-10', threshold: 8, comment: 'below' },
   ])
-  assert.deepEqual(defaultSurvey({ text_ty: '', text_vy: '' }).questions, [])
 })
 
 test('steps sort by day, then by time', () => {
