@@ -198,7 +198,10 @@ func (h *Handler) recruiterPolicy(c *fiber.Ctx, u *domain.User, p, m string) err
 	switch {
 	case p == "/api/team" || strings.HasPrefix(p, "/api/users") || p == "/api/newcomers/reassign" ||
 		strings.HasPrefix(p, "/api/hrlead/") || p == "/api/dev/recruiter-morning" ||
-		strings.HasPrefix(p, "/api/manager/"):
+		strings.HasPrefix(p, "/api/manager/") ||
+		// «Показатели» и прежний обзор — экран руководителя HR, рекрутеру закрыт (ресерч
+		// 2026-10-24-overview-metrics.md).
+		p == "/api/indicators" || p == "/api/overview":
 		return errForbidden()
 	case strings.HasPrefix(p, "/api/scenarios"):
 		if read || rePreviewPath.MatchString(p) || (isDev() && reSendTest.MatchString(p)) {

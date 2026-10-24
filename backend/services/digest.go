@@ -98,6 +98,9 @@ type Digest struct {
 	// последняя — отчётная (overview_tone.go). Числа считает код, строку в MAX тоже пишет код.
 	Tone      ToneCell
 	ToneTrend ToneTrend
+	// PulseTrend — средний пульс по неделям (4 недели, последняя — отчётная): «Настроение по
+	// неделям», переехало с «Показателей» в «Аналитику».
+	PulseTrend Trend
 	// Done — «Сделано по темам» из «что сделано» при решении обращений за неделю (#31).
 	Done       []DigestDoneTheme
 	Aggregates DigestAggregates
@@ -331,6 +334,7 @@ func BuildDigest(rows *repositories.OverviewRows, texts []repositories.DigestTex
 		}
 	}
 
+	d.PulseTrend = buildTrend(rows, people2site(rows), site, at, loc)
 	d.ToneTrend = BuildTone(rows, site, from.AddDate(0, 0, -7*(TrendWeeks-1)), TrendWeeks, loc)
 	d.Tone = toneWeek(rows, site, from, loc)
 

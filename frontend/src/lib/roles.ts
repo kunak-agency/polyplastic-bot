@@ -15,8 +15,9 @@ const ONLY: Partial<Record<Role, ReadonlySet<string>>> = {
 }
 const DENY: Partial<Record<Role, ReadonlySet<string>>> = {
   // Users are managed in Settings and the team on "Team", by the HR lead only.
-  // The head of unit's view ("manager") is not a recruiter's screen.
-  recruiter: new Set(['settings', 'team', 'manager']),
+  // The head of unit's view ("manager") is not a recruiter's screen, nor are
+  // "Indicators" (route "overview"): the HR lead's period outcomes.
+  recruiter: new Set(['settings', 'team', 'manager', 'overview']),
 }
 // Open by link but not in the menu: the HR lead reaches the head of unit's view
 // from Team → Heads of units and from the newcomer card, not as "My employees".

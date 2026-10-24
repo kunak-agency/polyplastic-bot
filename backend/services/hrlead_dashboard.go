@@ -82,6 +82,7 @@ type DigestCard struct {
 type HRLeadDashboard struct {
 	Today         []TodayRow
 	TodayTotal    int
+	TodayRed      int // из TodayTotal — красных (строка «Сегодня у команды» в «Показателях»)
 	Tiles         map[string]Tile
 	PulseResponse PulseResponse
 	Team          *Team
@@ -300,6 +301,11 @@ func BuildHRLeadDashboard(rows *repositories.OverviewRows, users []domain.User, 
 
 	sortToday(today)
 	d.TodayTotal = len(today)
+	for _, r := range today {
+		if r.Severity == SevRed {
+			d.TodayRed++
+		}
+	}
 	if len(today) > TodayLimit {
 		today = today[:TodayLimit]
 	}

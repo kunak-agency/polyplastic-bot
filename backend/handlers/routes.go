@@ -85,6 +85,8 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 
 	// v3 — обзор (api_contract.md, «v3 — итерация 4»).
 	api.Get("/overview", h.Overview)
+	// «Показатели» — исходы адаптации за период (api_contract.md, «Показатели»).
+	api.Get("/indicators", h.Indicators)
 
 	// v4 — дайджест и руководитель подразделения (api_contract.md, «v4 — дайджест и руководитель»).
 	api.Get("/digest", h.Digest)

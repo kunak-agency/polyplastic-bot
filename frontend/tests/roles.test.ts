@@ -26,7 +26,6 @@ test('menu by role', () => {
     'tickets',
     'newcomers',
     'analytics',
-    'overview',
     'scenarios',
     'knowledge',
     'media',
@@ -63,8 +62,9 @@ test('manager sees only his newcomers', () => {
   assert.equal(homeRoute('manager'), 'manager')
 })
 
-test('recruiter: no settings, team or head-of-unit view; starts on the dashboard', () => {
-  for (const r of ['settings', 'team', 'manager']) assert.equal(canOpen('recruiter', r), false, r)
+test('recruiter: no settings, team, head-of-unit view or Indicators; starts on the dashboard', () => {
+  for (const r of ['settings', 'team', 'manager', 'overview'])
+    assert.equal(canOpen('recruiter', r), false, r)
   for (const r of ['dashboard', 'tickets', 'newcomers', 'newcomer', 'analytics'])
     assert.equal(canOpen('recruiter', r), true, r)
   assert.equal(homeRoute('recruiter'), 'dashboard')

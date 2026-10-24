@@ -11,7 +11,8 @@ import { CHART_INK } from './echarts'
 // Topic x site heat map (ux-spec 3.7). A cell is the number of distinct
 // newcomers who raised the topic; fewer than min_group people behind a cell
 // and it is hidden, by the server (count is null), and drawn as "< 5" here.
-const props = defineProps<{ heatmap: Overview['heatmap'] }>()
+// title — the caller's heading ("Indicators" names it by the period, not by days).
+const props = defineProps<{ heatmap: Overview['heatmap']; title?: string }>()
 const { t, n } = useI18n()
 
 const rows = computed(() => heatRows(props.heatmap))
@@ -116,7 +117,7 @@ const option = computed<EChartsCoreOption>(() => {
 </script>
 
 <template>
-  <SectionCard :title="t('overview.heatmap.title', { days: heatmap.period_days })">
+  <SectionCard :title="title ?? t('overview.heatmap.title', { days: heatmap.period_days })">
     <template #desc>{{ t('overview.heatmap.desc', { min: heatmap.min_group }) }}</template>
     <p v-if="!anySignal" class="muted">
       {{ t('overview.heatmap.empty', { days: heatmap.period_days }) }}
@@ -171,6 +172,7 @@ const option = computed<EChartsCoreOption>(() => {
         </tbody>
       </table>
     </template>
+    <slot />
   </SectionCard>
 </template>
 

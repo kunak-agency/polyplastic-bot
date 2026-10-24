@@ -54,6 +54,8 @@ export function authGate(req: MockRequest): MockResult | null {
     return forbidden()
   // The head of unit's view is not a recruiter's screen.
   if (me.role === 'recruiter' && /\/manager\/[^/]+(\/[^/]+)?$/.test(req.path)) return forbidden()
+  // "Indicators" (and the old overview) are the HR lead's screen.
+  if (me.role === 'recruiter' && /\/(indicators|overview)$/.test(req.path)) return forbidden()
   return null
 }
 

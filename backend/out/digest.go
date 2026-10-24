@@ -27,6 +27,8 @@ type Digest struct {
 	Message      DigestMessage      `json:"max_message"`
 	Tone         Tone               `json:"tone"`
 	ToneTrend    ToneTrend          `json:"tone_trend"`
+	// PulseTrend — «Настроение по неделям»: средний пульс за 4 недели, последняя — отчётная.
+	PulseTrend Trend `json:"pulse_trend"`
 	// Done — «Сделано по темам» (волна 4, #31): категория, сколько обращений закрыто с «что
 	// сделано», до трёх обезличенных строк. Без имён; F5/F9/F10 не берутся.
 	Done []DigestDone `json:"done"`
@@ -119,6 +121,7 @@ func DigestFrom(d *services.Digest) Digest {
 		Message:      DigestMessage{Text: d.MaxText, Length: len([]rune(d.MaxText)), Link: d.Link},
 		Tone:         toneFrom(d.Tone),
 		ToneTrend:    toneTrendFrom(d.ToneTrend),
+		PulseTrend:   TrendFrom(d.PulseTrend),
 		Done:         []DigestDone{},
 	}
 	for _, x := range d.Done {

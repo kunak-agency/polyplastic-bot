@@ -149,6 +149,7 @@ func TestAuthFlagOffEverythingOpen(t *testing.T) {
 		t.Fatalf("без флага реестр открыт: %v", got)
 	}
 	a.do("GET", "/api/tickets", "", nil, 200)
+	a.do("GET", "/api/indicators", "", nil, 200) // без входа «Показатели» открыты, как раньше
 	a.do("GET", "/api/recruiter/dashboard", "", nil, 404)
 }
 
@@ -257,7 +258,10 @@ func TestAuthRecruiterSeesOnlyOwn(t *testing.T) {
 		t.Fatalf("после «связался» строка скрыта: %v", today)
 	}
 	a.do("POST", "/api/newcomers/"+other.ID.String()+"/contacted", sid, nil, 404)
-	a.do("GET", "/api/overview", sid, nil, 200)
+	// «Показатели» (и прежний обзор) — экран руководителя HR: рекрутеру 403.
+	a.do("GET", "/api/overview", sid, nil, 403)
+	a.do("GET", "/api/indicators", sid, nil, 403)
+	a.do("GET", "/api/indicators?period=q", sid, nil, 403)
 	a.do("GET", "/api/hrlead/dashboard", sid, nil, 403)
 	a.do("GET", "/api/manager/managers", sid, nil, 403) // вид руководителя — не экран рекрутера
 	a.do("GET", "/api/manager/newcomers?name=x", sid, nil, 403)
@@ -326,6 +330,12 @@ func TestAuthDeactivateAndUsers(t *testing.T) {
 		t.Fatalf("mine: %v", mine)
 	}
 	a.do("PATCH", "/api/newcomers/"+n.ID.String(), hrSID, map[string]any{"recruiter_id": nil}, 200)
+	// «Показатели» руководителю HR: строка «Сегодня у команды» — из его «Сегодня».
+	ind, _ := a.do("GET", "/api/indicators?period=90d", hrSID, nil, 200)
+	if today, _ := ind["today"].(map[string]any); today["source"] != "hrlead" || today["total"].(float64) < 1 {
+		t.Fatalf("indicators today: %v", ind["today"])
+	}
+	a.do("GET", "/api/indicators", petrSID, nil, 403)
 	hd, _ := a.do("GET", "/api/hrlead/dashboard", hrSID, nil, 200)
 	for _, k := range services.HRLeadTiles {
 		if _, ok := hd["tiles"].(map[string]any)[k]; !ok {

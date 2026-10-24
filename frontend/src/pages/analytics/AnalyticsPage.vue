@@ -11,6 +11,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import ErrorState from '@/components/common/ErrorState.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import RiskZones from '@/components/overview/RiskZones.vue'
+import PulseTrend from '@/components/overview/PulseTrend.vue'
 import DigestSummary from '@/components/digest/DigestSummary.vue'
 import DigestThemes from '@/components/digest/DigestThemes.vue'
 import DigestSites from '@/components/digest/DigestSites.vue'
@@ -147,6 +148,8 @@ const empty = computed(
         <div class="digest__col">
           <DigestThemes :digest="data" />
           <DigestSites :digest="data" />
+          <!-- Mood by weeks moved here from "Indicators" (research 2026-10-24). -->
+          <PulseTrend v-if="data.pulse_trend" :trend="data.pulse_trend" />
         </div>
         <div class="digest__col">
           <div class="probation txt-sm">

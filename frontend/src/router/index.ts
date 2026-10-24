@@ -204,8 +204,14 @@ router.beforeEach(async (to, from) => {
 
   const viewer = auth.viewer
   if (name === 'login') return { name: homeRoute(viewer) }
-  // The day starts on the role's "Today": a fresh load of "/" lands there.
-  if (name === 'overview' && from === START_LOCATION && homeRoute(viewer) !== 'overview') {
+  // The day starts on the role's "Today": a fresh load of the bare "/" lands
+  // there. A pasted "Indicators" link with a period (/?period=q) stays put.
+  if (
+    name === 'overview' &&
+    from === START_LOCATION &&
+    Object.keys(to.query).length === 0 &&
+    homeRoute(viewer) !== 'overview'
+  ) {
     return { name: homeRoute(viewer) }
   }
   if (name !== 'not-found' && !canOpen(viewer, name)) return { name: homeRoute(viewer) }

@@ -836,6 +836,120 @@ export interface Overview {
   }
 }
 
+// ── "Indicators" (api_contract.md, section "indicators") ────────────────────────────
+
+export type IndicatorPeriodKey = '30d' | '90d' | 'q'
+export type IndicatorTileKey =
+  | 'connected_before_d0'
+  | 'pulse_response'
+  | 'bot_closed'
+  | 'first_response'
+  | 'ip_passed'
+  | 'early_leave'
+// few: n < min_group; later_90: no decisions yet; no_marker: no dismissal mark.
+export type IndicatorStatus = 'ok' | 'few' | 'later_90' | 'no_marker'
+export type IndicatorDirection = 'up' | 'down' | 'same' | 'new'
+export type IndicatorUnit = 'count' | 'pct' | 'per10' | 'min'
+export type FunnelStepKey =
+  'invited' | 'connected_before_d0' | 'passed_d0' | 'active_d30' | 'active_d90' | 'ip_decision'
+export type FunnelLossReason =
+  'not_connected' | 'connected_late' | 'silent' | 'stopped' | 'no_decision'
+export type SiteRowKey =
+  'cohort' | 'connected_before_d0' | 'pulse_response' | 'low_pulse' | 'tickets' | 'ip_passed'
+export type SiteVerdict = 'hidden' | 'noise' | 'same' | 'above' | 'below'
+
+export interface IndicatorTile {
+  key: IndicatorTileKey
+  status: IndicatorStatus
+  unit: IndicatorUnit
+  // percent (pct) or working minutes (min); null unless status is "ok".
+  value: number | null
+  num: number
+  n: number
+  prev: number | null
+  prev_n: number
+  delta: number | null
+  direction: Exclude<IndicatorDirection, 'new'> | null
+  // The number comes from the synthetic demo flow: outcomes are not real.
+  demo: boolean
+  sla_pct?: number | null
+  sla_n?: number
+}
+
+export interface FunnelStep {
+  key: FunnelStepKey
+  // null when hidden (cohort below min_group).
+  count: number | null
+  // null below 20 people in the cohort: absolute numbers only.
+  percent: number | null
+  pending: number
+  lost: { reason: FunnelLossReason; count: number }[]
+  hidden: boolean
+}
+
+export interface SiteCellIndicator {
+  site: SiteCode
+  value: number | null
+  n: number
+  hidden: boolean
+  // In the row's unit (p.p. for pct, "per 10" for per10) and in p.p.
+  diff: number | null
+  diff_pp: number | null
+  verdict: SiteVerdict | null
+  flag: boolean
+}
+
+export interface Indicators {
+  site: SiteCode | null
+  generated_at: string
+  period: {
+    key: IndicatorPeriodKey
+    from: string
+    to: string
+    prev_from: string
+    prev_to: string
+    days: number
+  }
+  cohort: number
+  cohort_prev: number
+  synthetic: number
+  min_group: number
+  today: { total: number; urgent: number; source: 'hrlead' | 'actions' }
+  tiles: IndicatorTile[]
+  funnel: { cohort: number; percents: boolean; hidden: boolean; steps: FunnelStep[] }
+  sites: {
+    sites: SiteCode[]
+    cohorts: Partial<Record<SiteCode, number>>
+    rows: {
+      key: SiteRowKey
+      unit: IndicatorUnit
+      avg: number | null
+      avg_n: number
+      cells: SiteCellIndicator[]
+    }[]
+    flagged: SiteCode[]
+  }
+  topics: {
+    heatmap: Overview['heatmap']
+    trends: {
+      category: HeatCategoryCode
+      name: string
+      count: number | null
+      prev: number | null
+      trend: IndicatorDirection | null
+    }[]
+  }
+  hr_load: {
+    tickets: number
+    employees: number
+    per_100: number | null
+    bot_closed: IndicatorTile
+    first_response: IndicatorTile
+    kb_gaps: number | null
+    kb_questions: number
+  }
+}
+
 // ── v4: weekly digest and the head of unit (api_contract.md, "v4") ──────────
 
 export interface DigestTotals {
@@ -898,6 +1012,9 @@ export interface Digest {
     rejected: string[]
   }
   max_message: { text: string; length: number; link: string }
+  // Mood by weeks (4 weeks, the last one is the reported week); moved here from
+  // the Indicators screen. Optional: an older server does not send it.
+  pulse_trend?: Overview['trend']
 }
 
 export interface DigestSendResult {

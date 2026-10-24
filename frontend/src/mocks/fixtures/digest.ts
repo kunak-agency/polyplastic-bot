@@ -1,4 +1,5 @@
 import type { Digest, ManagerSummary, ManagerView } from '@/types/api'
+import { overviewFixtures } from './overview'
 
 // Synthetic digest of one week (no real people): numbers mirror a smoke run on
 // the 150-persona demo base.
@@ -89,6 +90,8 @@ export const digestFixture: Digest = {
     length: 80,
     link: 'http://localhost:5173/analytics?week=2026-W43',
   },
+  // Mood by weeks, the same synthetic capture as the overview's trend.
+  pulse_trend: overviewFixtures.all.trend,
 }
 
 export const managersFixture: ManagerSummary[] = [
