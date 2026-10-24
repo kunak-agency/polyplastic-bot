@@ -260,7 +260,7 @@ func (h *Handler) Call(conn *websocket.Conn) {
 				input = "text"
 			}
 			site := services.CallSite(m.Site)
-			opts := voiceOpts{audio: input == "voice", bargeIn: svc.Config().BargeIn, greet: svc.Config().SpokenGreeting, site: site, callID: callID}
+			opts := voiceOpts{audio: input == "voice", bargeIn: svc.Config().BargeIn, greet: svc.Config().SpokenGreeting, mute: svc.Config().MuteWhileBot, site: site, callID: callID}
 			var l audio.Leg
 			if opts.audio {
 				leg = newWSLeg(callID, sendBin)

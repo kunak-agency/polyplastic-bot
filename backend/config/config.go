@@ -94,6 +94,9 @@ type Call struct {
 	// SpokenGreeting — Корсик здоровается голосом (CALL_SPOKEN_GREETING, по умолчанию нет):
 	// без него звонящий сразу задаёт вопрос, приветствие только текстом на экране.
 	SpokenGreeting bool
+	// MuteWhileBot — микрофон глушится, пока Корсик думает и говорит (CALL_MUTE_WHILE_BOT,
+	// по умолчанию нет): для записи демо без перебиваний.
+	MuteWhileBot bool
 }
 
 // Digest — еженедельный дайджест руководителю подбора и ссылки из MAX в кабинет
@@ -264,6 +267,7 @@ func Load() (Config, error) {
 		MaxDuration:    time.Duration(integer("CALL_MAX_SECONDS")) * time.Second,
 		BargeIn:        flagDefault("CALL_BARGE_IN", true),
 		SpokenGreeting: flagDefault("CALL_SPOKEN_GREETING", false),
+		MuteWhileBot:   flagDefault("CALL_MUTE_WHILE_BOT", false),
 	}
 	if c.Call.MaxConcurrent <= 0 {
 		c.Call.MaxConcurrent = 2
