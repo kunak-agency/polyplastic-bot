@@ -6,34 +6,27 @@
 <rect x="24" y="26" width="2352" height="776" rx="14" fill="#fff" stroke="#e1e8f2" stroke-width="1"/>
 <rect x="40" y="40" width="960" height="60" rx="10" fill="#dde9f8" stroke="none" stroke-width="1.2"/>
 <text x="62" y="81" font-size="30" font-weight="bold" fill="#1f5fbf" text-anchor="start">1. Ведём новичка по сценарию и отвечаем по документам</text>
-<text x="2360" y="66" font-size="14" font-weight="normal" fill="#5b6675" text-anchor="end">поток слева направо: задача → сценарий → ответы → риски</text>
-<text x="2360" y="88" font-size="12.5" font-weight="normal" fill="#8a96a6" text-anchor="end">Корсик · ПОЛИПЛАСТИК · «Открой#Моспром» 2026</text>
+<text x="2360" y="76" font-size="15" font-weight="normal" fill="#8a96a6" text-anchor="end">Корсик · ПОЛИПЛАСТИК · «Открой#Моспром» 2026</text>
 <rect x="36" y="118" width="290" height="666" rx="16" fill="#f2f6fc" stroke="#c7d6ec" stroke-width="1.2"/>
 <circle cx="66" cy="150" r="17" fill="#1f5fbf"/>
 <text x="66" y="156" font-size="17" font-weight="bold" fill="#fff" text-anchor="middle">1</text>
 <text x="94" y="157" font-size="20" font-weight="bold" fill="#1b2a3d" text-anchor="start">Вход</text>
-<rect x="52" y="185" width="258" height="215" rx="10" fill="#15305a" stroke="#15305a" stroke-width="1.2"/>
-<text x="70" y="216" font-size="19" font-weight="bold" fill="#fff" text-anchor="start">Задача кейса</text>
-<text x="70" y="242" font-size="14" font-weight="normal" fill="#dbe6f7" text-anchor="start">Бот адаптации уже есть —</text>
-<text x="70" y="261" font-size="14" font-weight="normal" fill="#dbe6f7" text-anchor="start">перенести в MAX</text>
-<text x="70" y="280" font-size="14" font-weight="normal" fill="#dbe6f7" text-anchor="start">и добавить ИИ:</text>
-<text x="70" y="299" font-size="14" font-weight="normal" fill="#dbe6f7" text-anchor="start">ответы по базе знаний,</text>
-<text x="70" y="318" font-size="14" font-weight="normal" fill="#dbe6f7" text-anchor="start">стиль компании,</text>
-<text x="70" y="337" font-size="14" font-weight="normal" fill="#dbe6f7" text-anchor="start">кабинет для HR</text>
-<text x="70" y="380" font-size="14.5" font-weight="bold" fill="#9cc3ff" text-anchor="start">3 площадки · D−3 … D+90</text>
-<path d="M 72 436 A 109.0 11 0 0 0 290 436 L 290 524 A 109.0 11 0 0 1 72 524 Z" fill="#fff" stroke="#1f5fbf" stroke-width="1.4"/>
-<ellipse cx="181.0" cy="436" rx="109.0" ry="11" fill="#dde9f8" stroke="#1f5fbf" stroke-width="1.4"/>
-<text x="181.0" y="466" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="middle">Excel-ТЗ HR</text>
-<text x="181.0" y="485" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="middle">сценарий, строки r1–r70</text>
-<path d="M 290 480 L 341 480 L 341 295 L 370 295" fill="none" stroke="#8a96a6" stroke-width="1.6" marker-end="url(#ah)"/>
-<rect x="52" y="560" width="258" height="200" rx="10" fill="#fff" stroke="#c9d4e3" stroke-width="1.2"/>
-<text x="68" y="588" font-size="16" font-weight="bold" fill="#1b2a3d" text-anchor="start">Кто участвует</text>
-<text x="68" y="610" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">Новичок — чат в MAX</text>
-<text x="68" y="628" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">HR, рекрутер — кабинет</text>
-<text x="68" y="646" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">Руководители — MAX</text>
-<text x="68" y="664" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">HR-партнёр, СБ — через</text>
-<text x="68" y="682" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">обращения</text>
-<text x="68" y="744" font-size="11.5" font-weight="normal" fill="#8a96a6" text-anchor="start">данные в репозитории синтетические</text>
+<path d="M 64 211 A 117.0 11 0 0 0 298 211 L 298 379 A 117.0 11 0 0 1 64 379 Z" fill="#fff" stroke="#1f5fbf" stroke-width="1.4"/>
+<ellipse cx="181.0" cy="211" rx="117.0" ry="11" fill="#dde9f8" stroke="#1f5fbf" stroke-width="1.4"/>
+<text x="181.0" y="298.5" font-size="19" font-weight="bold" fill="#1b2a3d" text-anchor="middle">Excel-ТЗ HR</text>
+<text x="181.0" y="320.5" font-size="14" font-weight="normal" fill="#5b6675" text-anchor="middle">сценарий, строки r1–r70</text>
+<path d="M 298 295 L 370 295" fill="none" stroke="#8a96a6" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="52" y="430" width="258" height="330" rx="10" fill="#fff" stroke="#c9d4e3" stroke-width="1.2"/>
+<text x="70" y="466" font-size="19" font-weight="bold" fill="#1b2a3d" text-anchor="start">Кто участвует</text>
+<text x="70" y="506" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="start">Новичок</text>
+<text x="70" y="526" font-size="14" font-weight="normal" fill="#5b6675" text-anchor="start">чат в MAX</text>
+<text x="70" y="564" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="start">HR, рекрутер</text>
+<text x="70" y="584" font-size="14" font-weight="normal" fill="#5b6675" text-anchor="start">кабинет</text>
+<text x="70" y="622" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="start">Руководители</text>
+<text x="70" y="642" font-size="14" font-weight="normal" fill="#5b6675" text-anchor="start">MAX</text>
+<text x="70" y="680" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="start">HR-партнёр, СБ</text>
+<text x="70" y="700" font-size="14" font-weight="normal" fill="#5b6675" text-anchor="start">через обращения</text>
+<text x="70" y="742" font-size="11.5" font-weight="normal" fill="#8a96a6" text-anchor="start">данные в репозитории синтетические</text>
 <rect x="356" y="118" width="500" height="666" rx="16" fill="#f2f6fc" stroke="#c7d6ec" stroke-width="1.2"/>
 <circle cx="386" cy="150" r="17" fill="#1f5fbf"/>
 <text x="386" y="156" font-size="17" font-weight="bold" fill="#fff" text-anchor="middle">2</text>
@@ -57,8 +50,8 @@
 <path d="M 592 250 L 618 250" fill="none" stroke="#8a96a6" stroke-width="1.6" marker-end="url(#ah)"/>
 <path d="M 388 431 A 84.0 11 0 0 0 556 431 L 556 491 A 84.0 11 0 0 1 388 491 Z" fill="#fff" stroke="#1f5fbf" stroke-width="1.4"/>
 <ellipse cx="472.0" cy="431" rx="84.0" ry="11" fill="#dde9f8" stroke="#1f5fbf" stroke-width="1.4"/>
-<text x="472.0" y="461" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="middle">Postgres 16</text>
-<text x="472.0" y="480" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="middle">сценарии, новички</text>
+<text x="472.0" y="464.5" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="middle">Postgres 16</text>
+<text x="472.0" y="485.0" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="middle">сценарии, новички</text>
 <rect x="620" y="432" width="220" height="46" rx="23" fill="#dde9f8" stroke="#1f5fbf" stroke-width="1.2"/>
 <text x="730" y="461" font-size="15" font-weight="bold" fill="#1f5fbf" text-anchor="middle">Версия сценария</text>
 <path d="M 730 405 L 730 430" fill="none" stroke="#8a96a6" stroke-width="1.6" marker-end="url(#ah)"/>
@@ -93,8 +86,8 @@
 <path d="M 1082 237 L 1122 237" fill="none" stroke="#8a96a6" stroke-width="1.6" marker-end="url(#ah)"/>
 <path d="M 912 323 A 80.0 11 0 0 0 1072 323 L 1072 394 A 80.0 11 0 0 1 912 394 Z" fill="#fff" stroke="#1f5fbf" stroke-width="1.4"/>
 <ellipse cx="992.0" cy="323" rx="80.0" ry="11" fill="#dde9f8" stroke="#1f5fbf" stroke-width="1.4"/>
-<text x="992.0" y="353" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="middle">Регламенты</text>
-<text x="992.0" y="372" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="middle">ПВТР + 3 презентации</text>
+<text x="992.0" y="362.0" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="middle">Регламенты</text>
+<text x="992.0" y="382.5" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="middle">ПВТР + 3 презентации</text>
 <rect x="1346" y="185" width="240" height="220" rx="10" fill="#fff" stroke="#c9d4e3" stroke-width="1.2"/>
 <text x="1362" y="213" font-size="16" font-weight="bold" fill="#1b2a3d" text-anchor="start">Гибридный поиск</text>
 <text x="1362" y="235" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">BM25 по словоформам</text>
@@ -196,7 +189,6 @@
 <rect x="24" y="822" width="2352" height="504" rx="14" fill="#fff" stroke="#e1e8f2" stroke-width="1"/>
 <rect x="40" y="836" width="470" height="60" rx="10" fill="#dde9f8" stroke="none" stroke-width="1.2"/>
 <text x="62" y="877" font-size="30" font-weight="bold" fill="#1f5fbf" text-anchor="start">2. Проверяем и показываем</text>
-<text x="2360" y="862" font-size="14" font-weight="normal" fill="#5b6675" text-anchor="end">поток слева направо: проверки → продукт → итог</text>
 <path d="M 1000 784 L 1000 910" fill="none" stroke="#1f5fbf" stroke-width="1.6" stroke-dasharray="7 5" marker-end="url(#ahd)"/>
 <text x="1012" y="866" font-size="12" font-weight="normal" fill="#5b6675" text-anchor="start">что проверили</text>
 <rect x="36" y="912" width="1144" height="400" rx="16" fill="#f2f6fc" stroke="#c7d6ec" stroke-width="1.2"/>
@@ -272,13 +264,12 @@
 <text x="2214.0" y="1111" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="start">95 % ответов</text>
 <text x="2214.0" y="1128" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="start">с моделью быстрее</text>
 <rect x="1210" y="1180" width="430" height="132" rx="12" fill="#e4f4e9" stroke="#2f8a52" stroke-width="1.4"/>
-<circle cx="1240" cy="1212" r="13" fill="#2f8a52"/>
-<path d="M 1233 1212 L 1238.5 1217.5 L 1247 1207" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-<text x="1262" y="1218" font-size="18" font-weight="bold" fill="#1d5e36" text-anchor="start">Подтверждено</text>
-<text x="1228" y="1246" font-size="14" font-weight="bold" fill="#1d5e36" text-anchor="start">Сценарий заказчика пройден построчно.</text>
-<text x="1228" y="1268" font-size="13" font-weight="normal" fill="#1d5e36" text-anchor="start">В настоящем MAX на телефоне: приглашение,</text>
-<text x="1228" y="1286" font-size="13" font-weight="normal" fill="#1d5e36" text-anchor="start">ответ с пунктом, отказ на ловушке,</text>
-<text x="1228" y="1304" font-size="13" font-weight="normal" fill="#1d5e36" text-anchor="start">обращение → ответ HR через бота</text>
+<circle cx="1243" cy="1209" r="12" fill="#2f8a52"/>
+<path d="M 1237 1209 L 1241.5 1213.5 L 1249 1204.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1264" y="1215" font-size="18" font-weight="bold" fill="#1d5e36" text-anchor="start">Подтверждено</text>
+<text x="1232" y="1242" font-size="14" font-weight="bold" fill="#1d5e36" text-anchor="start">Сценарий заказчика пройден построчно.</text>
+<text x="1232" y="1265" font-size="13" font-weight="normal" fill="#1d5e36" text-anchor="start">В настоящем MAX: приглашение, ответ с пунктом,</text>
+<text x="1232" y="1287" font-size="13" font-weight="normal" fill="#1d5e36" text-anchor="start">отказ на ловушке, ответ HR через бота</text>
 <rect x="1660" y="1180" width="704" height="132" rx="12" fill="#15305a" stroke="#15305a" stroke-width="1.2"/>
 <text x="1684" y="1240" font-size="40" font-weight="bold" fill="#ffffff" text-anchor="start">70</text>
 <text x="1684" y="1268" font-size="13" font-weight="normal" fill="#b9cdee" text-anchor="start">строк ТЗ сверено</text>

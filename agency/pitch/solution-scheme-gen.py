@@ -88,15 +88,15 @@ def arrow(pts, dashed=False, label=None, lx=None, ly=None, anchor="middle", colo
         text(lx, ly, label, 12, color=GREY, anchor=anchor)
 
 
-def cylinder(x, y, w, h, title, sub, fill="#fff"):
+def cylinder(x, y, w, h, title, sub, fill="#fff", ts=15, ss=12.5):
     ry = 11
     add(f'<path d="M {x} {y+ry} A {w/2} {ry} 0 0 0 {x+w} {y+ry} L {x+w} {y+h-ry} '
         f'A {w/2} {ry} 0 0 1 {x} {y+h-ry} Z" fill="{fill}" stroke="{BLUE}" stroke-width="1.4"/>')
     add(f'<ellipse cx="{x+w/2}" cy="{y+ry}" rx="{w/2}" ry="{ry}" fill="{BLUE_SOFT}" '
         f'stroke="{BLUE}" stroke-width="1.4"/>')
-    cx = x + w / 2
-    text(cx, y + ry + 30, title, 15, "bold", INK, "middle", maxw=w - 16)
-    text(cx, y + ry + 49, sub, 12.5, color=GREY, anchor="middle", maxw=w - 16)
+    cx, mid = x + w / 2, y + ry + (h - ry) / 2
+    text(cx, mid - 2, title, ts, "bold", INK, "middle", maxw=w - 16)
+    text(cx, mid + ss + 6, sub, ss, color=GREY, anchor="middle", maxw=w - 16)
 
 
 # ---------------------------------------------------------------- canvas
@@ -116,29 +116,20 @@ add(f'<rect x="10" y="10" width="{W-20}" height="{H-20}" rx="14" fill="none" str
 add(f'<rect x="24" y="26" width="{W-48}" height="776" rx="14" fill="#fff" stroke="#e1e8f2" stroke-width="1"/>')
 rect(40, 40, 960, 60, fill=BLUE_SOFT, stroke="none", rx=10)
 text(62, 81, "1. Ведём новичка по сценарию и отвечаем по документам", 30, "bold", BLUE)
-text(2360, 66, "поток слева направо: задача → сценарий → ответы → риски", 14, color=GREY, anchor="end")
-text(2360, 88, "Корсик · ПОЛИПЛАСТИК · «Открой#Моспром» 2026", 12.5, color="#8a96a6", anchor="end")
+text(2360, 76, "Корсик · ПОЛИПЛАСТИК · «Открой#Моспром» 2026", 15, color="#8a96a6", anchor="end")
 
 # ---- panel 1: вход
 panel(36, 118, 290, 666, 1, "Вход")
-rect(52, 185, 258, 215, fill=NAVY, stroke=NAVY)
-text(70, 216, "Задача кейса", 19, "bold", "#fff")
-for i, ln in enumerate(["Бот адаптации уже есть —", "перенести в MAX", "и добавить ИИ:",
-                        "ответы по базе знаний,", "стиль компании,", "кабинет для HR"]):
-    text(70, 242 + i * 19, ln, 14, color="#dbe6f7", maxw=226)
-text(70, 380, "3 площадки · D−3 … D+90", 14.5, "bold", "#9cc3ff", maxw=226)
+cylinder(64, 200, 234, 190, "Excel-ТЗ HR", "сценарий, строки r1–r70", ts=19, ss=14)
+arrow([(298, 295), (370, 295)])
 
-cylinder(72, 425, 218, 110, "Excel-ТЗ HR", "сценарий, строки r1–r70")
-arrow([(290, 480), (341, 480), (341, 295), (370, 295)])
-
-card(52, 560, 258, 200, "Кто участвует", [
-    "Новичок — чат в MAX",
-    "HR, рекрутер — кабинет",
-    "Руководители — MAX",
-    "HR-партнёр, СБ — через",
-    "обращения",
-])
-text(68, 744, "данные в репозитории синтетические", 11.5, color="#8a96a6", maxw=226)
+rect(52, 430, 258, 330)
+text(70, 466, "Кто участвует", 19, "bold", INK, maxw=222)
+for i, (who, where) in enumerate([("Новичок", "чат в MAX"), ("HR, рекрутер", "кабинет"),
+                                    ("Руководители", "MAX"), ("HR-партнёр, СБ", "через обращения")]):
+    text(70, 506 + i * 58, who, 15, "bold", INK, maxw=222)
+    text(70, 526 + i * 58, where, 14, color=GREY, maxw=222)
+text(70, 742, "данные в репозитории синтетические", 11.5, color="#8a96a6", maxw=222)
 
 # ---- panel 2: конструктор и планировщик
 panel(356, 118, 500, 666, 2, "Конструктор и планировщик")
@@ -284,7 +275,6 @@ card(2150, 515, 198, 245, "Руководителям", [
 add(f'<rect x="24" y="822" width="{W-48}" height="504" rx="14" fill="#fff" stroke="#e1e8f2" stroke-width="1"/>')
 rect(40, 836, 470, 60, fill=BLUE_SOFT, stroke="none", rx=10)
 text(62, 877, "2. Проверяем и показываем", 30, "bold", BLUE)
-text(2360, 862, "поток слева направо: проверки → продукт → итог", 14, color=GREY, anchor="end")
 
 # межсекционная пунктирная стрелка
 arrow([(1000, 784), (1000, 910)], dashed=True, label="что проверили", lx=1012, ly=866,
@@ -331,14 +321,13 @@ for i, (t, ls, n, c) in enumerate(prod):
 
 # ---- итоги
 rect(1210, 1180, 430, 132, fill=GREEN_BG, stroke=GREEN, rx=12, sw=1.4)
-add(f'<circle cx="1240" cy="1212" r="13" fill="{GREEN}"/>')
-add('<path d="M 1233 1212 L 1238.5 1217.5 L 1247 1207" fill="none" stroke="#fff" stroke-width="2.6" '
+add(f'<circle cx="1243" cy="1209" r="12" fill="{GREEN}"/>')
+add('<path d="M 1237 1209 L 1241.5 1213.5 L 1249 1204.5" fill="none" stroke="#fff" stroke-width="2.4" '
     'stroke-linecap="round" stroke-linejoin="round"/>')
-text(1262, 1218, "Подтверждено", 18, "bold", GREEN_INK)
-text(1228, 1246, "Сценарий заказчика пройден построчно.", 14, "bold", GREEN_INK, maxw=396)
-text(1228, 1268, "В настоящем MAX на телефоне: приглашение,", 13, color=GREEN_INK, maxw=396)
-text(1228, 1286, "ответ с пунктом, отказ на ловушке,", 13, color=GREEN_INK, maxw=396)
-text(1228, 1304, "обращение → ответ HR через бота", 13, color=GREEN_INK, maxw=396)
+text(1264, 1215, "Подтверждено", 18, "bold", GREEN_INK)
+text(1232, 1242, "Сценарий заказчика пройден построчно.", 14, "bold", GREEN_INK, maxw=386)
+text(1232, 1265, "В настоящем MAX: приглашение, ответ с пунктом,", 13, color=GREEN_INK, maxw=386)
+text(1232, 1287, "отказ на ловушке, ответ HR через бота", 13, color=GREEN_INK, maxw=386)
 
 rect(1660, 1180, 704, 132, fill=NAVY, stroke=NAVY, rx=12)
 totals = [("70", ["строк ТЗ сверено", "на 3 площадках"]),
