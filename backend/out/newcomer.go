@@ -50,6 +50,8 @@ type Newcomer struct {
 	Risk            string  `json:"risk"`
 	RiskReason      *string `json:"risk_reason"`
 	OpenTickets     int     `json:"open_tickets"`
+	// Flags — флаги новичка (recruiter_enabled — «отмашка рекрутера», set_flag веток).
+	Flags map[string]bool `json:"flags"`
 }
 
 // zoned — момент в ISO 8601 с зоной площадки.
@@ -68,6 +70,10 @@ func NewcomerFrom(c services.NewcomerCard) Newcomer {
 		AddressForm: e.AddressForm, Consent: e.Consent, Connection: e.Connection,
 		Day: c.Day, Stage: c.Stage, InviteLink: c.InviteLink,
 		LastPulse: e.LastPulse, Risk: e.Risk, RiskReason: e.RiskReason, OpenTickets: c.OpenTickets,
+		Flags: map[string]bool{},
+	}
+	for k, v := range e.Flags {
+		n.Flags[k] = v
 	}
 	if n.Risk == "" {
 		n.Risk = domain.RiskGreen

@@ -541,9 +541,13 @@ func mediaUsageIn(ctx context.Context, r *repositories.Repos, list []domain.Medi
 	if err != nil {
 		return nil, err
 	}
+	scenarios, err := r.Media.DraftScenarios(ctx)
+	if err != nil {
+		return nil, err
+	}
 	places := map[uuid.UUID]map[string]bool{}
-	add := func(scenario uuid.UUID, st domain.ScenarioStep) {
-		for _, u := range mediaUnits(st) {
+	addUnits := func(scenario uuid.UUID, units []mediaUnit) {
+		for _, u := range units {
 			for _, m := range list {
 				if !u.refers(m) {
 					continue
@@ -551,9 +555,19 @@ func mediaUsageIn(ctx context.Context, r *repositories.Repos, list []domain.Medi
 				if places[m.ID] == nil {
 					places[m.ID] = map[string]bool{}
 				}
-				places[m.ID][scenario.String()+"|"+st.ID.String()+"|"+u.key] = true
+				places[m.ID][scenario.String()+"|"+u.key] = true
 			}
 		}
+	}
+	add := func(scenario uuid.UUID, st domain.ScenarioStep) {
+		units := mediaUnits(st)
+		for i := range units {
+			units[i].key = st.ID.String() + "|" + units[i].key
+		}
+		addUnits(scenario, units)
+	}
+	for _, sc := range scenarios {
+		addUnits(sc.ID, scenarioMediaUnits(sc.Commands, sc.Rules))
 	}
 	for _, st := range drafts {
 		add(st.ScenarioID, st)
@@ -562,6 +576,7 @@ func mediaUsageIn(ctx context.Context, r *repositories.Repos, list []domain.Medi
 		for _, st := range v.Steps {
 			add(v.ScenarioID, st)
 		}
+		addUnits(v.ScenarioID, scenarioMediaUnits(v.Commands, v.Rules))
 	}
 	for id, p := range places {
 		out[id] = len(p)
@@ -603,6 +618,39 @@ func mediaUnits(st domain.ScenarioStep) []mediaUnit {
 		for _, a := range b.Branch.Actions {
 			if a.Type == "send_file" && a.Media != "" {
 				u.names = append(u.names, a.Media)
+			}
+		}
+		out = append(out, u)
+	}
+	return out
+}
+
+// scenarioMediaUnits — ссылки команд (send_file) и правил (картинка, ветки кнопок) сценария:
+// каждая команда и каждое правило — одно место.
+func scenarioMediaUnits(cmds domain.CommandList, rules domain.RuleList) []mediaUnit {
+	var out []mediaUnit
+	for _, c := range cmds {
+		u := mediaUnit{key: "cmd:" + strings.ToLower(c.Name)}
+		for _, a := range c.Actions {
+			if a.Type == "send_file" && a.Media != "" {
+				u.names = append(u.names, a.Media)
+			}
+		}
+		out = append(out, u)
+	}
+	for i, r := range rules {
+		u := mediaUnit{key: fmt.Sprintf("rule:%d:%s", i, r.Kind), refs: append([]domain.MediaRef(nil), r.Media...)}
+		for _, b := range r.Buttons {
+			if b.Branch == nil {
+				continue
+			}
+			for _, msg := range b.Branch.Messages {
+				u.refs = append(u.refs, msg.Media...)
+			}
+			for _, a := range b.Branch.Actions {
+				if a.Type == "send_file" && a.Media != "" {
+					u.names = append(u.names, a.Media)
+				}
 			}
 		}
 		out = append(out, u)

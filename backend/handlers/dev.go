@@ -32,9 +32,10 @@ func devOnly(c *fiber.Ctx) error {
 }
 
 // devUserID — синтетический user_id MAX для новичка: стабильный (повтор вызова — тот же
-// аккаунт, приглашение не «занято другим») и вне диапазона настоящих id.
+// аккаунт, приглашение не «занято другим») и вне диапазона настоящих id. Берём последние
+// байты: в UUIDv7 первые — время, и новички, заведённые за минуту, склеивались в один аккаунт.
 func devUserID(id uuid.UUID) int64 {
-	return 9_000_000_000_000 + int64(binary.BigEndian.Uint32(id[:4]))
+	return 9_000_000_000_000 + int64(binary.BigEndian.Uint32(id[12:]))
 }
 
 // SimulateStart — POST /api/dev/simulate-start (только APP_ENV=development, api_contract.md,

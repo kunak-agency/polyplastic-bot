@@ -154,6 +154,14 @@ func (r *MediaRepo) DraftSteps(ctx context.Context) ([]domain.ScenarioStep, erro
 	return out, err
 }
 
+// DraftScenarios — команды и правила черновиков сценариев (без шагов): они тоже ссылаются на
+// медиатеку (/food — файл по площадке, правила r69/r70 — картинки).
+func (r *MediaRepo) DraftScenarios(ctx context.Context) ([]domain.Scenario, error) {
+	var out []domain.Scenario
+	err := r.db.WithContext(ctx).Select("id", "commands", "rules").Find(&out).Error
+	return out, err
+}
+
 // LatestVersions — последняя опубликованная версия каждого сценария.
 func (r *MediaRepo) LatestVersions(ctx context.Context) ([]domain.ScenarioVersion, error) {
 	var out []domain.ScenarioVersion
