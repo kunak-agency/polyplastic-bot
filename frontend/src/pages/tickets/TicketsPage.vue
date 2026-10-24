@@ -3,7 +3,7 @@ import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { CircleCheck, Columns3, List, SearchX } from 'lucide-vue-next'
+import { CircleCheck, Clock, Columns3, Flame, List, SearchX } from 'lucide-vue-next'
 import PageContainer from '@/components/common/PageContainer.vue'
 import PageHead from '@/components/common/PageHead.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
@@ -24,6 +24,7 @@ import {
   kanbanColumns,
   sortTickets,
   viewCounts,
+  type TicketSort,
   type TicketView,
 } from '@/lib/tickets'
 
@@ -46,6 +47,8 @@ const view = computed<TicketView>(() => {
     : 'all'
 })
 const mode = computed<Mode>(() => (route.query.mode === 'kanban' ? 'kanban' : 'list'))
+// Newest first by default; ?sort=priority puts the most urgent on top.
+const sort = computed<TicketSort>(() => (route.query.sort === 'priority' ? 'priority' : 'time'))
 
 function setQuery(patch: Record<string, string | undefined>): void {
   void router.replace({ query: { ...route.query, ...patch } })
@@ -55,6 +58,9 @@ function setView(v: TicketView): void {
 }
 function setMode(m: Mode): void {
   setQuery({ mode: m === 'list' ? undefined : m })
+}
+function setSort(s: TicketSort): void {
+  setQuery({ sort: s === 'time' ? undefined : s })
 }
 function setSite(s: SiteFilter): void {
   site.setSite(s)
@@ -67,8 +73,8 @@ watch(currentSite, reload)
 onMounted(reload)
 
 const counts = computed(() => viewCounts(items.value, now.value))
-const rows = computed(() => sortTickets(applyView(items.value, view.value, now.value)))
-const columns = computed(() => kanbanColumns(rows.value))
+const rows = computed(() => sortTickets(applyView(items.value, view.value, now.value), sort.value))
+const columns = computed(() => kanbanColumns(rows.value, sort.value))
 // Nothing waits for a person: the empty queue reads as success (ux-spec 3.4).
 const allClosed = computed(
   () => loaded.value && activeCount(items.value) === 0 && view.value !== 'closed',
@@ -80,6 +86,24 @@ const allClosed = computed(
     <PageHead :title="t('tickets.title')">
       <template #subtitle>{{ t('tickets.subtitle') }}</template>
       <template #actions>
+        <div class="tabs" role="group" :aria-label="t('tickets.sort.label')">
+          <button
+            type="button"
+            :class="['tab', { active: sort === 'time' }]"
+            :aria-pressed="sort === 'time'"
+            @click="setSort('time')"
+          >
+            <Clock :size="14" class="tab__ico" aria-hidden="true" />{{ t('tickets.sort.time') }}
+          </button>
+          <button
+            type="button"
+            :class="['tab', { active: sort === 'priority' }]"
+            :aria-pressed="sort === 'priority'"
+            @click="setSort('priority')"
+          >
+            <Flame :size="14" class="tab__ico" aria-hidden="true" />{{ t('tickets.sort.priority') }}
+          </button>
+        </div>
         <div class="tabs" role="group" :aria-label="t('tickets.mode.label')">
           <button
             type="button"

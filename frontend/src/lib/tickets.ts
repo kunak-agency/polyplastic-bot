@@ -150,8 +150,15 @@ export function compareTickets(a: Ticket, b: Ticket): number {
   )
 }
 
-export function sortTickets(list: Ticket[]): Ticket[] {
-  return list.slice().sort(compareTickets)
+// Newest first: the default order of the queue.
+export function compareByTime(a: Ticket, b: Ticket): number {
+  return at(b.created_at) - at(a.created_at) || b.number - a.number
+}
+
+export type TicketSort = 'time' | 'priority'
+
+export function sortTickets(list: Ticket[], by: TicketSort = 'priority'): Ticket[] {
+  return list.slice().sort(by === 'time' ? compareByTime : compareTickets)
 }
 
 export const KANBAN_COLUMNS: readonly TicketStatus[] = [
@@ -161,12 +168,15 @@ export const KANBAN_COLUMNS: readonly TicketStatus[] = [
   'resolved',
 ]
 
-export function kanbanColumns(list: Ticket[]): Record<TicketStatus, Ticket[]> {
+export function kanbanColumns(
+  list: Ticket[],
+  by: TicketSort = 'priority',
+): Record<TicketStatus, Ticket[]> {
   const columns = Object.fromEntries(KANBAN_COLUMNS.map((s) => [s, [] as Ticket[]])) as Record<
     TicketStatus,
     Ticket[]
   >
-  for (const t of sortTickets(list)) columns[t.status]?.push(t)
+  for (const t of sortTickets(list, by)) columns[t.status]?.push(t)
   return columns
 }
 

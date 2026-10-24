@@ -124,6 +124,18 @@ test('sorting: priority, then nearest deadline, then oldest; closed last', () =>
   )
 })
 
+test('sort by time: newest first, whatever the priority', () => {
+  const list = [
+    ticket(1, { priority: 'P0', created_at: at(-300) }),
+    ticket(2, { priority: 'P3', created_at: at(-10) }),
+    ticket(3, { priority: 'P1', created_at: at(-60), status: 'resolved' }),
+  ]
+  assert.deepEqual(
+    sortTickets(list, 'time').map((t) => t.number),
+    [2, 3, 1],
+  )
+})
+
 test('kanban: four columns in status order, each sorted', () => {
   const list = [
     ticket(1, { priority: 'P2' }),
