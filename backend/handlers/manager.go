@@ -8,7 +8,6 @@ import (
 	"main/in"
 	"main/out"
 	"main/pkg/errs"
-	"main/services"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -46,12 +45,14 @@ func (h *Handler) ManagerNewcomers(c *fiber.Ctx) error {
 	if err := bindQuery(c, &q); err != nil {
 		return err
 	}
-	// FEATURE_AUTH: руководитель видит только своих — имя из запроса игнорируется.
+	// FEATURE_AUTH: руководитель видит только своих (manager_id; старые карточки — по имени),
+	// имя из запроса игнорируется.
 	if v := Viewer(c); v != nil && v.Role == domain.RoleManager {
-		if v.ManagerName == nil || strings.TrimSpace(*v.ManagerName) == "" {
-			return c.JSON(out.ManagerViewFrom(&services.ManagerView{}))
+		view, err := h.services.Manager().ViewFor(c.UserContext(), v)
+		if err != nil {
+			return err
 		}
-		q.Name = *v.ManagerName
+		return c.JSON(out.ManagerViewFrom(view))
 	}
 	name, err := q.Validate()
 	if err != nil {

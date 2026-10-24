@@ -34,7 +34,7 @@ func (s *NewcomerService) SetIPDecision(ctx context.Context, id uuid.UUID, decis
 	if u := ViewerFrom(ctx); u != nil {
 		by = u.FullName
 		if by == "" {
-			by = u.Login
+			by = u.LoginOr("")
 		}
 	}
 	if err := s.repos.Employees.SetIPDecision(ctx, id, decision, s.now(), by); err != nil {

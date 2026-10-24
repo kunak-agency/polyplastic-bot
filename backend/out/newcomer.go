@@ -36,7 +36,11 @@ type Newcomer struct {
 	MentorName    string `json:"mentor_name"`
 	RecruiterName string `json:"recruiter_name"`
 	// RecruiterID — закреплённый рекрутер (employees.recruiter_id); null — без рекрутера.
-	RecruiterID     *string `json:"recruiter_id"`
+	RecruiterID *string `json:"recruiter_id"`
+	// ManagerID, MentorID — руководитель и наставник из справочника людей (GET /api/people);
+	// null — не выбран (у старой записи есть только manager_name / mentor_name).
+	ManagerID       *string `json:"manager_id"`
+	MentorID        *string `json:"mentor_id"`
 	StartDate       string  `json:"start_date"`
 	Shift           *string `json:"shift"`
 	ScenarioID      string  `json:"scenario_id"`
@@ -97,6 +101,14 @@ func NewcomerFrom(c services.NewcomerCard) Newcomer {
 	if e.RecruiterID != nil {
 		id := e.RecruiterID.String()
 		n.RecruiterID = &id
+	}
+	if e.ManagerID != nil {
+		id := e.ManagerID.String()
+		n.ManagerID = &id
+	}
+	if e.MentorID != nil {
+		id := e.MentorID.String()
+		n.MentorID = &id
 	}
 	if c.RecentTone != nil {
 		tones := make([]NewcomerTone, 0, len(c.RecentTone))

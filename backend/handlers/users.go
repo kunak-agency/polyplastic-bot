@@ -61,9 +61,11 @@ type userPatchBody struct {
 	FullName    *string `json:"full_name"`
 	Password    *string `json:"password"`
 	ManagerName *string `json:"manager_name"`
+	Login       *string `json:"login"`
 }
 
-// PatchUser — PATCH /api/users/{id} {"active"?,"role"?,"full_name"?,"password"?,"manager_name"?}.
+// PatchUser — PATCH /api/users/{id} {"active"?,"role"?,"full_name"?,"password"?,"manager_name"?,
+// "login"?}. login (+ password, если пароля нет) — «выдать вход» руководителю из справочника.
 func (h *Handler) PatchUser(c *fiber.Ctx) error {
 	id, err := pathID(c)
 	if err != nil {
@@ -74,7 +76,7 @@ func (h *Handler) PatchUser(c *fiber.Ctx) error {
 		return err
 	}
 	u, err := h.services.Users.Patch(c.UserContext(), id, services.UserPatch{Active: b.Active, Role: b.Role,
-		FullName: b.FullName, Password: b.Password, ManagerName: b.ManagerName})
+		FullName: b.FullName, Password: b.Password, ManagerName: b.ManagerName, Login: b.Login})
 	if err != nil {
 		return err
 	}
@@ -223,16 +225,6 @@ func newcomerRecruiterField(c *fiber.Ctx) (raw *string, present bool, err error)
 	return &s, true, nil
 }
 
-// onlyRecruiterPatch — в теле PATCH только recruiter_id (без start_date/tz).
-func onlyRecruiterPatch(c *fiber.Ctx) bool {
-	var m map[string]json.RawMessage
-	if json.Unmarshal(c.Body(), &m) != nil {
-		return false
-	}
-	_, ok := m["recruiter_id"]
-	return ok && len(m) == 1
-}
-
 // ── Новички: «только свои», закрепление рекрутера (вставки в newcomers.go) ──────────
 
 // scopeNewcomers — фильтр реестра: роль recruiter — только свои (всегда); ?mine=1 — свои;
@@ -317,16 +309,7 @@ func (h *Handler) patchRecruiter(c *fiber.Ctx, id uuid.UUID) (bool, error) {
 	if n == 0 {
 		return true, errs.NewNotFoundError("Новичок не найден")
 	}
-	if !onlyRecruiterPatch(c) {
-		return false, nil
-	}
-	card, err := h.services.Newcomers.Get(c.UserContext(), id)
-	if err != nil {
-		return true, err
-	}
-	cards := []services.NewcomerCard{*card}
-	h.fillRecruiterNames(c, cards)
-	return true, c.JSON(out.NewcomerFrom(cards[0]))
+	return false, nil // ответ — в PatchNewcomer (onlyPeoplePatch) или после start_date/tz
 }
 
 // NewcomerFiles — GET /api/newcomers/{id}/files → {"items":[{name,filename,mime,size,updated_at}]}.

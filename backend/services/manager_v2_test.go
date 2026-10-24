@@ -241,7 +241,8 @@ func TestRecruiterMorning(t *testing.T) {
 		t.Fatal(err)
 	}
 	uid := int64(779001)
-	u := &domain.User{Login: "rec-morning", FullName: "Рекрутер Утро", Role: domain.RoleRecruiter, Active: true, MaxUserID: &uid}
+	login := "rec-morning"
+	u := &domain.User{Login: &login, FullName: "Рекрутер Утро", Role: domain.RoleRecruiter, Active: true, MaxUserID: &uid}
 	if err := env.repos.Users.Create(ctx, u); err != nil {
 		t.Fatal(err)
 	}

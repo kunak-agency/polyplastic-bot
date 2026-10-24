@@ -4,46 +4,72 @@ import { useI18n } from 'vue-i18n'
 import AppDialog from '@/components/common/AppDialog.vue'
 import FormField from '@/components/common/FormField.vue'
 import { Button } from '@/components/ui/button'
-import type { TicketAssignRequest } from '@/types/api'
+import type { TicketAssignRequest, TicketAssignee } from '@/types/api'
 
 // "Assign" (ux-spec 3.4): reassigning needs a comment (Leena) — the next
 // person reads what was already done. The first assignment does not.
+// With FEATURE_AUTH (`assignees` given) the assignee is picked from active
+// recruiters and HR leads and sent as assignee_id; "It's me" is the signed-in
+// user. Without auth — a free name, as before.
 const props = defineProps<{
   number: number
   current: string | null
+  currentId?: string | null
   me: string
+  meId?: string | null
   suggestions: string[]
+  assignees?: TicketAssignee[] | null
   busy: boolean
 }>()
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ submit: [body: TicketAssignRequest] }>()
 const { t } = useI18n()
 
+const byUser = computed(() => !!props.assignees)
 const name = ref('')
+const userId = ref('')
 const comment = ref('')
 const touched = ref(false)
 
 watch(open, (v) => {
   if (!v) return
   name.value = props.current ? '' : props.me
+  userId.value = props.current ? '' : (props.meId ?? '')
   comment.value = ''
   touched.value = false
 })
 
-const reassign = computed(() => !!props.current && name.value.trim() !== props.current)
-const nameError = computed(() =>
-  touched.value && !name.value.trim() ? t('tickets.assign.assigneeRequired') : undefined,
-)
+const reassign = computed(() => {
+  if (!props.current) return false
+  if (byUser.value) return props.currentId ? userId.value !== props.currentId : !!userId.value
+  return name.value.trim() !== props.current
+})
+const nameError = computed(() => {
+  if (!touched.value) return undefined
+  const empty = byUser.value ? !userId.value : !name.value.trim()
+  return empty ? t('tickets.assign.assigneeRequired') : undefined
+})
 const commentError = computed(() =>
   touched.value && reassign.value && !comment.value.trim()
     ? t('tickets.assign.commentRequired')
     : undefined,
 )
 
+function pickMe(): void {
+  if (byUser.value) userId.value = props.meId ?? ''
+  else name.value = props.me
+}
+
 function submit(): void {
   touched.value = true
   if (nameError.value || commentError.value) return
-  emit('submit', { assignee_name: name.value.trim(), comment: comment.value.trim() })
+  const c = comment.value.trim()
+  emit(
+    'submit',
+    byUser.value
+      ? { assignee_id: userId.value, comment: c }
+      : { assignee_name: name.value.trim(), comment: c },
+  )
 }
 </script>
 
@@ -61,7 +87,14 @@ function submit(): void {
         :error="nameError"
       >
         <div class="assign__row">
+          <select v-if="assignees" id="assign-name" v-model="userId" class="input">
+            <option value="" disabled>{{ t('tickets.assign.pick') }}</option>
+            <option v-for="u in assignees" :key="u.id" :value="u.id">
+              {{ u.full_name }} · {{ t(`auth.roles.${u.role}`) }}
+            </option>
+          </select>
           <input
+            v-else
             id="assign-name"
             v-model="name"
             class="input"
@@ -69,9 +102,11 @@ function submit(): void {
             autocomplete="off"
             :placeholder="t('tickets.assign.assigneePlaceholder')"
           />
-          <Button type="button" size="sm" @click="name = me">{{ t('tickets.assign.me') }}</Button>
+          <Button type="button" size="sm" :disabled="assignees ? !meId : false" @click="pickMe">{{
+            t('tickets.assign.me')
+          }}</Button>
         </div>
-        <datalist id="assign-names">
+        <datalist v-if="!assignees" id="assign-names">
           <option v-for="s in suggestions" :key="s" :value="s" />
         </datalist>
       </FormField>

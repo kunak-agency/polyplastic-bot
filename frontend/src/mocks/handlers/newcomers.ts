@@ -5,6 +5,7 @@ import { SITES } from '@/stores/site'
 import {
   buildTimeline,
   ensureSeeded,
+  personByName,
   fireAt,
   inviteLink,
   newcomers,
@@ -132,9 +133,14 @@ function create(req: MockRequest): MockResult {
         ? me.id
         : null
   const tz = typeof b.tz === 'string' && isValidTz(b.tz) ? b.tz : null
+  // People directory: the id, or the exact name (found or created).
+  const person = (role: 'manager' | 'mentor', id: unknown, name: unknown): string | null =>
+    typeof id === 'string' && users.get(id)?.role === role ? id : personByName(role, str(name))
   const stored: Omit<Newcomer, 'day' | 'stage'> = {
     id: newId(),
     recruiter_id: recruiterId,
+    manager_id: person('manager', b.manager_id, b.manager_name),
+    mentor_id: person('mentor', b.mentor_id, b.mentor_name),
     tz,
     full_name,
     phone,
@@ -190,6 +196,21 @@ function patch(req: MockRequest): MockResult {
       return invalid([{ field: 'recruiter_id', code: 'NOT_FOUND', message: 'Рекрутер не найден' }])
     n.recruiter_id = id
     n.recruiter_name = id ? (users.get(id)?.full_name ?? '') : ''
+  }
+  for (const [key, role] of [
+    ['manager_id', 'manager'],
+    ['mentor_id', 'mentor'],
+  ] as const) {
+    if (!(key in b)) continue
+    const id = b[key]
+    if (id !== null && (typeof id !== 'string' || users.get(id)?.role !== role))
+      return invalid([
+        { field: key, code: 'OUT_OF_RANGE', message: 'Человек не найден в справочнике' },
+      ])
+    const name = id ? (users.get(id)?.full_name ?? '') : ''
+    n[key] = id
+    if (role === 'manager') n.manager_name = name
+    else n.mentor_name = name
   }
   const steps = scenarios.get(n.scenario_id)?.steps ?? []
   for (const e of timelines.get(n.id) ?? []) {

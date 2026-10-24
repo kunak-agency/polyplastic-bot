@@ -10,7 +10,7 @@ import UserMenu from '@/components/app/UserMenu.vue'
 import { useTicketsStore } from '@/stores/tickets'
 import { useSiteStore } from '@/stores/site'
 import { useAuthStore } from '@/stores/auth'
-import { canOpen, homeRoute } from '@/lib/roles'
+import { canOpen, homeRoute, inMenu } from '@/lib/roles'
 
 // By default the sidebar is a docked 220 px panel naming every section; the
 // page gets the rest of the width. The toggle folds it to a 56 px icon rail
@@ -39,10 +39,11 @@ watch(collapsed, (v) => {
 // ticket actions refresh it themselves.
 const auth = useAuthStore()
 const { viewer } = storeToRefs(auth)
-// The menu by role (lib/roles.ts): manager — only "My newcomers", recruiter —
-// all but "Team"; with auth off — as before, without the user-bound screens.
-const nav = computed(() => NAV.filter((it) => canOpen(viewer.value, it.routeName)))
-const navFooter = computed(() => NAV_FOOTER.filter((it) => canOpen(viewer.value, it.routeName)))
+// The menu by role (lib/roles.ts): manager — only "My employees", recruiter —
+// no Team, My employees, Settings; HR lead — Team instead of My employees; with
+// auth off — as before, without the user-bound screens.
+const nav = computed(() => NAV.filter((it) => inMenu(viewer.value, it.routeName)))
+const navFooter = computed(() => NAV_FOOTER.filter((it) => inMenu(viewer.value, it.routeName)))
 const home = computed(() => homeRoute(viewer.value))
 
 const tickets = useTicketsStore()

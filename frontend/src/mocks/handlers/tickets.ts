@@ -1,6 +1,7 @@
 import type { MockRequest, MockResult, MockRoute } from '../adapter'
 import type { Ticket, TicketDetail, TicketMessage } from '@/types/api'
-import { ensureSeeded, tickets } from '../state'
+import { ensureSeeded, tickets, users } from '../state'
+import { currentUser } from './auth'
 
 // Mirrors api_contract.md v2 (tickets). Where the contract is silent the mock
 // picks the strict reading and the screens do not depend on it:
@@ -79,21 +80,54 @@ function get(req: MockRequest): MockResult {
   return t ? { status: 200, data: detail(t) } : notFound()
 }
 
+// Who may be assigned (auth on): active recruiters and HR leads.
+function assignable(): { id: string; full_name: string; role: 'recruiter' | 'hr_lead' }[] {
+  ensureSeeded()
+  return [...users.values()]
+    .filter((u) => u.active !== false && (u.role === 'recruiter' || u.role === 'hr_lead'))
+    .map((u) => ({ id: u.id, full_name: u.full_name, role: u.role as 'recruiter' | 'hr_lead' }))
+    .sort((a, b) => a.full_name.localeCompare(b.full_name, 'ru'))
+}
+
+function assignees(): MockResult {
+  const items = assignable()
+  return { status: 200, data: { items, total: items.length } }
+}
+
+// The author of a staff record: the signed-in user, otherwise the assignee.
+function author(t: TicketDetail): string | null {
+  return currentUser()?.full_name ?? t.assignee_name
+}
+
 function assign(req: MockRequest): MockResult {
   const t = tickets.get(req.params.id)
   if (!t) return notFound()
   if (t.status === 'resolved') return closed()
-  const name = str(req.body.assignee_name)
+  const me = currentUser()
+  const wantedId = str(req.body.assignee_id)
+  let name = str(req.body.assignee_name)
+  let id: string | null = null
+  if (wantedId) {
+    const u = assignable().find((x) => x.id === wantedId)
+    if (!u) return error(422, 'VALIDATION_FAILED', 'Исполнитель не найден', 'assignee_id')
+    id = u.id
+    name = u.full_name
+  } else if (me && (!name || name === me.full_name)) {
+    // "Take it" with auth: an empty body assigns the session's user.
+    id = me.id
+    name = me.full_name
+  }
   if (!name) return error(422, 'VALIDATION_FAILED', 'Укажите исполнителя', 'assignee_name')
   const comment = str(req.body.comment)
   const previous = t.assignee_name
+  t.assignee_id = id
   t.assignee_name = name
   t.status = 'assigned'
   t.updated_at = new Date().toISOString()
   if (comment || (previous && previous !== name))
     push(t, {
       from: 'staff',
-      author: name,
+      author: me?.full_name ?? name,
       text: comment ? `Назначено: ${name}. ${comment}` : `Назначено: ${name}.`,
       internal: true,
     })
@@ -106,7 +140,7 @@ function reply(req: MockRequest): MockResult {
   if (t.status === 'resolved') return closed()
   const text = str(req.body.text)
   if (!text) return error(422, 'VALIDATION_FAILED', 'Текст ответа пустой', 'text')
-  push(t, { from: 'staff', author: t.assignee_name, text, internal: false })
+  push(t, { from: 'staff', author: author(t), text, internal: false })
   if (req.body.resolve === true) {
     t.status = 'resolved'
     t.sla_due_at = null
@@ -122,7 +156,7 @@ function note(req: MockRequest): MockResult {
   if (!t) return notFound()
   const text = str(req.body.text)
   if (!text) return error(422, 'VALIDATION_FAILED', 'Текст заметки пустой', 'text')
-  push(t, { from: 'staff', author: t.assignee_name, text, internal: true })
+  push(t, { from: 'staff', author: author(t), text, internal: true })
   return { status: 200, data: detail(t) }
 }
 
@@ -136,7 +170,7 @@ function resolve(req: MockRequest): MockResult {
     if (note)
       push(t, {
         from: 'staff',
-        author: t.assignee_name ?? 'HR',
+        author: author(t) ?? 'HR',
         text: '✅ Что сделано: ' + note,
         internal: true,
       })
@@ -165,6 +199,7 @@ function patch(req: MockRequest): MockResult {
 const routes: MockRoute[] = [
   { method: 'PATCH', path: '/tickets/:id', handler: patch },
   { method: 'GET', path: '/tickets', handler: list },
+  { method: 'GET', path: '/tickets/assignees', handler: assignees },
   { method: 'GET', path: '/tickets/:id', handler: get },
   { method: 'POST', path: '/tickets/:id/assign', handler: assign },
   { method: 'POST', path: '/tickets/:id/reply', handler: reply },

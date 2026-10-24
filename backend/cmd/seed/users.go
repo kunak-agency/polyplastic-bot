@@ -88,11 +88,25 @@ func seedUsers(ctx context.Context, repos *repositories.Repos, svc *services.Ser
 		if created {
 			state = "создан"
 		}
-		fmt.Printf("  %-10s %-9s %-40s %s, пароль %s\n", u.Login, u.Role, u.FullName, state, pw)
+		fmt.Printf("  %-10s %-9s %-40s %s, пароль %s\n", u.LoginOr("—"), u.Role, u.FullName, state, pw)
 	}
 	n, err := svc.Users.LinkRecruitersByName(ctx)
 	if err != nil {
 		log.Fatalf("сид -users: закрепление: %v", err)
 	}
 	fmt.Printf("Закреплено новичков за рекрутерами по имени: %d\n", n)
+}
+
+// seedPeople — перенос руководителей и наставников в справочник людей: go run ./cmd/seed -people.
+// Для каждого различного ManagerName / MentorName в карточках без manager_id / mentor_id —
+// пользователь с ролью manager / mentor и тем же ФИО (руководитель — и по старому
+// users.manager_name, так связывается демо-аккаунт manager) или новый без входа; затем связь.
+// Имена в карточках не меняются. Повторный запуск ничего не создаёт и не меняет.
+func seedPeople(ctx context.Context, svc *services.Services) {
+	r, err := svc.Users.LinkPeople(ctx)
+	if err != nil {
+		log.Fatalf("сид -people: %v", err)
+	}
+	fmt.Printf("Справочник людей: руководителей создано %d, карточек связано %d; наставников создано %d, карточек связано %d\n",
+		r.ManagersCreated, r.ManagersLinked, r.MentorsCreated, r.MentorsLinked)
 }

@@ -3,6 +3,7 @@ import type {
   ListResponse,
   Ticket,
   TicketAssignRequest,
+  TicketAssignee,
   TicketDetail,
   TicketListQuery,
   TicketNoteRequest,
@@ -43,6 +44,12 @@ export async function apiGetTicket(id: string): Promise<TicketDetail> {
 export async function apiPatchTicket(id: string, body: TicketPatchRequest): Promise<TicketDetail> {
   const r = await http.patch<TicketDetail>(path(id), body)
   return r.data
+}
+
+// Who a ticket can be assigned to (FEATURE_AUTH): active recruiters and HR leads.
+export async function apiTicketAssignees(): Promise<TicketAssignee[]> {
+  const r = await http.get<{ items: TicketAssignee[] }>('/tickets/assignees')
+  return r.data.items
 }
 
 export async function apiAssignTicket(id: string, body: TicketAssignRequest): Promise<Ticket> {

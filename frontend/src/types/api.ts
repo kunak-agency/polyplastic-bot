@@ -92,6 +92,10 @@ export interface Newcomer {
   // api_contract_auth.md v5: the assigned recruiter (users.id) and the time
   // zone. Optional: a backend without the auth/tz wave does not send them.
   recruiter_id?: string | null
+  // api_contract_auth.md "People": the manager and the mentor from the people
+  // directory; null — an old record with only the name strings.
+  manager_id?: string | null
+  mentor_id?: string | null
   // IANA zone overriding the site's; null — the site's zone applies.
   tz?: string | null
   site_tz?: string
@@ -170,6 +174,10 @@ export interface NewcomerCreate {
   scenario_id: string
   recruiter_id?: string | null
   tz?: string | null
+  // People directory ids; without them the server finds or creates the person
+  // by the exact name in manager_name / mentor_name.
+  manager_id?: string | null
+  mentor_id?: string | null
 }
 
 // PATCH /api/newcomers/{id}: moves the start date; unsent events are re-planned
@@ -179,6 +187,9 @@ export interface NewcomerPatch {
   start_date?: string
   tz?: string | null
   recruiter_id?: string | null
+  // People directory (recruiter for his own, hr_lead for all); null — clear.
+  manager_id?: string | null
+  mentor_id?: string | null
 }
 
 // POST /api/dev/simulate-start, APP_ENV=development only (api_contract.md,
@@ -558,6 +569,10 @@ export interface Ticket {
   priority: TicketPriority
   status: TicketStatus
   route: TicketRoute
+  // FEATURE_AUTH: the assignee user (users.id); null — nobody or a name only.
+  // Optional: an older backend does not send it.
+  assignee_id?: string | null
+  // A copy of the assignee's full_name for captions and texts.
   assignee_name: string | null
   anonymous: boolean
   summary: string
@@ -613,9 +628,19 @@ export interface TicketListQuery {
   mine?: boolean
 }
 
+// With FEATURE_AUTH: assignee_id picks a user; an empty body ("Take it")
+// assigns the signed-in user. Without auth: assignee_name, as before.
 export interface TicketAssignRequest {
-  assignee_name: string
-  comment: string
+  assignee_id?: string
+  assignee_name?: string
+  comment?: string
+}
+
+// GET /api/tickets/assignees: active recruiters and HR leads.
+export interface TicketAssignee {
+  id: string
+  full_name: string
+  role: Role
 }
 
 export interface TicketReplyRequest {
@@ -978,16 +1003,40 @@ export interface MediaEnsureResponse extends ListResponse<MediaItem> {
 
 // ── Auth, roles, dashboards (api_contract_auth.md v5) ───────────────────────
 
-export type Role = 'hr_lead' | 'recruiter' | 'manager'
+// mentor: a person of the people directory, never signs in.
+export type Role = 'hr_lead' | 'recruiter' | 'manager' | 'mentor'
 
 export interface User {
   id: string
-  login: string
+  // null — a person of the directory without sign-in.
+  login: string | null
   full_name: string
   role: Role
   tz: string | null
   manager_name?: string | null
   active?: boolean
+  // Can sign in: has a login and a password.
+  has_login?: boolean
+}
+
+// People directory (api_contract_auth.md, "People"): GET/POST /api/people.
+export type PersonRole = 'manager' | 'mentor' | 'recruiter'
+
+export interface Person {
+  id: string
+  full_name: string
+  role: PersonRole
+  has_login: boolean
+  active: boolean
+}
+
+// POST /api/people: without login — recruiter and hr_lead; with login and
+// password — hr_lead only. The same name and role answers 200 with that person.
+export interface PersonCreate {
+  full_name: string
+  role: 'manager' | 'mentor'
+  login?: string
+  password?: string
 }
 
 export interface LoginRequest {
@@ -1078,14 +1127,23 @@ export interface LoadRow {
   newcomers: number
   tickets_open: number
   tickets_sla_overdue: number
+  // Team page only, 30 days: first-response median, null below 5 answers
+  // (never a ranking: the table is not sorted by it); open tickets with no
+  // staff answer for over 24 h. Optional: an older server does not send them.
+  median_first_response_min?: number | null
+  median_n?: number
+  unanswered_24h?: number
 }
 
 export interface HrLeadDashboard {
   today: TodayRow[]
   tiles: Record<string, DashTile>
-  // Sorted by overdue SLA; no per-person response time, no ranking.
+  // Sorted by overdue SLA; no ranking.
   load: LoadRow[]
-  // Team median only.
+  // Newcomers without a recruiter and their open tickets unanswered for 24 h.
+  unassigned?: number
+  unassigned_unanswered_24h?: number
+  // Team median.
   median_first_response_min: number | null
   // "Digest of the week" card: three lines composed by the server.
   digest: { week: string; lines: string[] } | null
@@ -1095,7 +1153,7 @@ export interface HrLeadDashboard {
 export interface TeamMember {
   user_id: string
   full_name: string
-  login: string
+  login: string | null
   active: boolean
   newcomers: number
   tickets_open: number
@@ -1121,4 +1179,6 @@ export interface UserPatch {
   role?: Role
   full_name?: string
   password?: string
+  // "Grant sign-in" to a person of the directory (with password if none yet).
+  login?: string
 }

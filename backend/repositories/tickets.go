@@ -26,7 +26,9 @@ type TicketFilter struct {
 	Site     string
 	Route    string
 	Assignee string
-	Newcomer *uuid.UUID
+	// AssigneeID — «мои» при FEATURE_AUTH: исполнитель-пользователь.
+	AssigneeID *uuid.UUID
+	Newcomer   *uuid.UUID
 	// RecruiterID — обращения новичков этого рекрутера (роль recruiter, FEATURE_AUTH).
 	RecruiterID *uuid.UUID
 }
@@ -71,6 +73,9 @@ func (r *TicketRepo) List(ctx context.Context, f TicketFilter) ([]domain.Ticket,
 	}
 	if f.Assignee != "" {
 		q = q.Where("assignee_name = ?", f.Assignee)
+	}
+	if f.AssigneeID != nil {
+		q = q.Where("assignee_id = ?", *f.AssigneeID)
 	}
 	if f.Site != "" {
 		q = q.Where("employee_id IN (?)", r.db.Model(&domain.Employee{}).Select("id").Where("site = ?", f.Site))

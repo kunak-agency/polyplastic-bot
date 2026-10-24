@@ -381,22 +381,126 @@ func (s *TicketService) locked(ctx context.Context, tx *repositories.Repos, id u
 	return t, e, nil
 }
 
-// Assign — «Взять в работу» / «Назначить»: open → assigned; в human_active статус остаётся
-// (диалог уже идёт). Переназначение другому — только с комментарием. Новичку — ASSIGNED правкой
-// сообщения статуса.
-func (s *TicketService) Assign(ctx context.Context, id uuid.UUID, name, comment string) (*TicketView, error) {
+// AssignInput — POST /api/tickets/{id}/assign. AssigneeID — пользователь (recruiter | hr_lead,
+// активный); Name — имя без входа (совместимость при выключенном FEATURE_AUTH).
+type AssignInput struct {
+	AssigneeID *uuid.UUID
+	Name       string
+	Comment    string
+}
+
+// Отказы назначения.
+const (
+	msgAssigneeNotFound = "Исполнитель не найден"
+	msgAssigneeRole     = "Исполнитель — активный рекрутер или руководитель HR"
+)
+
+// resolveAssignee — кому назначить. С входом: assignee_id → этот пользователь; без id и имени
+// («Взять в работу», тело пустое) или с именем вошедшего → он сам; другое имя — активный
+// recruiter/hr_lead с таким full_name. Без входа: assignee_id → пользователь, иначе имя как есть.
+func (s *TicketService) resolveAssignee(ctx context.Context, in AssignInput) (*uuid.UUID, string, error) {
+	field := func(msg string) error {
+		return errs.NewValidationError(msg).
+			WithDetails(errs.FieldError{Field: "assignee_id", Code: errs.CodeOutOfRange, Message: msg})
+	}
+	if in.AssigneeID != nil {
+		u, err := s.repos.Users.ByID(ctx, *in.AssigneeID)
+		if err != nil {
+			return nil, "", err
+		}
+		if u == nil {
+			return nil, "", field(msgAssigneeNotFound)
+		}
+		if !canAssign(u) {
+			return nil, "", field(msgAssigneeRole)
+		}
+		id := u.ID
+		return &id, userName(u), nil
+	}
+	v := ViewerFrom(ctx)
+	if v == nil {
+		if strings.TrimSpace(in.Name) == "" {
+			return nil, "", errs.NewValidationError(errs.MsgInvalidFields).
+				WithDetails(errs.FieldError{Field: "assignee_name", Code: errs.CodeRequired, Message: "Обязательное поле"})
+		}
+		return nil, in.Name, nil
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" || name == userName(v) {
+		if !canAssign(v) {
+			return nil, "", field(msgAssigneeRole)
+		}
+		id := v.ID
+		return &id, userName(v), nil
+	}
+	list, err := s.repos.Users.List(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	for i := range list {
+		if u := &list[i]; canAssign(u) && userName(u) == name {
+			id := u.ID
+			return &id, userName(u), nil
+		}
+	}
+	return nil, "", field(msgAssigneeNotFound)
+}
+
+// userName — full_name пользователя, пустое — логин.
+func userName(u *domain.User) string {
+	if n := strings.TrimSpace(u.FullName); n != "" {
+		return n
+	}
+	return u.LoginOr("")
+}
+
+// Assignees — кому можно назначить обращение: активные recruiter и hr_lead по имени.
+func (s *TicketService) Assignees(ctx context.Context) ([]domain.User, error) {
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
+	list, err := s.repos.Users.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.User, 0, len(list))
+	for _, u := range list {
+		if canAssign(&u) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
+// sameAssignee — обращение уже за этим исполнителем: по id, если он есть у обоих, иначе по имени.
+func sameAssignee(t *domain.Ticket, id *uuid.UUID, name string) bool {
+	if t.AssigneeID != nil && id != nil {
+		return *t.AssigneeID == *id
+	}
+	return t.AssigneeName != nil && *t.AssigneeName == name
+}
+
+// Assign — «Взять в работу» / «Назначить»: open → assigned; в human_active статус остаётся
+// (диалог уже идёт). Переназначение другому — только с комментарием. Новичку — ASSIGNED правкой
+// сообщения статуса. Автор записи в переписке — вошедший пользователь (без входа — исполнитель).
+func (s *TicketService) Assign(ctx context.Context, id uuid.UUID, in AssignInput) (*TicketView, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	assigneeID, name, err := s.resolveAssignee(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	comment := in.Comment
 	var t *domain.Ticket
 	var e *domain.Employee
 	var view *TicketView
-	err := s.repos.Transaction(ctx, func(tx *repositories.Repos) error {
+	err = s.repos.Transaction(ctx, func(tx *repositories.Repos) error {
 		var err error
 		if t, e, err = s.locked(ctx, tx, id); err != nil {
 			return err
 		}
-		reassign := t.AssigneeName != nil && *t.AssigneeName != name
+		reassign := t.AssigneeName != nil && !sameAssignee(t, assigneeID, name)
 		if reassign && strings.TrimSpace(comment) == "" {
 			return errs.NewValidationError(msgReassignComment).
 				WithDetails(errs.FieldError{Field: "comment", Code: errs.CodeRequired, Message: msgReassignComment})
@@ -408,14 +512,15 @@ func (s *TicketService) Assign(ctx context.Context, id uuid.UUID, name, comment 
 		if c := strings.TrimSpace(comment); c != "" {
 			note += ". " + c
 		}
-		t.AssigneeName = &name
+		t.AssigneeID, t.AssigneeName = assigneeID, &name
 		if t.Status == domain.TicketOpen {
 			t.Status = domain.TicketAssigned
 		}
 		if err := tx.Tickets.Save(ctx, t); err != nil {
 			return err
 		}
-		if err := tx.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgStaff, Author: &name, Text: note, Internal: true}); err != nil {
+		author := actorOr(ctx, name)
+		if err := tx.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgStaff, Author: &author, Text: note, Internal: true}); err != nil {
 			return err
 		}
 		view, err = s.view(ctx, tx, t)
@@ -431,6 +536,18 @@ func (s *TicketService) Assign(ctx context.Context, id uuid.UUID, name, comment 
 		s.sendStatus(ctx, e, t, m, true)
 	}
 	return view, nil
+}
+
+// staffAuthor — автор записи сотрудника: вошедший пользователь; без входа — исполнитель или «HR».
+func staffAuthor(ctx context.Context, t *domain.Ticket) string {
+	fallback := "HR"
+	if t.AssigneeName != nil && strings.TrimSpace(*t.AssigneeName) != "" {
+		fallback = *t.AssigneeName
+	}
+	if n := actorOr(ctx, fallback); n != "" {
+		return n
+	}
+	return fallback
 }
 
 // Reply — ответ HR новичку через бота с подписью: статус human_active, текст новичка дальше идёт
@@ -456,7 +573,7 @@ func (s *TicketService) Reply(ctx context.Context, id uuid.UUID, text string, re
 	cat := s.category(t.Category, t.Route)
 	// Отправка — до записи: «отправлено» в кабинете должно значить «ушло в MAX». Реплаем — на
 	// сообщение новичка, из которого выросло обращение (FEATURE_REPLIES).
-	m := staffReplyMessage(to, t, cat, text)
+	m := staffReplyMessage(to, t, cat, staffAuthor(ctx, t), text)
 	m.ReplyTo = s.sourceMID(ctx, t)
 	if _, err := sendReply(ctx, s.max, s.replies, m); err != nil {
 		logger.Warn("обращение #%d: ответ HR не ушёл в MAX: %v", t.Number, err)
@@ -468,10 +585,7 @@ func (s *TicketService) Reply(ctx context.Context, id uuid.UUID, text string, re
 		if err != nil {
 			return err
 		}
-		author := "HR"
-		if cur.AssigneeName != nil {
-			author = *cur.AssigneeName
-		}
+		author := staffAuthor(ctx, cur)
 		if err := tx.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: cur.ID, From: domain.TicketMsgStaff, Author: &author, Text: text}); err != nil {
 			return err
 		}
@@ -557,10 +671,7 @@ func (s *TicketService) Note(ctx context.Context, id uuid.UUID, text string) (*T
 		if t == nil {
 			return errs.NewNotFoundError(msgTicketNotFound)
 		}
-		author := "HR"
-		if t.AssigneeName != nil {
-			author = *t.AssigneeName
-		}
+		author := staffAuthor(ctx, t)
 		if err := tx.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgStaff, Author: &author, Text: text, Internal: true}); err != nil {
 			return err
 		}
@@ -593,10 +704,7 @@ func (s *TicketService) Resolve(ctx context.Context, id uuid.UUID, doneNote stri
 			return err
 		}
 		if doneNote = normDoneNote(doneNote); doneNote != "" {
-			author := "HR"
-			if t.AssigneeName != nil {
-				author = *t.AssigneeName
-			}
+			author := staffAuthor(ctx, t)
 			if err := tx.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgStaff, Author: &author, Text: DoneNotePrefix + doneNote, Internal: true}); err != nil {
 				return err
 			}

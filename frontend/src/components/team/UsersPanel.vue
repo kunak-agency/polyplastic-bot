@@ -8,6 +8,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import ErrorState from '@/components/common/ErrorState.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import AddUserDialog from '@/components/team/AddUserDialog.vue'
+import PeopleList from '@/components/team/PeopleList.vue'
 import { Button } from '@/components/ui/button'
 import { apiGetTeam, apiPatchUser } from '@/api/team'
 import { useToast } from '@/composables/useToast'
@@ -27,6 +28,12 @@ const data = ref<TeamResponse | null>(null)
 const error = ref<unknown>(null)
 const loading = ref(false)
 const addOpen = ref(false)
+
+// Tabs by role: recruiters with their load, managers and mentors of the people
+// directory (api_contract_auth.md, "People").
+type Tab = 'recruiters' | 'managers' | 'mentors'
+const TABS: Tab[] = ['recruiters', 'managers', 'mentors']
+const tab = ref<Tab>('recruiters')
 const busyId = ref<string | null>(null)
 
 async function load(): Promise<void> {
@@ -78,12 +85,28 @@ function onCreated(): void {
         <h2 class="users-panel__title">{{ t('team.title') }}</h2>
         <p class="muted txt-sm">{{ t('team.subtitle') }}</p>
       </div>
-      <Button variant="primary" @click="addOpen = true">
+      <Button v-if="tab === 'recruiters'" variant="primary" @click="addOpen = true">
         <UserPlus :size="14" aria-hidden="true" />{{ t('team.add.button') }}
       </Button>
     </div>
 
-    <SectionCard v-if="!data && !error">
+    <div class="users-panel__tabs" role="tablist">
+      <button
+        v-for="x in TABS"
+        :key="x"
+        type="button"
+        role="tab"
+        :aria-selected="tab === x"
+        :class="['users-panel__tab', { 'is-active': tab === x }]"
+        @click="tab = x"
+      >
+        {{ t(`people.users.tabs.${x}`) }}
+      </button>
+    </div>
+
+    <PeopleList v-if="tab !== 'recruiters'" :role="tab === 'managers' ? 'manager' : 'mentor'" />
+
+    <SectionCard v-else-if="!data && !error">
       <LoadingState variant="table" :rows="4" />
     </SectionCard>
     <SectionCard v-else-if="!data">
@@ -185,6 +208,26 @@ function onCreated(): void {
 }
 .users-panel__head p {
   margin: 2px 0 0;
+}
+.users-panel__tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.users-panel__tab {
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.users-panel__tab.is-active {
+  color: var(--fg);
+  border-bottom-color: var(--accent, var(--fg));
+  font-weight: 500;
 }
 .team-summary {
   display: flex;

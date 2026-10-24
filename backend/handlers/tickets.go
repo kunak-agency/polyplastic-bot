@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strings"
+
 	"main/in"
 	"main/out"
 	"main/services"
@@ -19,6 +21,10 @@ func (h *Handler) ListTickets(c *fiber.Ctx) error {
 		return err
 	}
 	f.RecruiterID = recruiterScope(c) // FEATURE_AUTH: рекрутер — обращения своих новичков
+	// FEATURE_AUTH: mine — «мои» по assignee_id вошедшего, имя из запроса не используется.
+	if v := Viewer(c); v != nil && mineOn(q.Mine) {
+		f.Assignee, f.AssigneeID = "", &v.ID
+	}
 	list, err := h.services.Tickets.List(c.UserContext(), f)
 	if err != nil {
 		return err
@@ -52,7 +58,8 @@ func (h *Handler) PatchTicket(c *fiber.Ctx) error {
 	return card(c)(h.services.Tickets.SetNotifyManager(c.UserContext(), id, notify))
 }
 
-// AssignTicket — POST /api/tickets/{id}/assign {"assignee_name","comment"}.
+// AssignTicket — POST /api/tickets/{id}/assign {"assignee_id"?,"assignee_name"?,"comment"?}. При
+// FEATURE_AUTH пустое тело — на себя («Взять в работу»).
 func (h *Handler) AssignTicket(c *fiber.Ctx) error {
 	id, err := pathID(c)
 	if err != nil {
@@ -62,11 +69,26 @@ func (h *Handler) AssignTicket(c *fiber.Ctx) error {
 	if err := bindBody(c, &body); err != nil {
 		return err
 	}
-	name, comment, err := body.Validate()
+	v, err := body.Validate()
 	if err != nil {
 		return err
 	}
-	return card(c)(h.services.Tickets.Assign(c.UserContext(), id, name, comment))
+	return card(c)(h.services.Tickets.Assign(c.UserContext(), id,
+		services.AssignInput{AssigneeID: v.AssigneeID, Name: v.Name, Comment: v.Comment}))
+}
+
+// TicketAssignees — GET /api/tickets/assignees: кому можно назначить обращение (активные recruiter
+// и hr_lead). Узкий список для выбора исполнителя: /api/users рекрутеру закрыт.
+func (h *Handler) TicketAssignees(c *fiber.Ctx) error {
+	list, err := h.services.Tickets.Assignees(c.UserContext())
+	if err != nil {
+		return err
+	}
+	items := make([]out.Assignee, 0, len(list))
+	for _, u := range list {
+		items = append(items, out.Assignee{ID: u.ID.String(), FullName: u.FullName, Role: u.Role})
+	}
+	return c.JSON(out.NewList(items))
 }
 
 // ReplyTicket — POST /api/tickets/{id}/reply {"text","resolve"}: ответ новичку через бота.
@@ -128,4 +150,13 @@ func card(c *fiber.Ctx) func(*services.TicketView, error) error {
 		}
 		return c.JSON(out.TicketCardFrom(*v))
 	}
+}
+
+// mineOn — mine задан: «1», «true» или имя (старый кабинет).
+func mineOn(m string) bool {
+	switch m = strings.ToLower(strings.TrimSpace(m)); m {
+	case "", "0", "false":
+		return false
+	}
+	return true
 }

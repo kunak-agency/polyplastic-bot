@@ -44,6 +44,12 @@ func (h *Handler) CreateNewcomer(c *fiber.Ctx) error {
 	if input.RecruiterID, err = h.createRecruiter(c); err != nil { // recruiter_id (users.go)
 		return err
 	}
+	// manager_id / mentor_id (people.go); без них — по manager_name / mentor_name.
+	mgr, mentor, err := newcomerPeople(c)
+	if err != nil {
+		return err
+	}
+	input.ManagerID, input.MentorID = mgr.ID, mentor.ID
 	card, err := h.services.Newcomers.Create(c.UserContext(), input)
 	if err != nil {
 		return err
@@ -73,9 +79,26 @@ func (h *Handler) PatchNewcomer(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	// recruiter_id — закрепление рекрутера (users.go); только он в теле — ответ уже отправлен.
+	// manager_id / mentor_id — люди из справочника (people.go): формат проверяем до изменений.
+	mgr, mentor, err := newcomerPeople(c)
+	if err != nil {
+		return err
+	}
+	// recruiter_id — закрепление рекрутера (users.go).
 	if done, err := h.patchRecruiter(c, id); done || err != nil {
 		return err
+	}
+	if err := h.services.Newcomers.SetPeople(c.UserContext(), id, mgr, mentor); err != nil {
+		return err
+	}
+	if onlyPeoplePatch(c) { // в теле только recruiter_id / manager_id / mentor_id
+		card, err := h.services.Newcomers.Get(c.UserContext(), id)
+		if err != nil {
+			return err
+		}
+		cards := []services.NewcomerCard{*card}
+		h.fillRecruiterNames(c, cards)
+		return c.JSON(out.NewcomerFrom(cards[0]))
 	}
 	var body in.NewcomerPatch
 	if err := bindBody(c, &body); err != nil {

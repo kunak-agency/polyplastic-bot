@@ -91,7 +91,7 @@ func TestStaleButtonsAfterNewcomerDeleted(t *testing.T) {
 	tk := e.onlyTicket(t, c.Employee.ID)
 	e.press(preTicketDetails + tk.ID.String())
 	e.say("детали")
-	if _, err := e.svc.Tickets.Assign(ctx, tk.ID, "Анна HR", ""); err != nil {
+	if _, err := e.svc.Tickets.Assign(ctx, tk.ID, AssignInput{Name: "Анна HR", Comment: ""}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.svc.Tickets.Reply(ctx, tk.ID, "ответ HR", true); err != nil {

@@ -35,6 +35,10 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 		api.Post("/newcomers/:id/contacted", h.MarkContacted)
 	}
 
+	// Справочник людей: руководители и наставники карточки (api_contract_auth.md, «Люди»).
+	api.Get("/people", h.ListPeople)
+	api.Post("/people", h.CreatePerson)
+
 	// v1 — новички, сценарии, машина времени (api_contract.md, «v1 — итерация 1»).
 	api.Get("/newcomers", h.ListNewcomers)
 	api.Post("/newcomers", h.CreateNewcomer)
@@ -71,6 +75,7 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 
 	// v2 — обращения (api_contract.md, «v2 — итерация 3» и «Уточнения v2»).
 	api.Get("/tickets", h.ListTickets)
+	api.Get("/tickets/assignees", h.TicketAssignees) // до /tickets/:id
 	api.Get("/tickets/:id", h.GetTicket)
 	api.Patch("/tickets/:id", h.PatchTicket)
 	api.Post("/tickets/:id/assign", h.AssignTicket)

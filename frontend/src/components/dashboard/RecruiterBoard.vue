@@ -11,7 +11,6 @@ import TodayList from '@/components/dashboard/TodayList.vue'
 import { Users } from 'lucide-vue-next'
 import { useRemind } from '@/composables/useRemind'
 import { apiAssignTicket } from '@/api/tickets'
-import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/lib/apiError'
 import { formatDayOffset, isoToLocalDate } from '@/lib/calendar'
@@ -35,7 +34,6 @@ const { t, d } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
-const auth = useAuthStore()
 const { remind } = useRemind()
 
 const active = computed(() =>
@@ -61,10 +59,8 @@ async function onCall(row: TodayRow, call: 'remind' | 'take'): Promise<void> {
     if (call === 'remind' && row.newcomer_id) {
       if (await remind(row.newcomer_id)) emit('reload')
     } else if (call === 'take' && row.ticket_id) {
-      await apiAssignTicket(row.ticket_id, {
-        assignee_name: auth.user?.full_name ?? '',
-        comment: '',
-      })
+      // "Take it": the server assigns the signed-in user (the session), no body.
+      await apiAssignTicket(row.ticket_id, {})
       void router.push({ name: 'ticket', params: { id: row.ticket_id } })
     }
   } catch (e) {

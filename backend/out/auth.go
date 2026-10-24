@@ -13,17 +13,42 @@ import (
 
 // User — пользователь кабинета; хэш пароля наружу не выходит.
 type User struct {
-	ID          string  `json:"id"`
-	Login       string  `json:"login"`
+	ID string `json:"id"`
+	// Login — null у человека без входа (руководитель или наставник из справочника).
+	Login       *string `json:"login"`
 	FullName    string  `json:"full_name"`
 	Role        string  `json:"role"`
 	TZ          *string `json:"tz"`
 	ManagerName *string `json:"manager_name"`
 	Active      bool    `json:"active"`
+	// HasLogin — может войти в кабинет (логин и пароль есть).
+	HasLogin bool `json:"has_login"`
 }
 
 func UserFrom(u domain.User) User {
-	return User{ID: u.ID.String(), Login: u.Login, FullName: u.FullName, Role: u.Role, TZ: u.TZ, ManagerName: u.ManagerName, Active: u.Active}
+	return User{ID: u.ID.String(), Login: u.Login, FullName: u.FullName, Role: u.Role, TZ: u.TZ, ManagerName: u.ManagerName,
+		Active: u.Active, HasLogin: u.HasLogin()}
+}
+
+// Person — человек справочника (GET/POST /api/people).
+type Person struct {
+	ID       string `json:"id"`
+	FullName string `json:"full_name"`
+	Role     string `json:"role"`
+	HasLogin bool   `json:"has_login"`
+	Active   bool   `json:"active"`
+}
+
+func PersonFrom(u domain.User) Person {
+	return Person{ID: u.ID.String(), FullName: u.FullName, Role: u.Role, HasLogin: u.HasLogin(), Active: u.Active}
+}
+
+func PeopleFrom(list []domain.User) []Person {
+	out := make([]Person, 0, len(list))
+	for _, u := range list {
+		out = append(out, PersonFrom(u))
+	}
+	return out
 }
 
 func UsersFrom(list []domain.User) []User {
@@ -52,14 +77,14 @@ func isoPtr(t *time.Time) *string {
 
 // TeamMember — строка нагрузки (без времени ответа по человеку).
 type TeamMember struct {
-	UserID            string `json:"user_id"`
-	FullName          string `json:"full_name"`
-	Login             string `json:"login"`
-	Role              string `json:"role"`
-	Active            bool   `json:"active"`
-	Newcomers         int    `json:"newcomers"`
-	TicketsOpen       int    `json:"tickets_open"`
-	TicketsSLAOverdue int    `json:"tickets_sla_overdue"`
+	UserID            string  `json:"user_id"`
+	FullName          string  `json:"full_name"`
+	Login             *string `json:"login"`
+	Role              string  `json:"role"`
+	Active            bool    `json:"active"`
+	Newcomers         int     `json:"newcomers"`
+	TicketsOpen       int     `json:"tickets_open"`
+	TicketsSLAOverdue int     `json:"tickets_sla_overdue"`
 }
 
 // Team — GET /api/team.
@@ -265,6 +290,11 @@ type LoadRow struct {
 	Newcomers         int    `json:"newcomers"`
 	TicketsOpen       int    `json:"tickets_open"`
 	TicketsSLAOverdue int    `json:"tickets_sla_overdue"`
+	// Реакция за 30 дней (страница «Команда»): медиана первого ответа, null — мало данных
+	// (меньше 5 ответов); median_n — по скольким обращениям; открытые без ответа дольше суток.
+	MedianFirstResponseMin *int `json:"median_first_response_min"`
+	MedianN                int  `json:"median_n"`
+	Unanswered24h          int  `json:"unanswered_24h"`
 }
 
 // DigestLine — строка карточки «Дайджест недели» с числами для фронта (lines — готовый текст).
@@ -293,6 +323,7 @@ type HRLeadDashboard struct {
 	BotDid                 BotDid          `json:"bot_did"`
 	Load                   []LoadRow       `json:"load"`
 	Unassigned             int             `json:"unassigned"`
+	UnassignedUnanswered24 int             `json:"unassigned_unanswered_24h"`
 	MedianFirstResponseMin *int            `json:"median_first_response_min"`
 	MedianN                int             `json:"median_n"`
 	Digest                 *Digest3        `json:"digest"`
@@ -306,10 +337,13 @@ func HRLeadDashboardFrom(d *services.HRLeadDashboard) HRLeadDashboard {
 			if !m.User.Active || m.User.Role != domain.RoleRecruiter {
 				continue
 			}
+			r := d.Response[m.User.ID]
 			o.Load = append(o.Load, LoadRow{UserID: m.User.ID.String(), FullName: m.User.FullName, Newcomers: m.Newcomers,
-				TicketsOpen: m.TicketsOpen, TicketsSLAOverdue: m.TicketsSLAOverdue})
+				TicketsOpen: m.TicketsOpen, TicketsSLAOverdue: m.TicketsSLAOverdue,
+				MedianFirstResponseMin: r.MedianFirstResponseMin, MedianN: r.MedianN, Unanswered24h: r.Unanswered24h})
 		}
 		o.Unassigned, o.MedianFirstResponseMin, o.MedianN = t.Unassigned, t.MedianFirstResponseMin, t.MedianN
+		o.UnassignedUnanswered24 = d.Response[uuid.Nil].Unanswered24h
 	}
 	if c := d.DigestCard; c != nil {
 		dg := &Digest3{Week: c.Week, Link: c.Link, Lines: []string{}, Facts: []DigestLine{}}

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { BellRing, BellOff, ShieldCheck, Users } from 'lucide-vue-next'
 import PageContainer from '@/components/common/PageContainer.vue'
@@ -19,10 +19,12 @@ import { isoToLocalDate } from '@/lib/calendar'
 import { ipTone } from '@/lib/ipDecision'
 import type { IpDecision, ManagerSummary, ManagerView } from '@/types/api'
 import { useAuthStore } from '@/stores/auth'
+import { canOpen } from '@/lib/roles'
 
 // "My newcomers" of ux-spec 3.1 for the head of unit (case role 03): D+N,
 // stage, last pulse, open "1:1 meeting" tasks — no tickets, no answer texts,
-// no signal categories. No roles yet: /manager?name=<manager_name>.
+// no signal categories. The HR lead opens it as /manager?name=<manager_name>
+// from Team → Heads of units or the newcomer card; not in his menu.
 const { t, d } = useI18n()
 const route = useRoute()
 // Signed in as a head of unit: only his own people, no picker. The server
@@ -36,12 +38,25 @@ const name = computed(
   () => self.value || (typeof route.query.name === 'string' ? route.query.name : ''),
 )
 
+// The HR lead picks a head of unit on Team → Heads of units: the bare /manager
+// goes there, and "All heads of units" walks back to it. With auth off there
+// is no Team page, so the picker below stays.
+const router = useRouter()
+const pickerOnTeam = computed(() => !self.value && canOpen(auth.viewer, 'team'))
+const backTo = computed(() =>
+  pickerOnTeam.value ? { name: 'team', query: { tab: 'managers' } } : { name: 'manager' },
+)
+
 const managers = ref<ManagerSummary[] | null>(null)
 const view = ref<ManagerView | null>(null)
 const error = ref<unknown>(null)
 const loading = ref(false)
 
 async function load(): Promise<void> {
+  if (!name.value && pickerOnTeam.value) {
+    void router.replace(backTo.value)
+    return
+  }
   loading.value = true
   error.value = null
   try {
@@ -94,7 +109,7 @@ function ipBadge(v: IpDecision | null | undefined): string {
       <template #subtitle>{{ t('manager.subtitle') }}</template>
       <template v-if="name && !self" #actions>
         <Button as-child variant="outline" size="sm">
-          <RouterLink :to="{ name: 'manager' }">{{ t('manager.back') }}</RouterLink>
+          <RouterLink :to="backTo">{{ t('manager.back') }}</RouterLink>
         </Button>
       </template>
     </PageHead>

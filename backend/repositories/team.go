@@ -115,8 +115,8 @@ func (r *TicketRepo) TicketEmployee(ctx context.Context, ticketID uuid.UUID) (uu
 	return rows[0].EmployeeID, nil
 }
 
-// TeamRow — строка «Команды» по рекрутеру (RecruiterID nil — «без рекрутера»). Времени ответа
-// по человеку нет намеренно (ресерч дашбордов §2: без рейтингов) — только медиана по команде.
+// TeamRow — строка «Команды» по рекрутеру (RecruiterID nil — «без рекрутера»). Реакция по
+// рекрутеру — отдельно, RecruiterResponse (страница «Команда» руководителя HR, без рейтинга).
 type TeamRow struct {
 	RecruiterID       *uuid.UUID
 	Newcomers         int
@@ -250,6 +250,42 @@ JOIN (SELECT ticket_id, min(created_at) AS first_at FROM ticket_messages
       WHERE "from" = ? AND NOT internal GROUP BY ticket_id) m ON m.ticket_id = t.id
 WHERE NOT t.is_test AND t.created_at >= ?`, domain.TicketMsgStaff, since).Scan(&row).Error
 	return row.Median, row.N, err
+}
+
+// RecruiterResponseRow — реакция по рекрутеру (RecruiterID nil — новички без рекрутера):
+// медиана первого ответа сотрудника за since (Median nil — ответов не было, N — по скольким
+// обращениям) и открытые обращения без ответа сотрудника дольше суток. Для страницы «Команда»
+// руководителя HR; сервис скрывает медиану при N < AnonymityMinGroup.
+type RecruiterResponseRow struct {
+	RecruiterID   *uuid.UUID
+	Median        *float64
+	N             int
+	Unanswered24h int
+}
+
+// RecruiterResponse — реакция по рекрутерам новичков. Тестовые обращения не считаются.
+func (r *Repos) RecruiterResponse(ctx context.Context, now, since time.Time) ([]RecruiterResponseRow, error) {
+	if !r.Enabled() {
+		return nil, ErrNoDatabase
+	}
+	var out []RecruiterResponseRow
+	err := r.db.WithContext(ctx).Raw(`
+WITH first AS (
+	SELECT ticket_id, min(created_at) AS first_at FROM ticket_messages
+	WHERE "from" = ? AND NOT internal GROUP BY ticket_id
+)
+SELECT e.recruiter_id,
+	percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (f.first_at - t.created_at)) / 60)
+		FILTER (WHERE f.first_at IS NOT NULL AND t.created_at >= ?) AS median,
+	count(*) FILTER (WHERE f.first_at IS NOT NULL AND t.created_at >= ?) AS n,
+	count(*) FILTER (WHERE f.first_at IS NULL AND t.status <> ? AND t.created_at < ?) AS unanswered24h
+FROM tickets t
+JOIN employees e ON e.id = t.employee_id
+LEFT JOIN first f ON f.ticket_id = t.id
+WHERE NOT t.is_test
+GROUP BY e.recruiter_id`,
+		domain.TicketMsgStaff, since, since, domain.TicketResolved, now.Add(-24*time.Hour)).Scan(&out).Error
+	return out, err
 }
 
 // NewcomerFileInfo — личный файл новичка без содержимого (список в карточке).

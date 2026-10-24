@@ -37,8 +37,17 @@ const routes: RouteRecordRaw[] = [
       crumbs: [{ key: 'common.nav.items.dashboard' }],
     },
   },
-  // The team moved to Settings (users) and the HR lead's dashboard (load).
-  { path: '/team', redirect: { name: 'settings' } },
+  // HR lead's team: recruiters' load and the heads of units (?tab=recruiters|managers).
+  // Users are still managed in Settings.
+  {
+    path: '/team',
+    name: 'team',
+    component: () => import('@/pages/team/TeamPage.vue'),
+    meta: {
+      title: 'common.routes.team',
+      crumbs: [{ key: 'common.nav.items.team' }],
+    },
+  },
   {
     path: '/',
     name: 'overview',

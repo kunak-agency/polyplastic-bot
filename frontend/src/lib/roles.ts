@@ -6,15 +6,22 @@ import type { Role } from '@/types/api'
 // before, without the screens that need a signed-in user.
 export type Viewer = Role | null
 
-const NEEDS_USER = new Set(['dashboard'])
+// "Today" is per role; "Team" reads /hrlead/* — both need a signed-in HR lead or recruiter.
+const NEEDS_USER = new Set(['dashboard', 'team'])
 
 // Route names a role may open. `undefined` in the table means "everything".
 const ONLY: Partial<Record<Role, ReadonlySet<string>>> = {
   manager: new Set(['manager']),
 }
 const DENY: Partial<Record<Role, ReadonlySet<string>>> = {
-  // Users are managed in Settings, by the HR lead only.
-  recruiter: new Set(['settings']),
+  // Users are managed in Settings and the team on "Team", by the HR lead only.
+  // The head of unit's view ("manager") is not a recruiter's screen.
+  recruiter: new Set(['settings', 'team', 'manager']),
+}
+// Open by link but not in the menu: the HR lead reaches the head of unit's view
+// from Team → Heads of units and from the newcomer card, not as "My employees".
+const NOT_IN_MENU: Partial<Record<Role, ReadonlySet<string>>> = {
+  hr_lead: new Set(['manager']),
 }
 
 export function canOpen(viewer: Viewer, routeName: string): boolean {
@@ -22,6 +29,12 @@ export function canOpen(viewer: Viewer, routeName: string): boolean {
   const only = ONLY[viewer]
   if (only) return only.has(routeName)
   return !DENY[viewer]?.has(routeName)
+}
+
+// Whether the sidebar shows the item: openable and not a by-link-only screen.
+export function inMenu(viewer: Viewer, routeName: string): boolean {
+  if (!canOpen(viewer, routeName)) return false
+  return viewer === null || !NOT_IN_MENU[viewer]?.has(routeName)
 }
 
 // Where a role lands after sign-in and on the bare "/".

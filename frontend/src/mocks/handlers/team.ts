@@ -256,6 +256,35 @@ function recruiterDashboard(req: MockRequest): MockResult {
   return { status: 200, data }
 }
 
+// Reaction of a recruiter's newcomers' tickets, as the server counts it: the
+// median minutes to the first staff answer (null below 5 answers) and open
+// tickets with no staff answer for over 24 h.
+const REACTION_MIN_GROUP = 5
+function reactionOf(ids: Set<string>): {
+  median: number | null
+  n: number
+  unanswered: number
+} {
+  const mins: number[] = []
+  let unanswered = 0
+  for (const t of tickets.values()) {
+    if (!ids.has(t.newcomer_id)) continue
+    const first = t.messages.find((m) => m.from === 'staff' && !m.internal)
+    const created = Date.parse(t.created_at)
+    if (first) mins.push(Math.max(0, Math.round((Date.parse(first.at) - created) / 60_000)))
+    else if (t.status !== 'resolved' && Date.now() - created > 24 * 3_600_000) unanswered++
+  }
+  mins.sort((a, b) => a - b)
+  const mid = Math.floor(mins.length / 2)
+  const median =
+    mins.length < REACTION_MIN_GROUP
+      ? null
+      : mins.length % 2
+        ? mins[mid]
+        : Math.round((mins[mid - 1] + mins[mid]) / 2)
+  return { median, n: mins.length, unanswered }
+}
+
 function hrLeadDashboard(req: MockRequest): MockResult {
   if (!isLead()) return forbidden()
   const all = active(req.query.site)
@@ -333,12 +362,16 @@ function hrLeadDashboard(req: MockRequest): MockResult {
     .map((u) => {
       const mine = all.filter((n) => n.recruiter_id === u.id)
       const tk = mine.map((n) => ticketsOf(n.id))
+      const rx = reactionOf(new Set(mine.map((n) => n.id)))
       return {
         user_id: u.id,
         full_name: u.full_name,
         newcomers: mine.length,
         tickets_open: tk.reduce((s, x) => s + x.open, 0),
         tickets_sla_overdue: tk.reduce((s, x) => s + x.sla, 0),
+        median_first_response_min: rx.median,
+        median_n: rx.n,
+        unanswered_24h: rx.unanswered,
       }
     })
   const answered = all.filter((n) => n.last_pulse !== null).length
@@ -361,6 +394,8 @@ function hrLeadDashboard(req: MockRequest): MockResult {
       ),
     },
     load,
+    unassigned: noRecruiter.length,
+    unassigned_unanswered_24h: reactionOf(new Set(noRecruiter.map((n) => n.id))).unanswered,
     median_first_response_min: 47,
     digest: {
       week: '2026-W43',
@@ -579,7 +614,82 @@ function listUsers(req: MockRequest): MockResult {
   return { status: 200, data: { items, total: items.length } }
 }
 
-const ROLES: Role[] = ['hr_lead', 'recruiter', 'manager']
+const ROLES: Role[] = ['hr_lead', 'recruiter', 'manager', 'mentor']
+
+// People directory (api_contract_auth.md, "People"): recruiter and hr_lead.
+function canPeople(): boolean {
+  const me = currentUser()
+  return !me || me.role === 'hr_lead' || me.role === 'recruiter'
+}
+
+function listPeople(req: MockRequest): MockResult {
+  if (!canPeople()) return forbidden()
+  const role = req.query.role
+  if (role && !['manager', 'mentor', 'recruiter'].includes(role))
+    return err(422, 'VALIDATION_FAILED', 'Роль: manager, mentor или recruiter')
+  const q = (req.query.q ?? '').trim().toLowerCase()
+  const items = [...users.values()]
+    .filter((u) => (role ? u.role === role : ['manager', 'mentor', 'recruiter'].includes(u.role)))
+    .filter((u) => !q || u.full_name.toLowerCase().includes(q))
+    .sort((a, b) => a.full_name.localeCompare(b.full_name))
+    .map((u) => {
+      const p = publicUser(u)
+      return {
+        id: p.id,
+        full_name: p.full_name,
+        role: p.role,
+        has_login: !!p.has_login,
+        active: p.active !== false,
+      }
+    })
+  return { status: 200, data: { items, total: items.length } }
+}
+
+function createPerson(req: MockRequest): MockResult {
+  if (!canPeople()) return forbidden()
+  const b = req.body
+  const full_name = typeof b.full_name === 'string' ? b.full_name.trim() : ''
+  const role = b.role
+  const login = typeof b.login === 'string' ? b.login.trim() : ''
+  const password = typeof b.password === 'string' ? b.password : ''
+  if (!full_name || (role !== 'manager' && role !== 'mentor'))
+    return err(422, 'VALIDATION_FAILED', 'Укажите ФИО и роль: manager или mentor')
+  if (login || password) {
+    if (role === 'mentor') return err(422, 'VALIDATION_FAILED', 'Наставник в кабинет не входит')
+    if (!isLead()) return forbidden()
+    if (password.length < 8) return err(422, 'VALIDATION_FAILED', 'Пароль не короче 8 символов')
+    if ([...users.values()].some((u) => u.login === login))
+      return err(409, 'LOGIN_TAKEN', 'Логин уже занят')
+  }
+  const same = [...users.values()].find(
+    (u) => u.role === role && u.full_name.toLowerCase() === full_name.toLowerCase(),
+  )
+  if (same && !login) return { status: 200, data: personOut(same) }
+  const id = crypto.randomUUID()
+  const u = {
+    id,
+    login: login || null,
+    full_name,
+    role: role as Role,
+    tz: null,
+    manager_name: null,
+    active: true,
+    password,
+  }
+  users.set(id, u)
+  return { status: 201, data: personOut(u) }
+}
+
+function personOut(u: Parameters<typeof publicUser>[0]) {
+  const p = publicUser(u)
+  return {
+    id: p.id,
+    full_name: p.full_name,
+    role: p.role,
+    has_login: !!p.has_login,
+    active: p.active !== false,
+  }
+}
 
 function createUser(req: MockRequest): MockResult {
   if (!isLead()) return forbidden()
@@ -619,6 +729,19 @@ function patchUser(req: MockRequest): MockResult {
   if (ROLES.includes(req.body.role as Role)) u.role = req.body.role as Role
   if (typeof req.body.full_name === 'string' && req.body.full_name.trim())
     u.full_name = req.body.full_name.trim()
+  // "Grant sign-in" to a person of the directory.
+  if (typeof req.body.login === 'string') {
+    const login = req.body.login.trim()
+    const password = typeof req.body.password === 'string' ? req.body.password : ''
+    if (u.role === 'mentor') return err(422, 'VALIDATION_FAILED', 'Наставник в кабинет не входит')
+    if (!login || (!u.password && password.length < 8))
+      return err(422, 'VALIDATION_FAILED', 'Чтобы выдать вход, задайте логин и пароль')
+    if ([...users.values()].some((x) => x.login === login && x.id !== u.id))
+      return err(409, 'LOGIN_TAKEN', 'Логин уже занят')
+    u.login = login
+  }
+  if (typeof req.body.password === 'string' && req.body.password.length >= 8)
+    u.password = req.body.password
   return { status: 200, data: publicUser(u) }
 }
 
@@ -650,6 +773,8 @@ const routes: MockRoute[] = [
   { method: 'POST', path: '/dev/recruiter-morning', handler: devRecruiterMorning },
   { method: 'POST', path: '/newcomers/:id/files', handler: uploadFile },
   { method: 'GET', path: '/team', handler: team },
+  { method: 'GET', path: '/people', handler: listPeople },
+  { method: 'POST', path: '/people', handler: createPerson },
   { method: 'GET', path: '/users', handler: listUsers },
   { method: 'POST', path: '/users', handler: createUser },
   { method: 'PATCH', path: '/users/:id', handler: patchUser },

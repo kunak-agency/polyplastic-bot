@@ -10,6 +10,7 @@ import {
   Gauge,
   UserCheck,
   Users,
+  UsersRound,
 } from 'lucide-vue-next'
 
 export interface NavItem {
@@ -37,7 +38,9 @@ export const NAV: NavItem[] = [
   },
   { id: 'tickets', routeName: 'tickets', labelKey: 'common.nav.items.tickets', icon: Inbox },
   { id: 'newcomers', routeName: 'newcomers', labelKey: 'common.nav.items.newcomers', icon: Users },
-  // Head of unit's "My employees" (case role 03).
+  // HR lead's team: recruiters' load and the heads of units (lib/roles.ts).
+  { id: 'team', routeName: 'team', labelKey: 'common.nav.items.team', icon: UsersRound },
+  // Head of unit's "My employees" (case role 03); the HR lead opens it from Team.
   { id: 'manager', routeName: 'manager', labelKey: 'common.nav.items.manager', icon: UserCheck },
   {
     id: 'analytics',

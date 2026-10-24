@@ -19,10 +19,11 @@ function active() {
 function managers(): MockResult {
   const by = new Map<string, number>()
   for (const n of active()) by.set(n.manager_name, (by.get(n.manager_name) ?? 0) + 1)
-  const items = [...by].map(([manager_name, count]) => ({
+  // Every third head has opened the bot link: the Team page shows both states.
+  const items = [...by].map(([manager_name, count], i) => ({
     manager_name,
     newcomers: count,
-    connected: false,
+    connected: i % 3 === 0,
   }))
   return { status: 200, data: { items, total: items.length } }
 }
@@ -35,8 +36,15 @@ function managerView(req: MockRequest): MockResult {
       status: 422,
       data: { error: { code: 'VALIDATION_FAILED', message: 'Укажите руководителя' } },
     }
+  // Signed in as manager: by manager_id, the name only for records without it.
+  const mine = (n: { manager_id?: string | null; manager_name: string }): boolean =>
+    me?.role === 'manager'
+      ? n.manager_id
+        ? n.manager_id === me.id
+        : n.manager_name === name
+      : n.manager_name === name
   const items: ManagerCard[] = active()
-    .filter((n) => n.manager_name === name)
+    .filter(mine)
     .map((n) => ({
       newcomer_id: n.id,
       full_name: n.full_name,

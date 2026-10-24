@@ -29,14 +29,21 @@ type Employee struct {
 	UUIDModel
 	UpdatedAt time.Time
 
-	FullName      string
-	Phone         string
-	Site          string
-	Department    string
-	Position      string
+	FullName   string
+	Phone      string
+	Site       string
+	Department string
+	Position   string
+	// ManagerName, MentorName — копия ФИО для текстов бота и шаблонов {Руководитель} /
+	// {Наставник}. При выборе человека из справочника синхронизируется с User.FullName.
 	ManagerName   string
 	MentorName    string
 	RecruiterName string
+	// ManagerID — руководитель (User, роль manager); по нему руководитель видит подчинённых и
+	// получает push. nil — старая запись: запасной вариант — совпадение ManagerName.
+	ManagerID *uuid.UUID `gorm:"type:uuid"`
+	// MentorID — наставник (User, роль mentor); nil — не выбран из справочника.
+	MentorID *uuid.UUID `gorm:"type:uuid"`
 	// RecruiterID — закреплённый рекрутер (User.ID); nil — «без рекрутера». RecruiterName — старое
 	// текстовое поле из импорта, остаётся как есть.
 	RecruiterID *uuid.UUID `gorm:"type:uuid"`

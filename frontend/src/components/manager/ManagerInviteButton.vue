@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Copy, UserPlus } from 'lucide-vue-next'
@@ -9,6 +9,8 @@ import { apiManagerInvite } from '@/api/manager'
 import { useCopy } from '@/composables/useClipboard'
 import { errorMessage } from '@/lib/apiError'
 import type { ManagerInvite } from '@/types/api'
+import { useAuthStore } from '@/stores/auth'
+import { canOpen } from '@/lib/roles'
 
 // "Invite the head of unit" on the newcomer card (case role 03): a deep link
 // ?start=mgr_<token>; the bot binds the head to every newcomer with this
@@ -16,6 +18,9 @@ import type { ManagerInvite } from '@/types/api'
 const props = defineProps<{ newcomerId: string }>()
 const { t, d } = useI18n()
 const copy = useCopy()
+// "Open the head's view" only for whom that screen is open (not the recruiter).
+const auth = useAuthStore()
+const canView = computed(() => canOpen(auth.viewer, 'manager'))
 
 const open = ref(false)
 const invite = ref<ManagerInvite | null>(null)
@@ -56,7 +61,7 @@ async function show(): Promise<void> {
         <Button variant="primary" size="sm" @click="copy(invite.link)">
           <Copy :size="14" />{{ t('manager.invite.copy') }}
         </Button>
-        <Button as-child variant="outline" size="sm">
+        <Button v-if="canView" as-child variant="outline" size="sm">
           <RouterLink :to="{ name: 'manager', query: { name: invite.manager_name } }">
             {{ t('manager.invite.open') }}
           </RouterLink>

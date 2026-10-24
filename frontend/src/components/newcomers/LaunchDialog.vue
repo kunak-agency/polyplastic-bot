@@ -6,6 +6,7 @@ import AppDialog from '@/components/common/AppDialog.vue'
 import FormField from '@/components/common/FormField.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import PlanPreview from '@/components/newcomers/PlanPreview.vue'
+import PersonPicker from '@/components/people/PersonPicker.vue'
 import { Button } from '@/components/ui/button'
 import { apiCreateNewcomer } from '@/api/newcomers'
 import { apiGetScenario } from '@/api/scenarios'
@@ -41,7 +42,11 @@ function zoneLabel(id: string): string {
   return t('tz.option', { city: key ? t(`tz.city.${key}`) : id, offset: tzOffsetLabel(id) })
 }
 
-type Form = Omit<NewcomerCreate, 'shift'> & { shift: Shift | '' }
+type Form = Omit<NewcomerCreate, 'shift' | 'manager_id' | 'mentor_id'> & {
+  shift: Shift | ''
+  manager_id: string
+  mentor_id: string
+}
 
 function blank(): Form {
   return {
@@ -52,6 +57,10 @@ function blank(): Form {
     position: '',
     manager_name: '',
     mentor_name: '',
+    // People directory (api_contract_auth.md, "People"): the names go along as
+    // a copy for the bot texts; the server keys on the ids.
+    manager_id: '',
+    mentor_id: '',
     recruiter_name: recruiterMode.value === 'self' ? (auth.user?.full_name ?? '') : '',
     recruiter_id: recruiterMode.value === 'self' ? (auth.user?.id ?? '') : '',
     tz: '',
@@ -168,6 +177,8 @@ async function submit(): Promise<void> {
       full_name: form.full_name.trim(),
       shift: form.shift || null,
       recruiter_id: form.recruiter_id || undefined,
+      manager_id: form.manager_id || undefined,
+      mentor_id: form.mentor_id || undefined,
       tz: form.tz || null,
     })
     toast.success(t('newcomers.launch.launched'))
@@ -291,20 +302,23 @@ const SITE_CODES: readonly SiteCode[] = SITES
           required
           :error="errors.manager_name"
         >
-          <input
-            id="lf-man"
-            v-model="form.manager_name"
-            class="input"
-            :class="{ err: errors.manager_name }"
-            :placeholder="t('newcomers.launch.placeholders.manager')"
+          <PersonPicker
+            v-model="form.manager_id"
+            role="manager"
+            input-id="lf-man"
+            :name="form.manager_name"
+            :invalid="!!errors.manager_name"
+            @pick="(p) => (form.manager_name = p?.full_name ?? '')"
           />
         </FormField>
         <FormField :label="t('newcomers.launch.fields.mentor')" html-for="lf-men">
-          <input
-            id="lf-men"
-            v-model="form.mentor_name"
-            class="input"
-            :placeholder="t('newcomers.launch.placeholders.mentor')"
+          <PersonPicker
+            v-model="form.mentor_id"
+            role="mentor"
+            input-id="lf-men"
+            :name="form.mentor_name"
+            clearable
+            @pick="(p) => (form.mentor_name = p?.full_name ?? '')"
           />
         </FormField>
         <FormField

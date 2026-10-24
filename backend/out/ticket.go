@@ -5,6 +5,8 @@ import (
 
 	"main/domain"
 	"main/services"
+
+	"github.com/google/uuid"
 )
 
 // Ticket — обращение по контракту v2 (+ «Уточнения v2»).
@@ -20,6 +22,7 @@ type Ticket struct {
 	Priority      string  `json:"priority"`
 	Status        string  `json:"status"`
 	Route         string  `json:"route"`
+	AssigneeID    *string `json:"assignee_id"`
 	AssigneeName  *string `json:"assignee_name"`
 	Anonymous     bool    `json:"anonymous"`
 	Summary       string  `json:"summary"`
@@ -44,6 +47,13 @@ type TicketCard struct {
 	Messages        []TicketMessage `json:"messages"`
 }
 
+// Assignee — строка GET /api/tickets/assignees.
+type Assignee struct {
+	ID       string `json:"id"`
+	FullName string `json:"full_name"`
+	Role     string `json:"role"`
+}
+
 // TicketMessage — сообщение переписки. У закрытых обращений текст новичка скрыт: text=null,
 // hidden=true (роли HR-партнёра и СБ — позже).
 type TicketMessage struct {
@@ -63,7 +73,7 @@ func TicketFrom(v services.TicketView) Ticket {
 	o := Ticket{
 		ID: t.ID.String(), Number: t.Number, NewcomerID: t.EmployeeID.String(), NewcomerName: v.NewcomerName,
 		Site: v.Site, Day: t.Day, Category: t.Category, CategoryName: v.CategoryName, Priority: t.Priority, Status: t.Status, Route: t.Route,
-		AssigneeName: t.AssigneeName, Anonymous: t.Anonymous, Summary: t.Summary, Quote: t.Quote,
+		AssigneeID: uuidOrNil(t.AssigneeID), AssigneeName: t.AssigneeName, Anonymous: t.Anonymous, Summary: t.Summary, Quote: t.Quote,
 		CreatedAt: ticketTime(t.CreatedAt, v.Site), UpdatedAt: ticketTime(t.UpdatedAt, v.Site),
 		NotifyManager: t.NotifyManager && !t.Restricted, Restricted: t.Restricted,
 	}
@@ -101,4 +111,13 @@ func TicketsFrom(list []services.TicketView) []Ticket {
 		out[i] = TicketFrom(v)
 	}
 	return out
+}
+
+// uuidOrNil — id строкой; nil — null.
+func uuidOrNil(id *uuid.UUID) *string {
+	if id == nil {
+		return nil
+	}
+	s := id.String()
+	return &s
 }

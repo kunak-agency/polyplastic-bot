@@ -51,10 +51,13 @@ type Ticket struct {
 	// лишь от руководителя F0, F4, F10 — false (taxonomy.Category.ManagerHidden).
 	Restricted    bool
 	NotifyManager bool
-	AssigneeName  *string
-	Anonymous     bool // анонимность HR-процессом не обеспечена — всегда false (UX 2.7)
-	Summary       string
-	Quote         *string
+	// AssigneeID — исполнитель-пользователь (users.id, FEATURE_AUTH); nil — не назначен или
+	// назначен по имени без входа. AssigneeName — копия его full_name для подписей и текстов.
+	AssigneeID   *uuid.UUID `gorm:"type:uuid"`
+	AssigneeName *string
+	Anonymous    bool // анонимность HR-процессом не обеспечена — всегда false (UX 2.7)
+	Summary      string
+	Quote        *string
 	// SummaryModel — строка модели для HR (/flags v2, ≤ 120 символов, без ПДн): заголовок карточки
 	// в кабинете. nil — модель не размечала (degraded, F10, обращение не из текста). Summary
 	// остаётся сводкой кода.

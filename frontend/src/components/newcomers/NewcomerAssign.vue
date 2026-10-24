@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { Clock } from 'lucide-vue-next'
+import PersonPicker from '@/components/people/PersonPicker.vue'
 import { apiPatchNewcomer, apiSetIpDecision } from '@/api/newcomers'
 import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
@@ -50,6 +51,25 @@ watch(
 )
 function onRecruiter(): void {
   void patch({ recruiter_id: recruiterId.value || null }, false)
+}
+
+// ── Manager and mentor (people directory) ──────────────────────────────────
+// Recruiter (his own) and hr_lead change them; the manager role only sees.
+const canEditPeople = computed(() => auth.viewer !== 'manager')
+const managerId = ref(props.newcomer.manager_id ?? '')
+const mentorId = ref(props.newcomer.mentor_id ?? '')
+watch(
+  () => props.newcomer.manager_id,
+  (v) => (managerId.value = v ?? ''),
+)
+watch(
+  () => props.newcomer.mentor_id,
+  (v) => (mentorId.value = v ?? ''),
+)
+function onPerson(field: 'manager_id' | 'mentor_id', id: string): void {
+  const current = props.newcomer[field] ?? ''
+  if (id === current) return
+  void patch({ [field]: id || null }, false)
 }
 
 // ── Time zone ───────────────────────────────────────────────────────────────
@@ -168,6 +188,35 @@ const nextLine = computed(() => {
         newcomer.recruiter_name || t('team.noRecruiter')
       }}</span>
     </label>
+
+    <div class="assign__field">
+      <label class="field-label" for="na-manager">{{ t('people.role.manager') }}</label>
+      <PersonPicker
+        v-if="canEditPeople"
+        v-model="managerId"
+        role="manager"
+        input-id="na-manager"
+        :name="newcomer.manager_name"
+        :disabled="busy"
+        @pick="(p) => onPerson('manager_id', p?.id ?? '')"
+      />
+      <span v-else class="assign__value">{{ newcomer.manager_name || '—' }}</span>
+    </div>
+
+    <div class="assign__field">
+      <label class="field-label" for="na-mentor">{{ t('people.role.mentor') }}</label>
+      <PersonPicker
+        v-if="canEditPeople"
+        v-model="mentorId"
+        role="mentor"
+        input-id="na-mentor"
+        :name="newcomer.mentor_name"
+        :disabled="busy"
+        clearable
+        @pick="(p) => onPerson('mentor_id', p?.id ?? '')"
+      />
+      <span v-else class="assign__value">{{ newcomer.mentor_name || '—' }}</span>
+    </div>
 
     <label class="assign__field">
       <span class="field-label">{{ t('tz.label') }}</span>

@@ -10,6 +10,8 @@ import (
 	"main/pkg/errs"
 	"main/pkg/taxonomy"
 	"main/repositories"
+
+	"github.com/google/uuid"
 )
 
 // maxTicketText — потолок ответа HR и заметки: сообщение MAX ≤ 4000 символов, часть занимает
@@ -58,20 +60,36 @@ func (q TicketQuery) Validate() (repositories.TicketFilter, error) {
 	return out, f.err()
 }
 
-// TicketAssign — POST /api/tickets/{id}/assign.
+// TicketAssign — POST /api/tickets/{id}/assign. assignee_id — пользователь (FEATURE_AUTH);
+// assignee_name — имя без входа (совместимость). Тело пустое при входе — «Взять в работу» на себя.
 type TicketAssign struct {
-	AssigneeName string `json:"assignee_name"`
-	Comment      string `json:"comment"`
+	AssigneeID   *string `json:"assignee_id"`
+	AssigneeName string  `json:"assignee_name"`
+	Comment      string  `json:"comment"`
 }
 
-func (b TicketAssign) Validate() (string, string, error) {
+// TicketAssignValid — проверенное тело назначения.
+type TicketAssignValid struct {
+	AssigneeID *uuid.UUID
+	Name       string
+	Comment    string
+}
+
+// Validate — форма полей; обязательность исполнителя решает сервис (при входе его можно не
+// передавать).
+func (b TicketAssign) Validate() (TicketAssignValid, error) {
 	var f fields
-	name := f.text("assignee_name", b.AssigneeName, true)
-	comment := strings.TrimSpace(b.Comment)
-	if utf8.RuneCountInString(comment) > maxTicketText {
+	var out TicketAssignValid
+	if b.AssigneeID != nil && strings.TrimSpace(*b.AssigneeID) != "" {
+		u := f.uuid("assignee_id", strings.TrimSpace(*b.AssigneeID))
+		out.AssigneeID = &u
+	}
+	out.Name = f.text("assignee_name", b.AssigneeName, false)
+	out.Comment = strings.TrimSpace(b.Comment)
+	if utf8.RuneCountInString(out.Comment) > maxTicketText {
 		f.add("comment", errs.CodeOutOfRange, fmt.Sprintf("Не длиннее %d символов", maxTicketText))
 	}
-	return name, comment, f.err()
+	return out, f.err()
 }
 
 // TicketReply — POST /api/tickets/{id}/reply.

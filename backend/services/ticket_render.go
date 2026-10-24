@@ -159,18 +159,29 @@ func staffPlaceholder(cat taxonomy.Category) string {
 }
 
 // staffSignature — «**Анна Смирнова, HR** (по обращению #1042):».
+// Имя — исполнитель обращения.
 func staffSignature(t *domain.Ticket, cat taxonomy.Category) string {
+	name := ""
+	if t.AssigneeName != nil {
+		name = *t.AssigneeName
+	}
+	return signatureOf(name, t, cat)
+}
+
+// signatureOf — подпись с именем name (пусто — только роль).
+func signatureOf(name string, t *domain.Ticket, cat taxonomy.Category) string {
 	role := staffRole(cat)
 	head := role
-	if t.AssigneeName != nil && strings.TrimSpace(*t.AssigneeName) != "" {
-		head = escapeMarkdown(*t.AssigneeName) + ", " + role
+	if n := strings.TrimSpace(name); n != "" {
+		head = escapeMarkdown(n) + ", " + role
 	}
 	return fmt.Sprintf("**%s** (по обращению #%d):", head, t.Number)
 }
 
-// staffReplyMessage — HUMAN_ACTIVE: ответ человека отдельным сообщением с подписью.
-func staffReplyMessage(to recipient, t *domain.Ticket, cat taxonomy.Category, text string) max.OutMessage {
-	body := staffSignature(t, cat) + "\n" + escapeFit(text, maxTextLen-200)
+// staffReplyMessage — HUMAN_ACTIVE: ответ человека отдельным сообщением с подписью signer
+// (FEATURE_AUTH — вошедший пользователь, без входа — исполнитель).
+func staffReplyMessage(to recipient, t *domain.Ticket, cat taxonomy.Category, signer, text string) max.OutMessage {
+	body := signatureOf(signer, t, cat) + "\n" + escapeFit(text, maxTextLen-200)
 	return to.msg(body, formatMarkdown, [][]max.Button{{
 		{Text: btnTicketReply, Payload: preTicketReply + t.ID.String()},
 		{Text: btnTicketClose, Payload: preTicketClose + t.ID.String()},

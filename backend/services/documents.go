@@ -248,7 +248,7 @@ func (s *DocumentService) Upload(ctx context.Context, u UploadInput) (*DocumentI
 		d.Version++
 		d.Filename, d.Kind, d.Sites, d.Size, d.SHA256 = u.Filename, u.Kind, u.Sites, int64(len(u.Data)), hex.EncodeToString(sum[:])
 		d.RAGDocID, d.Chunks, d.Clauses, d.LowConfidencePages = res.DocID, res.Chunks, res.Clauses, res.LowConfidencePages
-		d.UploadedBy, d.IndexError, d.Status = u.UploadedBy, "", statusOf(res.LowConfidencePages)
+		d.UploadedBy, d.IndexError, d.Status = actorOr(ctx, u.UploadedBy), "", statusOf(res.LowConfidencePages)
 		d.UpdatedAt = s.now()
 		if err := tx.Documents.Save(ctx, d); err != nil {
 			return err

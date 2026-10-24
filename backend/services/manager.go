@@ -173,8 +173,21 @@ type ManagerTask struct {
 	CreatedAt time.Time
 }
 
-// View — новички руководителя name в адаптации.
+// View — новички руководителя name в адаптации (hr_lead выбирает руководителя по имени; имя в
+// карточке — копия ФИО из справочника).
 func (s *ManagerService) View(ctx context.Context, name string) (*ManagerView, error) {
+	return s.view(ctx, name, func(e *domain.Employee) bool {
+		return name != "" && strings.TrimSpace(e.ManagerName) == name
+	})
+}
+
+// ViewFor — «Мои новички» вошедшего руководителя: подчинённые по manager_id, старые карточки
+// без manager_id — по имени (ManagerOwns).
+func (s *ManagerService) ViewFor(ctx context.Context, v *domain.User) (*ManagerView, error) {
+	return s.view(ctx, strings.TrimSpace(v.FullName), func(e *domain.Employee) bool { return ManagerOwns(v, e) })
+}
+
+func (s *ManagerService) view(ctx context.Context, name string, keep func(*domain.Employee) bool) (*ManagerView, error) {
 	if !s.repos.Enabled() {
 		return nil, repositories.ErrNoDatabase
 	}
@@ -183,7 +196,7 @@ func (s *ManagerService) View(ctx context.Context, name string) (*ManagerView, e
 	if err != nil {
 		return nil, err
 	}
-	mine := filterManagerRows(rows, name)
+	mine := filterManagerRows(rows, keep)
 	var ids []uuid.UUID
 	for _, e := range mine.Employees {
 		ids = append(ids, e.ID)
@@ -218,12 +231,12 @@ func (s *ManagerService) nudgeOptions(ctx context.Context, rows *repositories.Ov
 	return opt, nil
 }
 
-// filterManagerRows — только новички с этим manager_name.
-func filterManagerRows(rows *repositories.OverviewRows, name string) *repositories.OverviewRows {
+// filterManagerRows — только подчинённые руководителя (mine).
+func filterManagerRows(rows *repositories.OverviewRows, mine func(*domain.Employee) bool) *repositories.OverviewRows {
 	out := &repositories.OverviewRows{}
 	keep := map[uuid.UUID]bool{}
-	for _, e := range rows.Employees {
-		if strings.TrimSpace(e.ManagerName) == name && name != "" {
+	for i := range rows.Employees {
+		if e := rows.Employees[i]; mine(&e) {
 			out.Employees = append(out.Employees, e)
 			keep[e.ID] = true
 		}
@@ -321,6 +334,10 @@ func (s *ManagerService) Tick(ctx context.Context, force bool) ([]SentNudge, err
 		return nil, err
 	}
 	cands := ManagerNudgeCandidates(rows, now, s.tax, opt)
+	maxOf, err := s.managerMax(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
 	var lim *nudgeLimiter
 	if s.v2 {
 		sort.SliceStable(cands, func(i, j int) bool { return nudgeRank[cands[i].Kind] < nudgeRank[cands[j].Kind] })
@@ -330,7 +347,7 @@ func (s *ManagerService) Tick(ctx context.Context, force bool) ([]SentNudge, err
 	}
 	var out []SentNudge
 	for _, c := range cands {
-		if sent[c.Key] || strings.TrimSpace(c.Employee.ManagerName) == "" {
+		if sent[c.Key] || (c.Employee.ManagerID == nil && strings.TrimSpace(c.Employee.ManagerName) == "") {
 			continue
 		}
 		if !force && !InWorkHours(now, domain.SiteOf(c.Employee.Site)) {
@@ -343,6 +360,10 @@ func (s *ManagerService) Tick(ctx context.Context, force bool) ([]SentNudge, err
 		n.CreatedAt = now // часы сервиса: по ним считаются лимиты v2
 		if c.Employee.ManagerUserID != nil {
 			n.ManagerUserID = *c.Employee.ManagerUserID
+		} else if c.Employee.ManagerID != nil && maxOf[*c.Employee.ManagerID] != 0 {
+			// MAX руководителя из справочника (users.max_user_id): привязка по ссылке ещё не
+			// дошла до этой карточки.
+			n.ManagerUserID = maxOf[*c.Employee.ManagerID]
 		}
 		created, err := s.repos.Manager().CreateNudge(ctx, n)
 		if err != nil {
@@ -377,6 +398,38 @@ func (s *ManagerService) Tick(ctx context.Context, force bool) ([]SentNudge, err
 		out = append(out, res)
 	}
 	return out, nil
+}
+
+// managerMax — MAX user_id руководителей из справочника (users.max_user_id) по manager_id.
+func (s *ManagerService) managerMax(ctx context.Context, rows *repositories.OverviewRows) (map[uuid.UUID]int64, error) {
+	out := map[uuid.UUID]int64{}
+	var ids []uuid.UUID
+	for _, e := range rows.Employees {
+		if e.ManagerID != nil && e.ManagerUserID == nil {
+			ids = append(ids, *e.ManagerID)
+		}
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	users, err := s.repos.Users.ByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for id, u := range users {
+		if u.MaxUserID != nil && u.Active {
+			out[id] = *u.MaxUserID
+		}
+	}
+	return out, nil
+}
+
+// managerKey — кто руководитель для лимитов push: "id:<manager_id>", у старых карточек — имя.
+func managerKey(e *domain.Employee) string {
+	if e.ManagerID != nil {
+		return "id:" + e.ManagerID.String()
+	}
+	return strings.TrimSpace(e.ManagerName)
 }
 
 // Run — такт правил push.
@@ -429,7 +482,7 @@ func managerNudgeMessageV2(n *domain.ManagerNudge, managerName, cab string) max.
 }
 
 // nudgeLimiter — лимиты push на руководителя (v2): не больше nudgeLimitDay в день и
-// nudgeLimitWeek поводов для 1:1 за 7 дней. Руководитель — по manager_name карточки.
+// nudgeLimitWeek поводов для 1:1 за 7 дней. Руководитель — managerKey (manager_id или имя).
 type nudgeLimiter struct {
 	day, week map[string]int
 }
@@ -439,8 +492,9 @@ func (s *ManagerService) limiter(ctx context.Context, rows *repositories.Overvie
 	lim := &nudgeLimiter{day: map[string]int{}, week: map[string]int{}}
 	mgr := map[uuid.UUID]string{}
 	ids := make([]uuid.UUID, 0, len(rows.Employees))
-	for _, e := range rows.Employees {
-		mgr[e.ID] = strings.TrimSpace(e.ManagerName)
+	for i := range rows.Employees {
+		e := &rows.Employees[i]
+		mgr[e.ID] = managerKey(e)
 		ids = append(ids, e.ID)
 	}
 	list, err := s.repos.Manager().NudgesOf(ctx, ids)
@@ -466,7 +520,7 @@ func (s *ManagerService) limiter(ctx context.Context, rows *repositories.Overvie
 }
 
 func (l *nudgeLimiter) allow(c NudgeCandidate) bool {
-	name := strings.TrimSpace(c.Employee.ManagerName)
+	name := managerKey(&c.Employee)
 	if l.day[name] >= nudgeLimitDay {
 		return false
 	}
@@ -474,7 +528,7 @@ func (l *nudgeLimiter) allow(c NudgeCandidate) bool {
 }
 
 func (l *nudgeLimiter) take(c NudgeCandidate) {
-	name := strings.TrimSpace(c.Employee.ManagerName)
+	name := managerKey(&c.Employee)
 	l.day[name]++
 	if nudgeMeeting(c.Kind) {
 		l.week[name]++

@@ -75,6 +75,9 @@ const median = computed(() => {
         <p class="load-foot muted txt-sm">
           <template v-if="median">{{ t('dashboard.load.median', { value: median }) }}</template>
           <template v-else>{{ t('dashboard.load.medianNone') }}</template>
+          <RouterLink class="load-foot__all" :to="{ name: 'team' }">{{
+            t('dashboard.load.allTeam')
+          }}</RouterLink>
         </p>
       </SectionCard>
 
@@ -125,9 +128,18 @@ const median = computed(() => {
   font-weight: 600;
 }
 .load-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
   margin: 0;
   padding: 8px var(--space-4);
   border-top: 1px solid var(--border-subtle);
+}
+.load-foot__all {
+  color: var(--accent);
+  font-weight: 500;
+  white-space: nowrap;
 }
 .digest__week {
   margin: 0 0 4px;

@@ -19,6 +19,7 @@ import { apiGetNewcomer } from '@/api/newcomers'
 import {
   apiAssignTicket,
   apiGetTicket,
+  apiTicketAssignees,
   apiListTickets,
   apiNoteTicket,
   apiPatchTicket,
@@ -41,12 +42,14 @@ import {
   visibleQuote,
 } from '@/lib/tickets'
 import { TONE_ICON, isSentiment } from '@/lib/tone'
+import { useAuthStore } from '@/stores/auth'
 import { useOperatorStore } from '@/stores/operator'
 import { useTicketsStore } from '@/stores/tickets'
 import type {
   Newcomer,
   Ticket,
   TicketAssignRequest,
+  TicketAssignee,
   TicketDetail,
   TicketMessage,
 } from '@/types/api'
@@ -58,7 +61,31 @@ const now = useNow()
 const { category } = useTicketFormat()
 const { setBreadcrumbTail } = useBreadcrumbTail()
 const queue = useTicketsStore()
-const { name: me } = storeToRefs(useOperatorStore())
+const operator = useOperatorStore()
+const { name: me, locked: signedIn, userId: meId } = storeToRefs(operator)
+const auth = useAuthStore()
+
+// FEATURE_AUTH: assignees are users (recruiters and HR leads), picked by id.
+// null — auth is off or the list did not load: the dialog takes a free name.
+const assignees = ref<TicketAssignee[] | null>(null)
+async function loadAssignees(): Promise<void> {
+  if (!auth.enabled) return
+  try {
+    assignees.value = await apiTicketAssignees()
+  } catch {
+    assignees.value = null
+  }
+}
+onMounted(() => void loadAssignees())
+
+// The body of "Take it": signed in — empty, the server assigns the session's
+// user; without auth — the name kept on this machine.
+function takeBody(): TicketAssignRequest {
+  return signedIn.value ? {} : { assignee_name: me.value.trim(), comment: '' }
+}
+// The reply goes out signed with this name: the signed-in user with auth,
+// otherwise the assignee (as the server signs it).
+const signer = computed(() => (signedIn.value ? me.value : ticket.value?.assignee_name || me.value))
 
 const id = computed(() => String(route.params.id))
 const ticket = ref<TicketDetail | null>(null)
@@ -110,9 +137,12 @@ async function refresh(): Promise<void> {
 
 const restricted = computed(() => (ticket.value ? isRestricted(ticket.value) : false))
 const resolved = computed(() => ticket.value?.status === 'resolved')
-const mine = computed(
-  () => !!ticket.value?.assignee_name && ticket.value.assignee_name === me.value,
-)
+const mine = computed(() => {
+  const tk = ticket.value
+  if (!tk?.assignee_name) return false
+  if (meId.value && tk.assignee_id !== undefined) return tk.assignee_id === meId.value
+  return tk.assignee_name === me.value
+})
 const busy = ref(false)
 
 // ── Take / assign / resolve ─────────────────────────────────────────────────
@@ -127,11 +157,11 @@ async function assign(body: TicketAssignRequest, toastKey: 'taken' | 'assigned')
   if (!ticket.value) return
   busy.value = true
   try {
-    await apiAssignTicket(ticket.value.id, body)
+    const got = await apiAssignTicket(ticket.value.id, body)
     toast.success(
       t(`tickets.detail.toast.${toastKey}`, {
         number: ticket.value.number,
-        name: body.assignee_name,
+        name: got.assignee_name ?? body.assignee_name ?? '',
       }),
     )
     assignOpen.value = false
@@ -158,11 +188,14 @@ function take(): void {
     assignOpen.value = true
     return
   }
-  void assign({ assignee_name: me.value.trim(), comment: '' }, 'taken')
+  void assign(takeBody(), 'taken')
 }
 
 function onAssign(body: TicketAssignRequest): void {
-  void assign(body, body.assignee_name === me.value.trim() ? 'taken' : 'assigned')
+  const self = body.assignee_id
+    ? body.assignee_id === meId.value
+    : body.assignee_name === me.value.trim()
+  void assign(body, self ? 'taken' : 'assigned')
 }
 
 // "Resolve" asks for an optional "what was done" first (wave 4, #31).
@@ -227,8 +260,7 @@ async function send(andResolve: boolean): Promise<void> {
     if (mode.value === 'reply') {
       // The bot signs the reply with the assignee's name: an unassigned
       // ticket is taken first, so the newcomer never gets an unsigned answer.
-      if (!tk.assignee_name)
-        await apiAssignTicket(tk.id, { assignee_name: me.value.trim(), comment: '' })
+      if (!tk.assignee_name) await apiAssignTicket(tk.id, takeBody())
       await apiReplyTicket(tk.id, { text: body, resolve: andResolve })
       toast.success(
         andResolve
@@ -493,7 +525,7 @@ function when(iso: string): string {
                 :placeholder="
                   mode === 'reply'
                     ? t(`tickets.detail.composer.replyPlaceholderRole.${signatureRole(ticket)}`, {
-                        operator: ticket.assignee_name || me,
+                        operator: signer,
                       })
                     : t('tickets.detail.composer.notePlaceholder')
                 "
@@ -509,7 +541,7 @@ function when(iso: string): string {
                 <template v-else-if="mode === 'reply'">
                   {{
                     t('tickets.detail.composer.replyHint', {
-                      operator: ticket.assignee_name || me,
+                      operator: signer,
                       role: t(`tickets.detail.composer.role.${signatureRole(ticket)}`),
                       number: ticket.number,
                     })
@@ -617,8 +649,11 @@ function when(iso: string): string {
         v-model:open="assignOpen"
         :number="ticket.number"
         :current="ticket.assignee_name"
+        :current-id="ticket.assignee_id ?? null"
         :me="me"
+        :me-id="meId"
         :suggestions="suggestions"
+        :assignees="assignees"
         :busy="busy"
         @submit="onAssign"
       />

@@ -71,9 +71,24 @@ func (r *ManagerRepo) Bind(ctx context.Context, inv *domain.ManagerInvite, userI
 			Updates(map[string]any{"used_at": at, "used_by": userID}).Error; err != nil {
 			return err
 		}
-		res := tx.Model(&domain.Employee{}).
-			Where("(manager_name = ? AND manager_name <> '') OR id = ?", inv.ManagerName, inv.EmployeeID).
-			Update("manager_user_id", userID)
+		// Руководитель карточки, с которой выдана ссылка: из справочника (manager_id) — его
+		// подчинённые по manager_id плюс старые карточки с тем же именем без связи, и MAX
+		// запоминается у пользователя (users.max_user_id) для карточек, назначенных позже.
+		var rows []struct{ ManagerID *uuid.UUID }
+		if err := tx.Model(&domain.Employee{}).Select("manager_id").Where("id = ?", inv.EmployeeID).Limit(1).Scan(&rows).Error; err != nil {
+			return err
+		}
+		q := tx.Model(&domain.Employee{})
+		if len(rows) == 1 && rows[0].ManagerID != nil {
+			mid := *rows[0].ManagerID
+			q = q.Where("manager_id = ? OR (manager_id IS NULL AND manager_name = ? AND manager_name <> '') OR id = ?", mid, inv.ManagerName, inv.EmployeeID)
+			if err := tx.Model(&domain.User{}).Where("id = ?", mid).Update("max_user_id", userID).Error; err != nil {
+				return err
+			}
+		} else {
+			q = q.Where("(manager_name = ? AND manager_name <> '') OR id = ?", inv.ManagerName, inv.EmployeeID)
+		}
+		res := q.Update("manager_user_id", userID)
 		n = res.RowsAffected
 		return res.Error
 	})

@@ -63,7 +63,29 @@ function seedUsers(): void {
 export function publicUser(u: User & { password: string }): User {
   const { password: _password, ...rest } = u
   void _password
-  return rest
+  return { ...rest, has_login: !!u.login && !!u.password && u.role !== 'mentor' }
+}
+
+// People directory (api_contract_auth.md, "People"): a manager or a mentor by
+// exact name, created without sign-in when missing. Returns the id.
+export function personByName(role: 'manager' | 'mentor', name: string): string | null {
+  const n = name.trim()
+  if (!n) return null
+  const key = n.toLowerCase()
+  for (const u of users.values())
+    if (u.role === role && (u.full_name.toLowerCase() === key || u.manager_name === n)) return u.id
+  const id = uuidV4()
+  users.set(id, {
+    id,
+    login: null,
+    full_name: n,
+    role,
+    tz: null,
+    manager_name: null,
+    active: true,
+    password: '',
+  })
+  return id
 }
 const BOT_LINK = 'https://max.ru/korsik_demo_bot?start=inv_'
 
@@ -110,8 +132,14 @@ function openTicketsOf(newcomerId: string, fallback: number): number {
 export function view(n: StoredNewcomer): Newcomer {
   const day = daysBetween(n.start_date, today())
   const recruiter = n.recruiter_id ? users.get(n.recruiter_id) : undefined
+  const manager = n.manager_id ? users.get(n.manager_id) : undefined
+  const mentor = n.mentor_id ? users.get(n.mentor_id) : undefined
   return {
     ...n,
+    manager_id: n.manager_id ?? null,
+    mentor_id: n.mentor_id ?? null,
+    manager_name: manager?.full_name ?? n.manager_name,
+    mentor_name: mentor?.full_name ?? n.mentor_name,
     day,
     stage: stageForDay(day),
     open_tickets: openTicketsOf(n.id, n.open_tickets),
@@ -233,6 +261,8 @@ export function ensureSeeded(): void {
       mentor_name: s.mentor_name,
       recruiter_name: s.recruiter_name,
       recruiter_id: recruiterByName.get(s.recruiter_name) ?? null,
+      manager_id: personByName('manager', s.manager_name),
+      mentor_id: personByName('mentor', s.mentor_name),
       tz: null,
       start_date: addDays(now, -s.day),
       shift: s.shift,

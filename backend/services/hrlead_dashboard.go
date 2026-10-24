@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"main/domain"
@@ -13,8 +14,9 @@ import (
 )
 
 // Дашборд руководителя HR (FEATURE_AUTH; ресерч role-dashboards §2, §6): «Сегодня» из 4 типов
-// строк, 6 плиток, нагрузка команды (без времени ответа по человеку — только медиана по
-// команде), карточка «Дайджест недели» в 3 строки. Зоны риска — из BuildOverview как есть,
+// строк, 6 плиток, нагрузка команды (медиана по команде; реакция по рекрутеру — только для
+// страницы «Команда», без сортировки по ней и с порогом AnonymityMinGroup), карточка
+// «Дайджест недели» в 3 строки. Зоны риска — из BuildOverview как есть,
 // дайджест — BuildDigest без LLM-текста.
 
 // Типы строк «Сегодня» руководителя HR.
@@ -85,6 +87,34 @@ type HRLeadDashboard struct {
 	Team          *Team
 	DigestCard    *DigestCard
 	BotDid        BotDid
+	// Response — реакция по рекрутеру (ключ uuid.Nil — новички без рекрутера), для страницы
+	// «Команда»: медиана первого ответа (nil — меньше AnonymityMinGroup ответов) и «без ответа >24 ч».
+	Response map[uuid.UUID]RecruiterResponse
+}
+
+// RecruiterResponse — реакция по рекрутеру за TeamResponseDays.
+type RecruiterResponse struct {
+	MedianFirstResponseMin *int
+	MedianN                int
+	Unanswered24h          int
+}
+
+// recruiterResponse — строки репозитория в карту; медиана — только от AnonymityMinGroup ответов.
+func recruiterResponse(rows []repositories.RecruiterResponseRow) map[uuid.UUID]RecruiterResponse {
+	out := make(map[uuid.UUID]RecruiterResponse, len(rows))
+	for _, r := range rows {
+		key := uuid.Nil
+		if r.RecruiterID != nil {
+			key = *r.RecruiterID
+		}
+		x := RecruiterResponse{MedianN: r.N, Unanswered24h: r.Unanswered24h}
+		if r.Median != nil && r.N >= AnonymityMinGroup {
+			v := int(math.Round(*r.Median))
+			x.MedianFirstResponseMin = &v
+		}
+		out[key] = x
+	}
+	return out
 }
 
 // HRLeadDashboard — дашборд руководителя HR по площадке (пусто — все).
@@ -119,8 +149,12 @@ func (s *UserService) HRLeadDashboard(ctx context.Context, site string, digest *
 			return nil, err
 		}
 	}
+	resp, err := s.repos.RecruiterResponse(ctx, now, now.AddDate(0, 0, -TeamResponseDays))
+	if err != nil {
+		return nil, err
+	}
 	d := BuildHRLeadDashboard(rows, users, themes, ov, site, now, s.tax)
-	d.Team, d.DigestCard = team, card
+	d.Team, d.DigestCard, d.Response = team, card, recruiterResponse(resp)
 	// «Бот сам» — по всем новичкам площадки за сутки.
 	ids := make([]uuid.UUID, 0, len(rows.Employees))
 	for _, e := range rows.Employees {

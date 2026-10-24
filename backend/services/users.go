@@ -48,13 +48,15 @@ type UserInput struct {
 	Active      bool
 }
 
-// UserPatch — PATCH /api/users/{id}: nil — поле не меняется. ManagerName "" — снять.
+// UserPatch — PATCH /api/users/{id}: nil — поле не меняется. ManagerName "" — снять. Login —
+// «выдать вход» человеку из справочника (вместе с Password, если пароля ещё нет).
 type UserPatch struct {
 	Active      *bool
 	Role        *string
 	FullName    *string
 	Password    *string
 	ManagerName *string
+	Login       *string
 }
 
 func validRole(r string) bool {
@@ -101,6 +103,8 @@ func (s *UserService) Create(ctx context.Context, in UserInput) (*domain.User, e
 		return nil, fieldErr("full_name", errs.CodeRequired, "Обязательное поле")
 	case !validRole(in.Role):
 		return nil, fieldErr("role", errs.CodeOutOfRange, "Роль: hr_lead, recruiter или manager")
+	case in.Role == domain.RoleMentor:
+		return nil, fieldErr("role", errs.CodeOutOfRange, msgMentorNoLogin)
 	}
 	if err := checkPasswordLen(in.Password); err != nil {
 		return nil, err
@@ -109,7 +113,7 @@ func (s *UserService) Create(ctx context.Context, in UserInput) (*domain.User, e
 	if err != nil {
 		return nil, err
 	}
-	u := &domain.User{Login: login, PasswordHash: hash, FullName: strings.TrimSpace(in.FullName), Role: in.Role,
+	u := &domain.User{Login: &login, PasswordHash: hash, FullName: strings.TrimSpace(in.FullName), Role: in.Role,
 		Active: in.Active, TZ: emptyToNil(in.TZ), ManagerName: emptyToNil(in.ManagerName)}
 	if err := s.repos.Users.Create(ctx, u); err != nil {
 		if repositories.IsUniqueViolation(err) {
@@ -150,12 +154,32 @@ func (s *UserService) Patch(ctx context.Context, id uuid.UUID, p UserPatch) (*do
 		}
 		fields["role"] = *p.Role
 	}
+	renamed := ""
 	if p.FullName != nil {
 		name := strings.TrimSpace(*p.FullName)
 		if name == "" {
 			return nil, fieldErr("full_name", errs.CodeRequired, "Обязательное поле")
 		}
 		fields["full_name"] = name
+		if name != u.FullName {
+			renamed = name
+		}
+	}
+	if p.Login != nil {
+		login := NormalizeLogin(*p.Login)
+		role := u.Role
+		if p.Role != nil {
+			role = *p.Role
+		}
+		switch {
+		case role == domain.RoleMentor:
+			return nil, fieldErr("login", errs.CodeOutOfRange, msgMentorNoLogin)
+		case login == "" || utf8.RuneCountInString(login) > 100:
+			return nil, fieldErr("login", errs.CodeRequired, "Логин: от 1 до 100 символов")
+		case u.PasswordHash == "" && p.Password == nil:
+			return nil, fieldErr("password", errs.CodeRequired, "Чтобы выдать вход, задайте пароль")
+		}
+		fields["login"] = login
 	}
 	if p.ManagerName != nil {
 		fields["manager_name"] = emptyToNil(p.ManagerName)
@@ -174,6 +198,15 @@ func (s *UserService) Patch(ctx context.Context, id uuid.UUID, p UserPatch) (*do
 	err = s.repos.Transaction(ctx, func(tx *repositories.Repos) error {
 		if len(fields) > 0 {
 			if err := tx.Users.Patch(ctx, id, fields); err != nil {
+				if repositories.IsUniqueViolation(err) {
+					return errs.NewConflictError("Логин уже занят").WithCode(CodeLoginTaken)
+				}
+				return err
+			}
+		}
+		if renamed != "" {
+			// Копия ФИО в карточках (тексты бота, шаблоны) следует за справочником.
+			if err := tx.Employees.SyncPeopleNames(ctx, id, renamed); err != nil {
 				return err
 			}
 		}
@@ -367,7 +400,7 @@ func (s *UserService) NewcomerFiles(ctx context.Context, id uuid.UUID) ([]reposi
 
 // ManagerTask — «Встретился» (done) / «Запланировал» (planned) из кабинета: то же, что кнопки
 // mg:met / mg:plan под push в MAX (manager_bot.go). Роль manager — только задачи своих
-// подчинённых (по User.ManagerName), чужая — 404.
+// подчинённых (ManagerOwns: manager_id, для старых записей — имя), чужая — 404.
 func (s *UserService) ManagerTask(ctx context.Context, nudgeID uuid.UUID, status string) error {
 	if !s.repos.Enabled() {
 		return repositories.ErrNoDatabase
@@ -395,7 +428,7 @@ func (s *UserService) ManagerTask(ctx context.Context, nudgeID uuid.UUID, status
 		if err != nil {
 			return err
 		}
-		if e == nil || v.ManagerName == nil || strings.TrimSpace(e.ManagerName) != strings.TrimSpace(*v.ManagerName) {
+		if e == nil || !ManagerOwns(v, e) {
 			return notFound
 		}
 	}

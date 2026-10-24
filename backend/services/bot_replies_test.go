@@ -56,7 +56,7 @@ func TestRepliesAnswerHandoffAndStaff(t *testing.T) {
 	}
 
 	tk := e.onlyTicket(t, c.Employee.ID)
-	if _, err := e.svc.Tickets.Assign(ctx, tk.ID, "Анна", ""); err != nil {
+	if _, err := e.svc.Tickets.Assign(ctx, tk.ID, AssignInput{Name: "Анна", Comment: ""}); err != nil {
 		t.Fatal(err)
 	}
 	e.fake.Reset()
@@ -134,7 +134,7 @@ func TestRepliesOff(t *testing.T) {
 	qid := questionID(t, m)
 	e.pressOn(m.Buttons[0][0].Payload, e.question(t, qid).MessageID)
 	tk := e.onlyTicket(t, c.Employee.ID)
-	if _, err := e.svc.Tickets.Assign(ctx, tk.ID, "Анна", ""); err != nil {
+	if _, err := e.svc.Tickets.Assign(ctx, tk.ID, AssignInput{Name: "Анна", Comment: ""}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.svc.Tickets.Reply(ctx, tk.ID, "Бесплатная", false); err != nil {

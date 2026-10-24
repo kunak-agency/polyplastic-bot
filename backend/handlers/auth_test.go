@@ -259,6 +259,8 @@ func TestAuthRecruiterSeesOnlyOwn(t *testing.T) {
 	a.do("POST", "/api/newcomers/"+other.ID.String()+"/contacted", sid, nil, 404)
 	a.do("GET", "/api/overview", sid, nil, 200)
 	a.do("GET", "/api/hrlead/dashboard", sid, nil, 403)
+	a.do("GET", "/api/manager/managers", sid, nil, 403) // вид руководителя — не экран рекрутера
+	a.do("GET", "/api/manager/newcomers?name=x", sid, nil, 403)
 	t.Setenv("APP_ENV", "development")
 	a.do("POST", "/api/dev/recruiter-morning", sid, nil, 403) // утренняя сводка — только hr_lead
 }
@@ -330,8 +332,14 @@ func TestAuthDeactivateAndUsers(t *testing.T) {
 			t.Fatalf("нет плитки %s: %v", k, hd)
 		}
 	}
-	if load, _ := hd["load"].([]any); len(load) != 1 {
+	load, _ := hd["load"].([]any)
+	if len(load) != 1 {
 		t.Fatalf("load — активные рекрутеры: %v", hd["load"])
+	}
+	for _, k := range []string{"median_first_response_min", "median_n", "unanswered_24h"} {
+		if _, ok := load[0].(map[string]any)[k]; !ok {
+			t.Fatalf("load без %s: %v", k, load[0])
+		}
 	}
 	a.do("GET", "/api/newcomers/"+n.ID.String()+"/files", hrSID, nil, 200)
 	t.Setenv("APP_ENV", "development")

@@ -112,7 +112,7 @@ func TestTicketLifecycle(t *testing.T) {
 	}
 
 	// assign → assigned, статус правкой OPEN.
-	v, err := e.svc.Tickets.Assign(ctx, tk.ID, "Анна Смирнова", "")
+	v, err := e.svc.Tickets.Assign(ctx, tk.ID, AssignInput{Name: "Анна Смирнова", Comment: ""})
 	if err != nil || v.Ticket.Status != domain.TicketAssigned {
 		t.Fatalf("assign %+v %v", v, err)
 	}
@@ -121,7 +121,7 @@ func TestTicketLifecycle(t *testing.T) {
 		t.Fatalf("ASSIGNED %+v", edits)
 	}
 	// Переназначение без комментария — 422, с комментарием — ок.
-	if _, err := e.svc.Tickets.Assign(ctx, tk.ID, "Олег Петров", ""); err == nil {
+	if _, err := e.svc.Tickets.Assign(ctx, tk.ID, AssignInput{Name: "Олег Петров", Comment: ""}); err == nil {
 		t.Fatal("переназначение без комментария")
 	} else if typ, _ := appCode(err); typ != errs.ErrTypeValidation {
 		t.Fatalf("%v", err)
@@ -138,7 +138,7 @@ func TestTicketLifecycle(t *testing.T) {
 		t.Fatalf("ответ HR %q %v", r.Text, labels(r))
 	}
 	// Переназначение в human_active статус не понижает.
-	if v, err := e.svc.Tickets.Assign(ctx, tk.ID, "Олег Петров", "Анна в отпуске"); err != nil || v.Ticket.Status != domain.TicketHumanActive {
+	if v, err := e.svc.Tickets.Assign(ctx, tk.ID, AssignInput{Name: "Олег Петров", Comment: "Анна в отпуске"}); err != nil || v.Ticket.Status != domain.TicketHumanActive {
 		t.Fatalf("assign в human_active: %+v %v", v, err)
 	}
 
@@ -190,7 +190,10 @@ func TestTicketLifecycle(t *testing.T) {
 	}
 	for _, call := range []func() error{
 		func() error { _, err := e.svc.Tickets.Reply(ctx, tk.ID, "ещё", false); return err },
-		func() error { _, err := e.svc.Tickets.Assign(ctx, tk.ID, "Анна", "x"); return err },
+		func() error {
+			_, err := e.svc.Tickets.Assign(ctx, tk.ID, AssignInput{Name: "Анна", Comment: "x"})
+			return err
+		},
 		func() error { _, err := e.svc.Tickets.Resolve(ctx, tk.ID, ""); return err },
 	} {
 		if typ, _ := appCode(call()); typ != errs.ErrTypeConflict {
@@ -213,7 +216,7 @@ func TestTicketReplyAndResolve(t *testing.T) {
 	ctx := context.Background()
 	e.press(payHuman)
 	tk := e.onlyTicket(t, c.Employee.ID)
-	if _, err := e.svc.Tickets.Assign(ctx, tk.ID, "Анна", ""); err != nil {
+	if _, err := e.svc.Tickets.Assign(ctx, tk.ID, AssignInput{Name: "Анна", Comment: ""}); err != nil {
 		t.Fatal(err)
 	}
 	e.fake.Reset()

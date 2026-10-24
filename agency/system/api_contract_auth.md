@@ -54,7 +54,9 @@
 | `/api/newcomers*`, `/api/tickets*`, `/api/overview`, сценарии, база знаний | всё | только свои (`employees.recruiter_id = me`); сценарии — чтение | 403 |
 | `/api/recruiter/dashboard` | все новички или `?recruiter_id=<uuid>\|none` | свои | 403 |
 | `/api/hrlead/dashboard`, `/api/team`, `/api/users*`, `/api/newcomers/reassign` | да | 403 | 403 |
-| `/api/manager/newcomers`, `/api/manager/tasks/{id}` | любой `name` | любой `name` | `name` игнорируется: подчинённые по `users.manager_name`; чужая задача → 404 |
+| `/api/manager/newcomers`, `/api/manager/tasks/{id}` | любой `name` | любой `name` | `name` игнорируется: подчинённые по `employees.manager_id = me` (запись без `manager_id` — по имени); чужая задача → 404 |
+| `GET /api/people`, `POST /api/people` (без входа) | да | да | 403 |
+| `POST /api/people` с `login`+`password` | да | 403 | 403 |
 | `/api/manager/managers` | да | да | 403 |
 | тексты ответов (`timeline.answer`/`text`), обращения | да | свои | 403 |
 
@@ -239,3 +241,113 @@ multipart `file`, `name=adaptation_plan`, ≤ 20 МБ). `GET /api/newcomers/{id}
 `DEMO_PASSWORD_RECRUITER1`, `DEMO_PASSWORD_RECRUITER2`, `DEMO_PASSWORD_MANAGER`; без них новому
 аккаунту пароль генерируется и печатается один раз, у существующего не меняется. Затем новичкам
 без рекрутера проставляется `recruiter_id` по совпадению `recruiter_name` с `full_name`.
+
+## Люди: руководители и наставники (справочник, 24.10, агент P)
+
+Руководитель и наставник в карточке сотрудника — **сущности**, а не свободный текст: опечатка в
+строке больше не прячет сотрудника от руководителя.
+
+- Роли пользователей: `hr_lead | recruiter | manager | mentor`. `mentor` в кабинет не входит
+  никогда. Человек справочника может быть **без входа**: `login = null`, пароля нет — вход
+  отвергается тем же 401 `INVALID_CREDENTIALS`. Руководителю вход можно выдать позже.
+- Пользователь (`/api/users`, `/api/auth/me`): `login` — `string|null`, новое поле
+  `has_login: bool` (логин и пароль есть, роль не mentor). `GET /api/team`: `login` тоже `string|null`.
+- Схема: `employees.manager_id uuid NULL`, `employees.mentor_id uuid NULL` → `users.id`.
+  `manager_name` / `mentor_name` остаются **копией ФИО** (тексты бота, шаблоны `{Руководитель}` /
+  `{Наставник}`): при выборе человека и при переименовании пользователя (`PATCH /api/users/{id}`
+  `full_name`) сервер синхронизирует их с `users.full_name`.
+
+### `GET /api/people?role=manager|mentor|recruiter&q=` (recruiter, hr_lead)
+→ `{"items":[{"id","full_name","role","has_login","active"}],"total"}`, по ФИО; `q` — подстрока
+ФИО без учёта регистра; без `role` — все три роли. Неизвестная роль → 422. Неактивные тоже в
+списке (`active:false`), кабинет показывает их только выбранными.
+
+### `POST /api/people` `{"full_name","role":"manager|mentor","login"?,"password"?}`
+- Без `login`/`password` — recruiter и hr_lead: человек без входа → **201**. Человек той же роли с
+  тем же ФИО (без учёта регистра и пробелов по краям) уже есть → **200** и он сам (без дубля).
+- С `login` и `password` — только hr_lead (иначе 403); `mentor` со входом → 422; пароль < 8 → 422;
+  логин занят → 409 `LOGIN_TAKEN`. Если человек с этим ФИО уже есть без входа — вход выдаётся ему
+  (200); если вход у него уже есть → 409 `PERSON_EXISTS`.
+- Ответ — `{"id","full_name","role","has_login","active"}`.
+
+### «Выдать вход» — `PATCH /api/users/{id}` `{"login","password"}` (hr_lead)
+`login` — новое поле PATCH. У человека без пароля `password` обязателен (иначе 422); `mentor` →
+422; логин занят → 409 `LOGIN_TAKEN`.
+
+### Сотрудник
+- В ответе (`GET/POST/PATCH /api/newcomers…`): `"manager_id":"uuid|null"`, `"mentor_id":"uuid|null"`
+  рядом с `manager_name` / `mentor_name`.
+- `POST /api/newcomers` дополнительно принимает `manager_id?`, `mentor_id?`. Без id — по
+  `manager_name` / `mentor_name` (совместимость): человек с ролью manager/mentor и точно таким ФИО
+  (руководитель — также по старому `users.manager_name`), нет — создаётся без входа. id не того
+  человека (нет или другая роль) → 422 (`field: manager_id|mentor_id`).
+- `PATCH /api/newcomers/{id}` `{"manager_id"?: "uuid|null", "mentor_id"?: "uuid|null"}` — права как
+  у остального PATCH: recruiter — свои (чужой → 404), hr_lead — все. `null` — снять (имя → `""`).
+  Не UUID → 422. Можно вместе с `recruiter_id` / `start_date` / `tz`.
+
+### Доступ руководителя и push
+- Роль manager видит подчинённых по `employees.manager_id = users.id`; строка имени
+  (`users.manager_name`, иначе `full_name`) — запасной вариант **только** для записей без
+  `manager_id`. То же для `POST /api/manager/tasks/{id}`.
+- Push руководителю (`services/manager.go`): MAX-получатель — `employees.manager_user_id` (связка
+  по ссылке `mgr_<token>`, как раньше), иначе `users.max_user_id` руководителя по `manager_id`.
+  Лимиты push считаются по `manager_id` (у старых карточек — по имени).
+- Ссылка руководителя `mgr_<token>`: при входе по ней сервер ставит `manager_user_id` всем
+  карточкам с тем же `manager_id` (и старым без `manager_id` с тем же именем) и запоминает MAX у
+  пользователя (`users.max_user_id`). При смене руководителя в карточке `manager_user_id` берётся у
+  нового (`users.max_user_id` или `null`).
+
+### Перенос данных: `go run ./cmd/seed -people`
+Идемпотентно: для каждого различного `manager_name` / `mentor_name` в карточках без
+`manager_id` / `mentor_id` — пользователь с ролью manager / mentor и тем же ФИО (руководитель —
+также по `users.manager_name`, так связывается демо-аккаунт `manager`) или новый без входа;
+затем проставляется связь. Имена в карточках не меняются. Повторный запуск: «создано 0, связано 0».
+Прод (на ВМ, после выката бэкенда — AutoMigrate добавит колонки при старте API или сида):
+`docker compose -f docker-compose.demo.yml exec backend /app/seed -people` (бинарь `seed` уже в образе)
+либо из исходников `cd backend && DATABASE_URL=… go run ./cmd/seed -people`.
+
+
+## Кто есть кто: исполнитель и авторы из сессии (агент Q, 24.10)
+
+Правило: при `FEATURE_AUTH` человек, который действует в кабинете, — **вошедший пользователь**
+(`services.ViewerFrom`, его `full_name`, пустое — логин). Имена, которые присылает кабинет,
+сервер при входе игнорирует. Без флага — всё как раньше (имя из запроса).
+
+### Исполнитель обращения
+- Схема: `tickets.assignee_id uuid NULL` (AutoMigrate). `assignee_name` остаётся копией
+  `full_name` исполнителя для подписей и текстов.
+- В ответах `Ticket` / `TicketCard` новое поле `"assignee_id": "uuid|null"`.
+- `GET /api/tickets/assignees` → `{"items":[{"id","full_name","role":"recruiter|hr_lead"}],"total"}` —
+  активные recruiter и hr_lead по имени. Открыт рекрутеру и hr_lead (`/api/users` рекрутеру
+  закрыт), manager → 403. Есть и без флага (тогда фронт его не зовёт).
+- `POST /api/tickets/{id}/assign` `{"assignee_id"?, "assignee_name"?, "comment"?}`:
+  - `assignee_id` — пользователь; не найден, неактивен или роль не recruiter/hr_lead → 422
+    (`field: assignee_id`); не UUID → 422.
+  - при входе без `assignee_id`: пустое тело (или `assignee_name` = имя вошедшего) — **на себя**
+    («Взять в работу» в обращении и в «Сегодня»: фронт шлёт `{}`); другое имя — активный
+    recruiter/hr_lead с таким `full_name`, иначе 422.
+  - без входа: `assignee_name` обязателен (как раньше), `assignee_id` допустим.
+  - переназначение другому (сравнение по `assignee_id`, у старых записей — по имени) — только с
+    `comment`, иначе 422. Автор записи «Исполнитель: …» в переписке — вошедший.
+- `GET /api/tickets?mine=1` при входе — `assignee_id = me` (имя в `mine` не используется).
+
+### Подписи и авторы
+- Подпись ответа в MAX `**<Имя>, <роль> (по обращению #N):**` — `full_name` вошедшего, даже если
+  исполнитель другой; без входа — `assignee_name`. 409 `ticket_not_assigned` без исполнителя —
+  как раньше.
+- Автор (`messages[].author`) ответа, внутренней заметки и «что сделано» (`done_note`) — вошедший;
+  без входа — исполнитель или «HR».
+- `updated_by` медиатеки (`POST/PUT/PATCH /api/media*`, `POST /api/media/ensure`) и `uploaded_by`
+  базы знаний (`POST /api/documents`) — вошедший; поле формы/тела при входе игнорируется.
+- `ip_decision_by` — уже из сессии (`services/ip_decision.go`), без входа — «кабинет».
+- У сценариев поля «кто изменил» нет.
+
+### Фронт
+- `stores/operator.ts`: при входе `name` = `full_name` пользователя, менять нельзя (`locked`);
+  без входа — имя из `localStorage` («Анна К.» по умолчанию). Поля «Ваше имя» в настройках нет.
+- Диалог «Назначить» при входе — выбор из `GET /api/tickets/assignees` (`assignee_id`), «Это я» —
+  вошедший; без входа — свободное имя.
+
+### Дайджест
+Получатели — `MAX_DIGEST_USER_IDS` **плюс** активные hr_lead с `users.max_user_id`, без дублей
+(порядок: env, затем hr_lead).

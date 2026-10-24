@@ -83,7 +83,8 @@ var dummyHash = sync.OnceValue(func() string {
 // NormalizeLogin — логин без пробелов по краям, в нижнем регистре.
 func NormalizeLogin(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 
-// Login — проверка пароля и новая сессия. Деактивированный — тот же отказ, что неверный пароль.
+// Login — проверка пароля и новая сессия. Деактивированный, без пароля или наставник — тот же
+// отказ, что неверный пароль.
 func (s *AuthService) Login(ctx context.Context, login, password, ip string) (*domain.User, *domain.Session, error) {
 	if !s.repos.Enabled() {
 		return nil, nil, repositories.ErrNoDatabase
@@ -101,7 +102,8 @@ func (s *AuthService) Login(ctx context.Context, login, password, ip string) (*d
 		hash = u.PasswordHash
 	}
 	ok := checkPassword(hash, password)
-	if u == nil || !ok || !u.Active {
+	// Без пароля (человек из справочника) checkPassword всегда false; наставник не входит вовсе.
+	if u == nil || !ok || !u.Active || !u.HasLogin() {
 		s.limiter.Fail(ip, now)
 		return nil, nil, errs.NewUnauthorizedError(msgInvalidCredentials).WithCode(CodeInvalidCredentials)
 	}
@@ -146,7 +148,7 @@ func (s *AuthService) UserBySession(ctx context.Context, sessionID string) (*dom
 	if err != nil {
 		return nil, err
 	}
-	if u == nil || !u.Active {
+	if u == nil || !u.Active || !u.HasLogin() {
 		return nil, unauth
 	}
 	return u, nil

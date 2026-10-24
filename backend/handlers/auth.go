@@ -191,12 +191,14 @@ func (h *Handler) policy(c *fiber.Ctx, u *domain.User) error {
 }
 
 // recruiterPolicy — рекрутер: свои новички и обращения (чужой — 404), сценарии и база знаний —
-// чтение, без команды, пользователей и переназначения.
+// чтение, без команды, пользователей, переназначения и вида руководителя (/api/manager/*;
+// ссылка-приглашение руководителя из карточки — /api/newcomers/:id/manager-invite — остаётся).
 func (h *Handler) recruiterPolicy(c *fiber.Ctx, u *domain.User, p, m string) error {
 	read := m == fiber.MethodGet || m == fiber.MethodHead
 	switch {
 	case p == "/api/team" || strings.HasPrefix(p, "/api/users") || p == "/api/newcomers/reassign" ||
-		strings.HasPrefix(p, "/api/hrlead/") || p == "/api/dev/recruiter-morning":
+		strings.HasPrefix(p, "/api/hrlead/") || p == "/api/dev/recruiter-morning" ||
+		strings.HasPrefix(p, "/api/manager/"):
 		return errForbidden()
 	case strings.HasPrefix(p, "/api/scenarios"):
 		if read || rePreviewPath.MatchString(p) || (isDev() && reSendTest.MatchString(p)) {

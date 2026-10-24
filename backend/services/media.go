@@ -174,7 +174,7 @@ func (s *MediaService) Create(ctx context.Context, u MediaUpload) (*MediaItem, e
 		} else {
 			m = &domain.Media{Name: u.Name, NameKey: domain.MediaNameKey(u.Name), Aliases: domain.StringList{}}
 		}
-		m.Kind, m.UpdatedBy, m.UpdatedAt = u.Kind, u.By, s.now()
+		m.Kind, m.UpdatedBy, m.UpdatedAt = u.Kind, actorOr(ctx, u.By), s.now()
 		if err := tx.Media.Save(ctx, m); err != nil {
 			return err
 		}
@@ -234,7 +234,7 @@ func (s *MediaService) PutFile(ctx context.Context, id uuid.UUID, u MediaUpload)
 			}
 			return errs.NewValidationError(msg).WithDetails(errs.FieldError{Field: "file", Code: errs.CodeInvalidFormat, Message: msg})
 		}
-		m.Kind, m.UpdatedBy, m.UpdatedAt = u.Kind, u.By, s.now()
+		m.Kind, m.UpdatedBy, m.UpdatedAt = u.Kind, actorOr(ctx, u.By), s.now()
 		if err := tx.Media.Save(ctx, m); err != nil {
 			return err
 		}
@@ -355,7 +355,7 @@ func (s *MediaService) Rename(ctx context.Context, id uuid.UUID, name, by string
 				aliases = append(aliases, a)
 			}
 		}
-		m.Name, m.NameKey, m.Aliases, m.UpdatedBy, m.UpdatedAt = name, key, aliases, by, s.now()
+		m.Name, m.NameKey, m.Aliases, m.UpdatedBy, m.UpdatedAt = name, key, aliases, actorOr(ctx, by), s.now()
 		if err := tx.Media.Save(ctx, m); err != nil {
 			return err
 		}
@@ -483,7 +483,7 @@ func (s *MediaService) Ensure(ctx context.Context, names []string, kind, by stri
 				if k == "" {
 					k = guessMediaKind(name)
 				}
-				m = &domain.Media{Name: strings.Join(strings.Fields(name), " "), NameKey: key, Kind: k, Aliases: domain.StringList{}, UpdatedBy: by, UpdatedAt: s.now()}
+				m = &domain.Media{Name: strings.Join(strings.Fields(name), " "), NameKey: key, Kind: k, Aliases: domain.StringList{}, UpdatedBy: actorOr(ctx, by), UpdatedAt: s.now()}
 				if err := tx.Media.Create(ctx, m); err != nil {
 					return err
 				}

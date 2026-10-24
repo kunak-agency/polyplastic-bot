@@ -541,7 +541,8 @@ type DigestSendResult struct {
 	Logged bool // получателей нет или бот выключен — текст только в лог
 }
 
-// Send — отправить дайджест недели (пусто — прошедшая) всем из MAX_DIGEST_USER_IDS.
+// Send — отправить дайджест недели (пусто — прошедшая) всем из MAX_DIGEST_USER_IDS и активным
+// hr_lead с users.max_user_id (без дублей).
 func (s *DigestService) Send(ctx context.Context, week string) (*DigestSendResult, error) {
 	if week == "" {
 		week = s.LastFullWeek()
@@ -551,15 +552,13 @@ func (s *DigestService) Send(ctx context.Context, week string) (*DigestSendResul
 		return nil, err
 	}
 	res := &DigestSendResult{Week: d.Week, Text: d.MaxText}
-	if len(s.opts.UserIDs) == 0 || s.max == nil {
+	to := s.recipients(ctx)
+	if len(to) == 0 || s.max == nil {
 		res.Logged = true
-		logger.Info("дайджест %s: получателей нет (MAX_DIGEST_USER_IDS) или бот выключен — текст в лог:\n%s", d.Week, d.MaxText)
+		logger.Info("дайджест %s: получателей нет (MAX_DIGEST_USER_IDS, hr_lead с max_user_id) или бот выключен — текст в лог:\n%s", d.Week, d.MaxText)
 		return res, nil
 	}
-	for _, uid := range s.opts.UserIDs {
-		if uid == 0 {
-			continue
-		}
+	for _, uid := range to {
 		_, err := s.max.Send(ctx, max.OutMessage{UserID: uid, Text: d.MaxText,
 			Buttons: [][]max.Button{{{Text: "Открыть аналитику", URL: d.Link}}}})
 		if err != nil {
@@ -568,8 +567,38 @@ func (s *DigestService) Send(ctx context.Context, week string) (*DigestSendResul
 		}
 		res.SentTo++
 	}
-	logger.Info("дайджест %s: отправлен %d из %d получателей", d.Week, res.SentTo, len(s.opts.UserIDs))
+	logger.Info("дайджест %s: отправлен %d из %d получателей", d.Week, res.SentTo, len(to))
 	return res, nil
+}
+
+// recipients — MAX user_id получателей: сначала MAX_DIGEST_USER_IDS, затем активные hr_lead с
+// заданным users.max_user_id. Нули и повторы отброшены. База недоступна — только env.
+func (s *DigestService) recipients(ctx context.Context) []int64 {
+	seen := map[int64]bool{}
+	var out []int64
+	add := func(id int64) {
+		if id != 0 && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	for _, id := range s.opts.UserIDs {
+		add(id)
+	}
+	if !s.repos.Enabled() {
+		return out
+	}
+	users, err := s.repos.Users.List(ctx)
+	if err != nil {
+		logger.Warn("дайджест: пользователи hr_lead не прочитаны: %v", err)
+		return out
+	}
+	for _, u := range users {
+		if u.Active && u.Role == domain.RoleHRLead && u.MaxUserID != nil {
+			add(*u.MaxUserID)
+		}
+	}
+	return out
 }
 
 // RunWeekly — понедельник 9:00 по Москве: дайджест прошедшей недели, один раз за неделю

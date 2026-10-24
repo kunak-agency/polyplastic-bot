@@ -41,6 +41,10 @@ type NewcomerInput struct {
 	TZ *string
 	// RecruiterID — закреплённый рекрутер (FEATURE_AUTH: роль recruiter — он сам); nil — нет.
 	RecruiterID *uuid.UUID
+	// ManagerID, MentorID — люди из справочника (api_contract_auth.md, «Люди»); nil — тогда по
+	// ManagerName / MentorName человек находится по точному ФИО или создаётся без входа.
+	ManagerID *uuid.UUID
+	MentorID  *uuid.UUID
 }
 
 // NewcomerCard — сотрудник с вычисляемыми полями контракта.
@@ -222,12 +226,34 @@ func (s *NewcomerService) Create(ctx context.Context, in NewcomerInput) (*Newcom
 		if v == nil {
 			return errs.NewInternalError("версия сценария не найдена")
 		}
+		mgr, err := resolvePerson(ctx, tx, domain.RoleManager, "manager_id", PersonRef{ID: in.ManagerID, Name: in.ManagerName})
+		if err != nil {
+			return err
+		}
+		mentor, err := resolvePerson(ctx, tx, domain.RoleMentor, "mentor_id", PersonRef{ID: in.MentorID, Name: in.MentorName})
+		if err != nil {
+			return err
+		}
 		e = domain.Employee{
 			FullName: in.FullName, Phone: in.Phone, Site: in.Site, Department: in.Department,
 			Position: in.Position, ManagerName: in.ManagerName, MentorName: in.MentorName,
 			RecruiterName: in.RecruiterName, RecruiterID: in.RecruiterID, StartDate: in.StartDate, Shift: in.Shift,
 			ScenarioID: sc.ID, ScenarioVersion: sc.Version, TZ: in.TZ,
 			Connection: domain.ConnInvited, Risk: domain.RiskGreen,
+		}
+		// The recruiter's name is a copy of the user's full name, not what the form sent.
+		if in.RecruiterID != nil {
+			if u, err := tx.Users.ByID(ctx, *in.RecruiterID); err != nil {
+				return err
+			} else if u != nil {
+				e.RecruiterName = u.FullName
+			}
+		}
+		if mgr != nil {
+			e.ManagerID, e.ManagerName, e.ManagerUserID = &mgr.ID, mgr.FullName, mgr.MaxUserID
+		}
+		if mentor != nil {
+			e.MentorID, e.MentorName = &mentor.ID, mentor.FullName
 		}
 		if err := tx.Employees.Create(ctx, &e); err != nil {
 			return err

@@ -45,13 +45,15 @@ export function forbidden(): MockResult {
 const OPEN = [/\/auth\/login$/, /\/auth\/logout$/, /\/auth\/me$/, /\/health$/]
 
 // 401 for every call without a session while auth is on; manager gets 403
-// outside his own view (the role matrix of the contract).
+// outside his own view, recruiter inside it (the role matrix of the contract).
 export function authGate(req: MockRequest): MockResult | null {
   if (!MOCK_AUTH || OPEN.some((re) => re.test(req.path))) return null
   const me = currentUser()
   if (!me) return err(401, 'UNAUTHENTICATED', 'Войдите в кабинет')
   if (me.role === 'manager' && !/\/manager\/(newcomers|tasks\/[^/]+)$/.test(req.path))
     return forbidden()
+  // The head of unit's view is not a recruiter's screen.
+  if (me.role === 'recruiter' && /\/manager\/[^/]+(\/[^/]+)?$/.test(req.path)) return forbidden()
   return null
 }
 
@@ -60,7 +62,8 @@ function login(req: MockRequest): MockResult {
   const loginName = typeof req.body.login === 'string' ? req.body.login.trim() : ''
   const password = typeof req.body.password === 'string' ? req.body.password : ''
   const u = [...users.values()].find((x) => x.login === loginName)
-  if (!u || u.password !== password || u.active === false)
+  // No password (a person of the directory) or a mentor: never signs in.
+  if (!u || !u.password || u.password !== password || u.active === false || u.role === 'mentor')
     return err(401, 'INVALID_CREDENTIALS', 'Неверный логин или пароль')
   writeSession(u.id)
   return { status: 200, data: { user: publicUser(u) } }

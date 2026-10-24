@@ -13,20 +13,24 @@ const (
 	RoleHRLead    = "hr_lead"   // руководитель HR / подбора: всё по всем площадкам, пользователи
 	RoleRecruiter = "recruiter" // рекрутер: свои новички (Employee.RecruiterID)
 	RoleManager   = "manager"   // руководитель подразделения: только подчинённые, без текстов ответов
+	// RoleMentor — наставник: справочник людей (Employee.MentorID), в кабинет не входит.
+	RoleMentor = "mentor"
 )
 
 // Roles — допустимые роли.
-var Roles = []string{RoleHRLead, RoleRecruiter, RoleManager}
+var Roles = []string{RoleHRLead, RoleRecruiter, RoleManager, RoleMentor}
 
 // User — пользователь кабинета. Вход — логин и пароль (хэш argon2id или bcrypt), сессии — Session.
 type User struct {
 	UUIDModel
 	UpdatedAt time.Time
 
-	Login        string `gorm:"uniqueIndex;size:100"`
+	// Login — nil у человека без входа (руководитель или наставник из справочника): NULL не
+	// конфликтует в уникальном индексе. Пустой PasswordHash — войти нельзя (HasLogin).
+	Login        *string `gorm:"uniqueIndex;size:100"`
 	PasswordHash string
 	FullName     string
-	Role         string // hr_lead | recruiter | manager
+	Role         string // hr_lead | recruiter | manager | mentor
 	// Active — false: деактивирован, войти не может. default:true: GORM на Create подменяет
 	// нулевое значение дефолтом, поэтому выключенного создаёт только UserRepo.Create.
 	Active bool `gorm:"not null;default:true"`
@@ -38,6 +42,19 @@ type User struct {
 	// MaxUserID — MAX user_id пользователя для push кабинета (утренняя сводка рекрутеру,
 	// FEATURE_RISK_V2); nil — в MAX не пишем.
 	MaxUserID *int64
+}
+
+// HasLogin — может войти в кабинет: есть логин и пароль, роль не mentor.
+func (u *User) HasLogin() bool {
+	return u != nil && u.Login != nil && *u.Login != "" && u.PasswordHash != "" && u.Role != RoleMentor
+}
+
+// LoginOr — логин или def, если входа нет.
+func (u *User) LoginOr(def string) string {
+	if u == nil || u.Login == nil {
+		return def
+	}
+	return *u.Login
 }
 
 // SessionTTL — срок жизни сессии кабинета (cookie HttpOnly; Secure; SameSite=Lax).

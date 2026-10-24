@@ -34,7 +34,8 @@ func iterRepos(t *testing.T) *Repos {
 
 func TestUsersAndSessions(t *testing.T) {
 	r, ctx := iterRepos(t), context.Background()
-	off := &domain.User{Login: "off", PasswordHash: "x", FullName: "Выключен", Role: domain.RoleRecruiter, Active: false}
+	login := "off"
+	off := &domain.User{Login: &login, PasswordHash: "x", FullName: "Выключен", Role: domain.RoleRecruiter, Active: false}
 	if err := r.Users.Create(ctx, off); err != nil {
 		t.Fatal(err)
 	}
@@ -42,8 +43,14 @@ func TestUsersAndSessions(t *testing.T) {
 	if err != nil || got == nil || got.Active {
 		t.Fatalf("Active=false должен сохраниться: %+v, %v", got, err)
 	}
-	if err := r.Users.Create(ctx, &domain.User{Login: "off", Role: domain.RoleManager}); !IsUniqueViolation(err) {
+	if err := r.Users.Create(ctx, &domain.User{Login: &login, Role: domain.RoleManager}); !IsUniqueViolation(err) {
 		t.Fatalf("логин уникален: %v", err)
+	}
+	// Без входа (справочник людей): login NULL не конфликтует в уникальном индексе.
+	for i := 0; i < 2; i++ {
+		if err := r.Users.Create(ctx, &domain.User{FullName: "Без входа", Role: domain.RoleMentor, Active: true}); err != nil {
+			t.Fatalf("человек без логина %d: %v", i, err)
+		}
 	}
 	if err := r.Users.SetActive(ctx, off.ID, true); err != nil {
 		t.Fatal(err)

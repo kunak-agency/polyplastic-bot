@@ -5,6 +5,7 @@
 //	cd backend && go run ./cmd/seed     (или make seed)
 //	cd backend && go run ./cmd/seed -reset   (или make seed-reset) — чистая пересборка
 //	cd backend && go run ./cmd/seed -users   — демо-аккаунты кабинета (users.go)
+//	cd backend && go run ./cmd/seed -people  — руководители и наставники в справочник людей (users.go)
 //
 // -reset — только APP_ENV=development: удаляет всех новичков (вместе со смоук-данными агентов),
 // сценарии со «Смоук-шагом» и правками, события, вопросы и обращения, затем заливает сид заново.
@@ -41,6 +42,7 @@ func main() {
 	reset := flag.Bool("reset", false, "очистить демо-данные и залить сид заново (только APP_ENV=development)")
 	yes := flag.Bool("yes", false, "не спрашивать подтверждение для -reset")
 	users := flag.Bool("users", false, "только демо-аккаунты кабинета (hr, recruiter1, recruiter2, manager) и закрепление новичков за рекрутерами")
+	people := flag.Bool("people", false, "только перенос руководителей и наставников из строк карточек в справочник людей (manager_id, mentor_id); идемпотентно")
 	flag.Parse()
 	_ = godotenv.Load()
 	cfg, err := config.Load()
@@ -69,6 +71,10 @@ func main() {
 	ctx := context.Background()
 	if *users {
 		seedUsers(ctx, repos, svc)
+		return
+	}
+	if *people {
+		seedPeople(ctx, svc)
 		return
 	}
 
