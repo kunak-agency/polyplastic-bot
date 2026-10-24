@@ -13,6 +13,7 @@ structured outputs (`response_format: {"type": "json_schema", ...}`). Схема
 | Файл | Версия | Где используется | Выход | temperature | presence_penalty | top_p | max_tokens | Статус |
 |---|---|---|---|---|---|---|---|---|
 | `rag-answer.md` | v2 | `services/rag` → `POST /ask`, шаг generate | `sources, answer, confidence, needs_escalation` | 0.2 | 1.0 | 0.8 | 768 | v1 в `llm.py`; v2 ждёт интеграции |
+| `query-rewrite.md` | v1 | `services/rag` → `POST /ask`, шаг rewrite (только когда вопрос не прошёл gate) | `queries[≤3]` | 0.2 | 1.0 | 0.8 | 160 | интегрирован (`rewrite.py`), копия в `services/rag/prompts/` |
 | `flags-classify.md` | v1 | `services/rag` → `POST /flags` (сейчас заглушка) | `flags[code,severity,confidence], sentiment, quote` | 0.1 | 1.0 | 0.8 | 200 | ждёт интеграции |
 | `digest.md` | v1 | еженедельный дайджест (MAX, пн 9:00) и «Аналитика» | `summary, themes, changes` | 0.2 | 1.0 | 0.8 | 450 | ждёт интеграции |
 | `address-vy.md` | v1 | кабинет → отчёт импорта → «Сделать вариант на «вы» (ИИ)», `POST /scenarios/{id}/rewrite-vy` | `text` | 0.1 | 0.0 (см. G) | 0.8 | вход + 256, ≤ 3000 | интегрирован (`backend/services/address_form*.go`) |

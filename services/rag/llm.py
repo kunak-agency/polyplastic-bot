@@ -282,20 +282,28 @@ class LLMClient:
         except httpx.TimeoutException as exc:
             raise LLMTimeout(f"LLM: {type(exc).__name__}") from exc
 
-    def generate(self, question: str, chunks: list[Chunk], *, address_form: str | None = None,
-                 site: str | None = None) -> dict:
-        payload = build_payload(self.cfg, question, chunks, address_form=address_form, site=site)
+    def complete(self, payload: dict, timeout_s: float | None = None) -> str:
+        """POST /chat/completions с общим бюджетом времени → content первого choice.
+        Общий для generate и переформулировки вопроса (rewrite.py): одно соединение и пул."""
+        budget = self.cfg.timeout_s if timeout_s is None else timeout_s
         future = self._pool.submit(self._post, payload)
         try:
-            resp = future.result(timeout=self.cfg.timeout_s)
+            resp = future.result(timeout=budget)
         except FutureTimeout as exc:
             future.cancel()
-            raise LLMTimeout(f"LLM не ответил за {self.cfg.timeout_s:g} с") from exc
+            raise LLMTimeout(f"LLM не ответил за {budget:g} с") from exc
         resp.raise_for_status()
         choice = resp.json()["choices"][0]
         if choice.get("finish_reason") == "length":
             raise InvalidLLMAnswer("ответ обрезан по max_tokens")
-        return parse_answer(choice["message"]["content"])
+        return choice["message"]["content"]
+
+    def generate(self, question: str, chunks: list[Chunk], *, address_form: str | None = None,
+                 site: str | None = None, timeout_s: float | None = None) -> dict:
+        """timeout_s — остаток бюджета /ask; берётся меньшее из него и LLM_TIMEOUT."""
+        payload = build_payload(self.cfg, question, chunks, address_form=address_form, site=site)
+        budget = self.cfg.timeout_s if timeout_s is None else min(self.cfg.timeout_s, timeout_s)
+        return parse_answer(self.complete(payload, timeout_s=budget))
 
     def close(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)

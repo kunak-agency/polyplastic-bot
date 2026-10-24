@@ -5,4 +5,4 @@ __pycache__/
 
 # Реальные регламенты ПОЛИПЛАСТИК и golden set по ним — коммерческая тайна заказчика, в git не едут
 corpus-real/
-eval/golden-real.csv
+eval/golden-real*.csv

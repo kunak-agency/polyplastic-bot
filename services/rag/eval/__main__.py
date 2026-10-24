@@ -27,6 +27,12 @@
   llm-declined  — доля вызовов LLM, где модель сама вернула needs_escalation;
   разбивка отказов проверок (verify_failed / foreign_numbers / too_long / truncated) — в --verbose.
 
+Модификаторы конфигурации (через `+`, после final / final+llm):
+  syn  — словарь synonyms.yaml в retrieve и реранкере (RAG_SYNONYMS=rerank);
+  synr — словарь только в retrieve (RAG_SYNONYMS=retrieve);
+  rw   — LLM-переформулировка вопроса при провале gate (RAG_REWRITE=1, нужен LLM_BASE_URL).
+  Например `final+syn+rw` — без генерации, ответ дословной цитатой; `final+llm+syn+rw` — всё.
+
 Флаги: --configs bm25,final,final+llm  --presence-penalty 1.0,0.3  --threshold 0.3  --sweep
        --rerank-top 8  --golden eval/golden-real.csv  --corpus corpus-real  --real
        --json out.json  --verbose
@@ -60,6 +66,7 @@ os.environ.setdefault("HF_HOME", str(ROOT / ".cache"))
 from chunker import load_corpus  # noqa: E402
 from llm import LLMClient, LLMConfig  # noqa: E402
 from pipeline import DEFAULT_GATE, Pipeline, Settings  # noqa: E402
+from rewrite import QueryRewriter  # noqa: E402
 from verify import verify_sources  # noqa: E402
 
 GOLDEN = ROOT / "eval" / "golden.csv"
@@ -111,6 +118,8 @@ class Row:
     extractive: bool = False
     mode: str | None = None       # extractive | llm | extractive_fallback | None
     check: str | None = None      # см. pipeline.Answer.check
+    rewrites: int = 0             # формулировок LLM в повторном поиске
+    rewrite_used: bool = False    # gate прошёл благодаря переформулировке
 
 
 @dataclass
@@ -137,8 +146,29 @@ TOP_K: int | None = None       # --top-k: сколько чанков уходи
 CORPUS_DIR: Path | str = CORPUS  # --corpus / --real
 
 
+REWRITE_TIMEOUT: float | None = None  # --rewrite-timeout
+
+
+def split_config(name: str) -> tuple[str, set[str]]:
+    """`final+llm+syn+rw` → ("final+llm", {"syn", "rw"}). Модификаторы: syn — словарь в
+    retrieve и реранкер, synr — словарь только в retrieve, rw — LLM-переформулировка."""
+    parts = name.split("+")
+    base = "+".join(parts[:2]) if parts[1:2] == ["llm"] else parts[0]
+    mods = set(parts[2:] if base.endswith("+llm") else parts[1:])
+    unknown = mods - {"syn", "synr", "rw"}
+    if unknown:
+        raise SystemExit(f"неизвестные модификаторы {sorted(unknown)} в {name!r}: syn | synr | rw")
+    return base, mods
+
+
 def make_settings(name: str, threshold: float | None) -> Settings:
-    s = _make_settings(name, threshold)
+    base, mods = split_config(name)
+    s = _make_settings(base, threshold)
+    s.synonyms = "rerank" if "syn" in mods else "retrieve" if "synr" in mods else "off"
+    s.rewrite = "rw" in mods
+    s.rewrite_speculative = (os.getenv("RAG_REWRITE_SPECULATIVE") or "0") in ("1", "true", "on", "yes")
+    if REWRITE_TIMEOUT:
+        s.rewrite_timeout = REWRITE_TIMEOUT
     if RERANK_TOP:
         s.rerank_top = RERANK_TOP
     if TOP_K:
@@ -160,10 +190,15 @@ def _make_settings(name: str, threshold: float | None) -> Settings:
 
 
 def run_config(name: str, items: list[Item], chunks, threshold: float | None, generator=None,
-               label: str | None = None) -> Report:
+               label: str | None = None, llm_client=None) -> Report:
     settings = make_settings(name, threshold)
     t0 = time.perf_counter()
-    pipe = Pipeline(settings, chunks, generator=generator)
+    rewriter = None
+    if settings.rewrite:
+        if llm_client is None:
+            raise SystemExit(f"{name}: для rw нужен LLM_BASE_URL")
+        rewriter = QueryRewriter(llm_client, timeout_s=settings.rewrite_timeout, max_queries=settings.rewrite_max)
+    pipe = Pipeline(settings, chunks, generator=generator, rewriter=rewriter)
     name = label or name
     rep = Report(name=name, load_s=time.perf_counter() - t0, threshold=settings.gate_threshold)
     pipe.warmup()  # то же, что на старте сервиса: модели и LLM прогреты
@@ -172,16 +207,17 @@ def run_config(name: str, items: list[Item], chunks, threshold: float | None, ge
         t1 = time.perf_counter()
         ans = pipe.ask(it.question)
         latency = (time.perf_counter() - t1) * 1000
-        hits = pipe.retrieve(it.question)
+        hits = ans.hits or pipe.retrieve(it.question)
         cited = [key(s.doc, s.clause_id) for s in ans.sources]
         raw = [{"doc": s.doc, "clause_id": s.clause_id, "quote": s.quote} for s in ans.sources]
         citation_ok = bool(raw) and verify_sources(raw, chunks).ok
         rep.rows.append(Row(item=it, ranked=[[key(h.chunk.doc, c) for c in h.chunk.clause_ids] for h in hits],
-                            gate=max((h.gate_score for h in hits), default=0.0),
+                            gate=ans.gate if ans.gate is not None else max((h.gate_score for h in hits), default=0.0),
                             answered=not ans.needs_escalation, cited=cited, abstain_reason=ans.abstain_reason,
                             citation_ok=citation_ok, latency_ms=latency,
                             extractive=bool(ans.answer) and all(ans.answer == s.quote for s in ans.sources),
-                            mode=ans.mode, check=ans.check))
+                            mode=ans.mode, check=ans.check, rewrites=ans.rewrites,
+                            rewrite_used=ans.rewrite_used))
     return rep
 
 
@@ -244,6 +280,10 @@ def metrics(rep: Report) -> dict:
         "llm_fallback": _pct([r.mode == "extractive_fallback" for r in llm_calls]) if llm_calls else float("nan"),
         "llm_declined": _pct([r.check == "declined" for r in llm_calls]) if llm_calls else float("nan"),
         "llm_checks": checks,
+        "rewrite_calls": sum(r.rewrites > 0 for r in rep.rows),
+        "rewrite_used": sum(r.rewrite_used for r in rep.rows),
+        "rewrite_used_ok": sum(r.rewrite_used and r.answered and not r.item.is_trap
+                               and any_match(r.item.expected, r.cited) for r in rep.rows),
     }
 
 
@@ -255,11 +295,17 @@ ROWS = [("Hit@5 (все отвечаемые)", "hit@5", "pct"), ("  Hit@5 до�
         ("Citation-validity", "citation_valid", "pct"),
         ("LLM: ответ прошёл verify и проверки", "llm_verify_pass", "pct"),
         ("LLM: fallback на экстрактив", "llm_fallback", "pct"), ("LLM: отказ модели", "llm_declined", "pct"),
+        ("Переформулировка: вопросов с формулировками", "rewrite_calls", "int"),
+        ("  gate прошёл благодаря ей / из них верный пункт", "rewrite_used", "rw"),
         ("p50, мс", "p50_ms", "ms"), ("p95, мс", "p95_ms", "ms"),
         ("Порог gate", "threshold", "num"), ("Загрузка моделей и индекса, с", "load_s", "num")]
 
 
-def _fmt(v, kind) -> str:
+def _fmt(v, kind, m: dict | None = None) -> str:
+    if kind == "int":
+        return str(v)
+    if kind == "rw":
+        return f"{v} / {m['rewrite_used_ok']}" if m else str(v)
     if v != v:  # nan
         return "—"
     if kind == "pct":
@@ -272,7 +318,7 @@ def _fmt(v, kind) -> str:
 def table(ms: list[dict]) -> str:
     head = "| Метрика | " + " | ".join(m["config"] for m in ms) + " |"
     sep = "|---|" + "---|" * len(ms)
-    lines = [head, sep] + [f"| {label} | " + " | ".join(_fmt(m[key], kind) for m in ms) + " |"
+    lines = [head, sep] + [f"| {label} | " + " | ".join(_fmt(m[key], kind, m) for m in ms) + " |"
                            for label, key, kind in ROWS]
     m0 = ms[0]
     lines.append(f"\nВопросов: {m0['n']} (отвечаемых {m0['n_answerable']}, ловушек {m0['n_traps']}, "
@@ -325,10 +371,14 @@ def main(argv: list[str] | None = None) -> int:
                     help=f"каталог(и) корпуса через запятую (по умолчанию {CORPUS.relative_to(ROOT)})")
     ap.add_argument("--real", action="store_true",
                     help=f"настоящие документы: --golden {GOLDEN_REAL.relative_to(ROOT)} --corpus {CORPUS_REAL.relative_to(ROOT)}")
+    ap.add_argument("--rewrite-timeout", type=float, default=None,
+                    help="бюджет LLM-переформулировки, с (по умолчанию RAG_REWRITE_TIMEOUT или 3)")
     ap.add_argument("--json", type=Path, default=None)
     ap.add_argument("--verbose", "-v", action="store_true", help="построчный разбор вопросов")
     args = ap.parse_args(argv)
-    global RERANK_TOP, CORPUS_DIR, TOP_K
+    global RERANK_TOP, CORPUS_DIR, TOP_K, REWRITE_TIMEOUT
+    REWRITE_TIMEOUT = args.rewrite_timeout or (float(os.environ["RAG_REWRITE_TIMEOUT"])
+                                               if os.getenv("RAG_REWRITE_TIMEOUT") else None)
     RERANK_TOP = args.rerank_top or (int(os.environ["RAG_RERANK_TOP"]) if os.getenv("RAG_RERANK_TOP") else None)
     logging.basicConfig(level=logging.WARNING)
 
@@ -345,25 +395,31 @@ def main(argv: list[str] | None = None) -> int:
     configs = args.configs or ("bm25,final,final+llm" if llm_cfg else "bm25,final")
     reports = []
     for name in [c.strip() for c in configs.split(",") if c.strip()]:
-        thr = args.threshold if name in ("final", "final+llm") else None
-        if name != "final+llm":
-            print(f"→ {name} …", file=sys.stderr, flush=True)
-            reports.append(run_config(name, items, chunks, thr))
+        base, mods = split_config(name)
+        thr = args.threshold if base in ("final", "final+llm") else None
+        if (base == "final+llm" or "rw" in mods) and llm_cfg is None:
+            print(f"→ {name} пропущен: LLM_BASE_URL не задан", file=sys.stderr, flush=True)
             continue
-        if llm_cfg is None:
-            print("→ final+llm пропущен: LLM_BASE_URL не задан", file=sys.stderr, flush=True)
+        if base != "final+llm":
+            print(f"→ {name} …", file=sys.stderr, flush=True)
+            client = LLMClient(llm_cfg) if "rw" in mods else None
+            try:
+                reports.append(run_config(name, items, chunks, thr, llm_client=client))
+            finally:
+                if client is not None:
+                    client.close()
             continue
         penalties = ([float(x) for x in args.presence_penalty.split(",") if x.strip()]
                      if args.presence_penalty else [llm_cfg.presence_penalty])
         for pp in penalties:
             cfg = dataclasses.replace(llm_cfg, presence_penalty=pp)
-            label = f"final+llm pp={pp:g}" if len(penalties) > 1 or args.presence_penalty else "final+llm"
+            label = f"{name} pp={pp:g}" if len(penalties) > 1 or args.presence_penalty else name
             # адрес и ключ не печатаем
             print(f"→ {label} (model={cfg.model}, structured={cfg.structured}, max_tokens={cfg.max_tokens}, "
-                  f"key={'set' if cfg.api_key else 'none'}) …", file=sys.stderr, flush=True)
+                  f"timeout={cfg.timeout_s:g}, key={'set' if cfg.api_key else 'none'}) …", file=sys.stderr, flush=True)
             client = LLMClient(cfg)
             try:
-                reports.append(run_config(name, items, chunks, thr, generator=client, label=label))
+                reports.append(run_config(name, items, chunks, thr, generator=client, label=label, llm_client=client))
             finally:
                 client.close()
     if not reports:
@@ -383,6 +439,7 @@ def main(argv: list[str] | None = None) -> int:
                       f"top={','.join(_short(k) for k in r.ranked[0]) if r.ranked else '-':8s} "
                       f"ans={','.join(_short(k) for k in r.cited) or r.abstain_reason}"
                       + (f" mode={r.mode} check={r.check}" if r.mode in ("llm", "extractive_fallback") else "")
+                      + (f" rw={r.rewrites}{'+' if r.rewrite_used else ''}" if r.rewrites else "")
                       + f" {r.latency_ms:.0f}ms  {r.item.question}")
             m = next(x for x in ms if x["config"] == rep.name)
             if m["n_llm_calls"]:

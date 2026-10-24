@@ -333,22 +333,44 @@ class CrossEncoderReranker:
         return out
 
     def rerank(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
-        if not hits:
-            return []
         if self.max_candidates:
             hits = hits[:self.max_candidates]
-        owners: list[tuple[int, str]] = []
+        return self.rerank_many([(query, hits)], k)
+
+    def score_jobs(self, jobs: list[tuple[str, list[Hit]]]) -> list[list[Hit]]:
+        """Несколько (вопрос, кандидаты) одним прогоном модели → для каждого вопроса свои hits,
+        отсортированные по скору (скор чанка — максимум по его пунктам). max_candidates здесь
+        не применяется: кандидатов отбирает вызывающий код."""
+        owners: list[tuple[int, int, str]] = []
         pairs: list[tuple[str, str]] = []
-        for i, h in enumerate(hits):
-            for cl in h.chunk.clauses:
-                owners.append((i, cl.clause_id))
-                pairs.append((query, self.pair_text(h.chunk, cl)))
+        for j, (query, hits) in enumerate(jobs):
+            for i, h in enumerate(hits):
+                for cl in h.chunk.clauses:
+                    owners.append((j, i, cl.clause_id))
+                    pairs.append((query, self.pair_text(h.chunk, cl)))
+        if not pairs:
+            return [[] for _ in jobs]
         probs = _sigmoid(self._logits(pairs))
-        best: dict[int, tuple[float, str]] = {}
-        for (i, cid), p in zip(owners, probs):
-            if i not in best or p > best[i][0]:
-                best[i] = (float(p), cid)
-        rescored = [Hit(chunk=h.chunk, score=best[i][0], gate_score=best[i][0], clause_id=best[i][1])
-                    for i, h in enumerate(hits)]
+        best: dict[tuple[int, int], tuple[float, str]] = {}
+        for (j, i, cid), p in zip(owners, probs):
+            if (j, i) not in best or p > best[(j, i)][0]:
+                best[(j, i)] = (float(p), cid)
+        out: list[list[Hit]] = []
+        for j, (_, hits) in enumerate(jobs):
+            rescored = [Hit(chunk=h.chunk, score=best[(j, i)][0], gate_score=best[(j, i)][0],
+                            clause_id=best[(j, i)][1]) for i, h in enumerate(hits) if (j, i) in best]
+            rescored.sort(key=lambda h: h.score, reverse=True)
+            out.append(rescored)
+        return out
+
+    def rerank_many(self, jobs: list[tuple[str, list[Hit]]], k: int) -> list[Hit]:
+        """Как score_jobs, но одним списком: скор чанка — максимум по всем вопросам. Для вопроса,
+        расширенного словарём (исходный + расширенный)."""
+        best: dict[int, Hit] = {}
+        for hits in self.score_jobs(jobs):
+            for h in hits:
+                if id(h.chunk) not in best or h.score > best[id(h.chunk)].score:
+                    best[id(h.chunk)] = h
+        rescored = list(best.values())
         rescored.sort(key=lambda h: h.score, reverse=True)
         return rescored[:k]

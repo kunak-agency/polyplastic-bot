@@ -4,4 +4,4 @@ __pycache__
 .pytest_cache
 tests
 corpus-real
-eval/golden-real.csv
+eval/golden-real*.csv
