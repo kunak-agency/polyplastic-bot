@@ -165,7 +165,7 @@ function deleteScenario(req: MockRequest): MockResult {
         error: {
           code: 'scenario_not_deletable',
           message: hasNewcomers
-            ? 'По сценарию запущены новички — удалить его нельзя'
+            ? 'По сценарию запущены сотрудники — удалить его нельзя'
             : 'Сценарий уже публиковался — удалить можно только черновик без публикаций',
           traceId: `mock-${Date.now()}`,
         },
@@ -294,7 +294,7 @@ function mockImportReport(steps: ScenarioDetail['steps']) {
           warn(
             34,
             'recruiter_flag',
-            'Шаг «по отмашке рекрутера»: уйдёт, только если у новичка включён флаг recruiter_enabled',
+            'Шаг «по отмашке рекрутера»: уйдёт, только если у сотрудника включён флаг recruiter_enabled',
             3,
           ),
           warn(
@@ -475,9 +475,9 @@ function sendTest(req: MockRequest): MockResult {
   if (!s.steps.some((st) => st.id === req.params.stepId))
     return error(404, 'NOT_FOUND', 'Шаг не найден в черновике сценария')
   const nc = newcomers.get(String(req.body.newcomer_id ?? ''))
-  if (!nc) return error(404, 'NOT_FOUND', 'Новичок не найден')
+  if (!nc) return error(404, 'NOT_FOUND', 'Сотрудник не найден')
   if (nc.connection !== 'connected')
-    return error(409, 'CONFLICT', 'Новичок не подключён к боту — отправлять некуда')
+    return error(409, 'CONFLICT', 'Сотрудник не подключён к боту — отправлять некуда')
   return { status: 200, data: { status: 'sent', messages: 1 } }
 }
 

@@ -37,5 +37,8 @@ export const useHealthStore = defineStore('health', () => {
     }
   }
 
-  return { last, status, checkedAt, check }
+  // FEATURE_NUDGES_DEFAULT as reported by /health; false until it answered.
+  const nudgesDefault = computed(() => last.value?.features?.nudges_default === true)
+
+  return { last, status, checkedAt, check, nudgesDefault }
 })

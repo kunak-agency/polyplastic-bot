@@ -8,6 +8,7 @@ import (
 
 	"main/config"
 	"main/domain"
+	"main/repositories"
 )
 
 // Итерация 24.10, агент A: пояса и окно 8–18 (FEATURE_TZ), наджи по умолчанию
@@ -296,7 +297,7 @@ func TestNudgeNow(t *testing.T) {
 	*e.clock = msk(2026, 11, 3, 17, 30)
 	e.fake.Reset()
 	res, err = e.svc.Newcomers.Nudge(ctx, id, [16]byte{})
-	if err != nil || res.Sent || res.Message != "Отправится в 08:00 по времени новичка" || !res.At.Equal(msk(2026, 11, 5, 6, 0)) {
+	if err != nil || res.Sent || res.Message != "Отправится в 08:00 по времени сотрудника" || !res.At.Equal(msk(2026, 11, 5, 6, 0)) {
 		// 4 ноября — праздник: окно — 5 ноября
 		t.Fatalf("отложенный: %+v %v", res, err)
 	}
@@ -451,14 +452,77 @@ func TestCatchupD20(t *testing.T) {
 	if ev := eventByTitle(t, evs, "Сегодня"); ev.Status != domain.EventSkipped || *ev.Answer != skipMissed {
 		t.Fatalf("необязательный прошлый шаг: %s", ev.Status)
 	}
-	if ev := eventByTitle(t, evs, "Понятно"); !ev.Catchup || !ev.FireAt.Equal(msk(2026, 11, 3, 9, 0)) {
+	// взамен устаревших опросов — догоняющий пульс первым блоком, обязательные вопросы — следом
+	if ev := eventByTitle(t, evs, "Доступы"); !ev.Catchup || ev.Status != domain.EventScheduled || !ev.FireAt.Equal(msk(2026, 11, 3, 9, 0)) {
+		t.Fatalf("первый вопрос в очереди: %+v", ev)
+	}
+	if ev := eventByTitle(t, evs, "Понятно"); !ev.Catchup || !ev.FireAt.Equal(msk(2026, 11, 4, 9, 0)) {
 		t.Fatalf("вопрос в очереди: %+v", ev)
 	}
 	if !hasText(e.fake, "Возьмите паспорт") {
 		t.Fatal("нет сводки")
 	}
-	if done, total, _ := e.repos.Events.CatchupProgress(context.Background(), c.Employee.ID); done != 1 || total != 3 {
+	texts := sentTexts(e.fake)
+	iSum, iPulse := -1, -1
+	for i, s := range texts {
+		if strings.HasPrefix(s, textMissedHead) {
+			iSum = i
+		}
+		if strings.Contains(s, catchupPulseQuestion) && iPulse < 0 {
+			iPulse = i
+		}
+	}
+	if iSum < 0 || iPulse < iSum {
+		t.Fatalf("пульс после сводки: %q", texts)
+	}
+	p := eventByTitle(t, evs, catchupPulseTitle)
+	if !p.Catchup || p.Status != domain.EventSent || p.Kind != domain.KindSurvey || p.Snapshot == nil || p.IsTest {
+		t.Fatalf("пульс: %+v", p)
+	}
+	if done, total, _ := e.repos.Events.CatchupProgress(context.Background(), c.Employee.ID); done != 1 || total != 4 {
 		t.Fatalf("прогресс %d/%d", done, total)
+	}
+	// 2 из 5 — ниже порога: экран причин, как у обычного пульса
+	e.press(preAnswer + p.ID.String() + ":0:2")
+	if a := lastAnswer(t, e.fake); !strings.Contains(a.Answer.Message.Text, "Что именно не так?") {
+		t.Fatalf("нет экрана причин: %+v", a.Answer)
+	}
+	e.press(preReason + p.ID.String() + ":0:0")
+	e.svc.Bot.Wait()
+	if ev := eventByTitle(t, e.events(t, c.Employee.ID), catchupPulseTitle); ev.Status != domain.EventAnswered {
+		t.Fatalf("пульс после причины: %s", ev.Status)
+	}
+	// повторная сборка очереди второго пульса не создаёт
+	err := e.repos.Transaction(context.Background(), func(tx *repositories.Repos) error {
+		return e.svc.Scheduler.BuildCatchup(context.Background(), tx, e.employee(t, c.Employee.ID))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, ev := range e.events(t, c.Employee.ID) {
+		if ev.Title == catchupPulseTitle {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("пульсов %d", n)
+	}
+}
+
+// Устаревших опросов нет (D+5) — догоняющего пульса нет.
+func TestCatchupNoPulseWhenFresh(t *testing.T) {
+	e := newEnv(t, msk(2026, 10, 26, 12, 0))
+	e.features(config.Features{Catchup: true})
+	c, _ := e.launchSteps(t, date(2026, 10, 21), lateSteps())
+	e.connect(t, c, domain.AddressVy, true)
+	for _, ev := range e.events(t, c.Employee.ID) {
+		if ev.Title == catchupPulseTitle {
+			t.Fatal("пульс без устаревших опросов")
+		}
+	}
+	if hasText(e.fake, catchupPulseQuestion) {
+		t.Fatal("пульс ушёл")
 	}
 }
 
@@ -495,6 +559,9 @@ func TestCatchupFlagOff(t *testing.T) {
 	}
 	if hasText(e.fake, textMissedHead) {
 		t.Fatal("сводка без флага")
+	}
+	if hasText(e.fake, catchupPulseQuestion) {
+		t.Fatal("догоняющий пульс без флага")
 	}
 	card, _ := e.svc.Newcomers.Get(context.Background(), c.Employee.ID)
 	if card.Catchup != nil {

@@ -9,6 +9,7 @@ import (
 
 	"main/domain"
 	"main/externalApi/max"
+	"main/externalApi/rag"
 	"main/pkg/flags"
 	"main/pkg/logger"
 	"main/pkg/taxonomy"
@@ -247,7 +248,7 @@ func (b *BotService) stepButton(ctx context.Context, u max.Update, empID uuid.UU
 		btn := step.Buttons[idx]
 		if accessMissing(btn) {
 			// «Чего-то нет» (UX 2.3, D0 12:00): сначала причины, обращение F2 — после выбора.
-			m := accessReasonsMessage(recipientOf(e), step, e, ev, sentAt(ev, b.now()))
+			m := accessReasonsMessage(b.recipient(e), step, e, ev, sentAt(ev, b.now()))
 			reply = max.Answer{Notification: "Что именно?", Message: &m}
 			return nil
 		}
@@ -408,7 +409,7 @@ func (b *BotService) terminalButton(ctx context.Context, u max.Update, empID uui
 			return err
 		}
 		bm := br.Messages[m]
-		done := recipientOf(e).msg(branchText(bm, e, ev)+"\n\n✅ "+tb.Label, "", nil)
+		done := recipientOf(e).msg(branchText(bm, e, ev, b.siteFor(e))+"\n\n✅ "+tb.Label, "", nil)
 		reply = max.Answer{Notification: "Записал", Message: &done}
 		p.emp, p.ev = e, *ev
 		plan = p
@@ -470,13 +471,14 @@ func (b *BotService) continuePress(ctx context.Context, u max.Update, empID uuid
 	return nil
 }
 
-// branchText — текст сообщения ветки в форме обращения новичка.
-func branchText(m domain.BranchMessage, e *domain.Employee, ev *domain.ScheduledEvent) string {
+// branchText — текст сообщения ветки в форме обращения новичка; site — календарь новичка для
+// {start_day} (BotService.siteFor: с FEATURE_TZ — пояс новичка, без — площадки).
+func branchText(m domain.BranchMessage, e *domain.Employee, ev *domain.ScheduledEvent, site domain.Site) string {
 	var at time.Time
 	if ev != nil && ev.SentAt != nil {
 		at = *ev.SentAt
 	}
-	text := stepText(domain.ScenarioStep{TextTy: m.TextTy, TextVy: m.TextVy}, e, at)
+	text := stepTextIn(domain.ScenarioStep{TextTy: m.TextTy, TextVy: m.TextVy}, e, at, site)
 	if ev != nil && ev.IsTest {
 		text = testPrefix + text
 	}
@@ -501,7 +503,7 @@ func (b *BotService) branchMessage(ctx context.Context, e *domain.Employee, ev *
 		id := ev.ID
 		rows = append(rows, humanRow(&id))
 	}
-	msg := recipientOf(e).msg(branchText(m, e, ev), "", rows)
+	msg := recipientOf(e).msg(branchText(m, e, ev, b.siteFor(e)), "", rows)
 	msg.Attachments = b.attach(ctx, e, m.Media)
 	if emptyMessage(msg) {
 		logger.Warn("бот: реплика ветки «%s» без текста и без вложений (файла нет в медиатеке) — новичку %s запасной текст", src, e.ID)
@@ -811,7 +813,8 @@ func (b *BotService) handoff(ctx context.Context, emp *domain.Employee, ev *doma
 
 // freeText — текст новичка после «Другое» / open_free_text: regex-флаги → обращение escalate
 // (категория флага, иначе из ветки), /flags в фоне; затем then ветки. В RAG не уходит.
-func (b *BotService) freeText(ctx context.Context, emp *domain.Employee, text, mid string) error {
+// voice — текст распознан из голосового: модели контекст voice (паразиты, обрывы).
+func (b *BotService) freeText(ctx context.Context, emp *domain.Employee, text, mid string, voice bool) error {
 	var w *domain.FreeTextWait
 	var e *domain.Employee
 	var ev *domain.ScheduledEvent
@@ -865,7 +868,11 @@ func (b *BotService) freeText(ctx context.Context, emp *domain.Employee, text, m
 	}
 	b.escalate(ctx, e, ev, step, a, w.Label, text, mid, sig)
 	if codes == nil {
-		b.classifyAsync(ctx, e, flagInput{text: text, where: "в ответе «свой вариант» на «" + step.Title + "»", mid: mid})
+		in := flagInput{text: text, where: "в ответе «свой вариант» на «" + step.Title + "»", mid: mid}
+		if voice {
+			in.context = rag.FlagsContextVoice
+		}
+		b.classifyAsync(ctx, e, in)
 	}
 	if isSurvey(step) {
 		b.resumeSurvey(ctx, e.ID, w.EventID) // ветка варианта опроса ждала этот текст

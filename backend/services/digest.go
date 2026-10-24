@@ -460,7 +460,7 @@ func DigestMaxMessage(d *Digest) string {
 	if len(d.Themes) > 0 {
 		b.WriteString("Темы недели:\n")
 		for _, th := range d.Themes {
-			fmt.Fprintf(&b, "• %s — %s", th.Label, plural(th.Newcomers, "новичок", "новичка", "новичков"))
+			fmt.Fprintf(&b, "• %s — %s", th.Label, plural(th.Newcomers, "сотрудник", "сотрудника", "сотрудников"))
 			if len(th.Sites) > 0 {
 				fmt.Fprintf(&b, " (%s)", strings.Join(th.Sites, ", "))
 			}
@@ -475,7 +475,7 @@ func DigestMaxMessage(d *Digest) string {
 			b.WriteString("\n")
 		}
 	} else {
-		b.WriteString("Тем, за которыми 5 и больше новичков, нет.\n")
+		b.WriteString("Тем, за которыми 5 и больше сотрудников, нет.\n")
 	}
 	if d.Hidden > 0 {
 		fmt.Fprintf(&b, "Ещё %s — меньше 5 человек в каждой, скрыты (порог анонимности).\n", plural(d.Hidden, "тема", "темы", "тем"))

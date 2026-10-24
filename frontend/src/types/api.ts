@@ -34,6 +34,14 @@ export interface HealthResponse {
   status: HealthState | (string & {})
   db: HealthState | (string & {})
   rag: HealthState | (string & {})
+  // Feature flags the cabinet's look depends on; absent on an older backend.
+  features?: HealthFeatures
+}
+
+export interface HealthFeatures {
+  // FEATURE_NUDGES_DEFAULT: a question without its own no_answer gets the
+  // default reminders (4 h and 24 h in work hours, holds the flow at most 48 h).
+  nudges_default?: boolean
 }
 
 // ── Common (api_contract.md v1) ─────────────────────────────────────────────

@@ -23,9 +23,16 @@ type ErrorInfo struct {
 // Health — GET /api/health. status — живость процесса (всегда ok, раз ответил); db и rag —
 // готовность зависимостей: ok | down.
 type Health struct {
-	Status string `json:"status"`
-	DB     string `json:"db"`
-	RAG    string `json:"rag"`
+	Status   string         `json:"status"`
+	DB       string         `json:"db"`
+	RAG      string         `json:"rag"`
+	Features HealthFeatures `json:"features"`
+}
+
+// HealthFeatures — фича-флаги, от которых зависит вид кабинета (не секреты): nudges_default —
+// FEATURE_NUDGES_DEFAULT, конструктор показывает правило напоминаний по умолчанию.
+type HealthFeatures struct {
+	NudgesDefault bool `json:"nudges_default"`
 }
 
 // OkDown — true → "ok", false → "down".

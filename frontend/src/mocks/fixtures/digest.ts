@@ -78,7 +78,7 @@ export const digestFixture: Digest = {
   probation: { count: 1, this_week: false },
   text: {
     summary:
-      'На связи 67 новичков, ответили 55 (82 %). Средний индекс W — 81, снизился на 3 пункта. Проблем — 40, из них критичных — 5.',
+      'На связи 67 сотрудников, ответили 55 (82 %). Средний индекс W — 81, снизился на 3 пункта. Проблем — 40, из них критичных — 5.',
     themes: null,
     changes: null,
     source: 'template',

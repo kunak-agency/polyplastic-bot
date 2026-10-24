@@ -6,4 +6,5 @@ export const healthFixture: HealthResponse = {
   status: 'ok',
   db: 'ok',
   rag: 'ok',
+  features: { nudges_default: true },
 }

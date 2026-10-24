@@ -143,3 +143,43 @@ func TestSurveyRegexCommentGetsModelMarkup(t *testing.T) {
 		t.Fatalf("обращений %d", n)
 	}
 }
+
+// Голосом — «свой вариант» ветки шага (open_free_text): в /flags уходит context=voice, набранный
+// текст — без него (free_text по умолчанию).
+func TestVoiceFreeTextFlagsContext(t *testing.T) {
+	for _, voice := range []bool{true, false} {
+		e := newEnv(t, flowNow)
+		f := newFakeRAG(t)
+		f.flagsReply = `{"flags":[],"sentiment":"neu","quote":""}`
+		e.svc.Bot.rag = rag.New(f.srv.URL, time.Second)
+		asr := newFakeASR(t, "ну это самое не прислали договор")
+		e.svc.Bot.asr = rag.New(asr.srv.URL, 0)
+		br := &domain.Branch{Messages: []domain.BranchMessage{{TextVy: "Понимаю", TextTy: "Понимаю", Buttons: []domain.StepButton{
+			{Label: "Описать проблему", Action: "escalate:recruiter", OpensFreeText: true},
+		}}}}
+		c, _ := e.launchSteps(t, flowStart, []domain.ScenarioStep{
+			txt(0, "10:00", "Вопрос", "Документы в порядке?", domain.StepButton{Label: "Нет", Branch: br}),
+		})
+		e.connect(t, c, domain.AddressVy, true)
+		q := eventByTitle(t, e.events(t, c.Employee.ID), "Вопрос")
+		e.press(preStepButton + q.ID.String() + ":0")
+		e.press(findPayload(lastSent(t, e.fake), "Описать проблему"))
+		if voice {
+			e.voice(max.Audio{})
+		} else {
+			e.say("не прислали договор")
+		}
+		e.svc.Bot.Wait()
+		want := rag.FlagsContextFreeText
+		if voice {
+			want = rag.FlagsContextVoice
+		}
+		fr := f.flagRequests()
+		if len(fr) != 1 || fr[0]["context"] != want {
+			t.Fatalf("voice=%v: /flags %v", voice, fr)
+		}
+		if emp := e.employee(t, c.Employee.ID); emp.AwaitFreeText != nil {
+			t.Fatalf("voice=%v: текст всё ещё ждём", voice)
+		}
+	}
+}

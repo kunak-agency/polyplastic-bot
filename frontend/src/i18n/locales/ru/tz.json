@@ -3,10 +3,10 @@
   "bySite": "По поясу площадки",
   "bySiteWith": "По площадке: {zone}",
   "option": "{city} ({offset})",
-  "launchHint": "Время шагов — местное время новичка",
+  "launchHint": "Время шагов — местное время сотрудника",
   "nextTitle": "Ближайший шаг «{title}»",
   "nextLocal": "{date}, {time} по времени {site} ({offset})",
-  "nextLocalOwn": "{date}, {time} по времени новичка ({offset})",
+  "nextLocalOwn": "{date}, {time} по времени сотрудника ({offset})",
   "nextMine": "у вас {time} ({offset})",
   "nextPlain": "{date}, {time}",
   "city": {

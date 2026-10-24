@@ -10,5 +10,6 @@ import (
 // в полях db и rag, а не статусом — иначе балансировщик снимал бы API из-за упавшего rag.
 func (h *Handler) Health(c *fiber.Ctx) error {
 	r := h.services.Health.Check(c.UserContext())
-	return c.JSON(out.Health{Status: "ok", DB: out.OkDown(r.DB), RAG: out.OkDown(r.RAG)})
+	return c.JSON(out.Health{Status: "ok", DB: out.OkDown(r.DB), RAG: out.OkDown(r.RAG),
+		Features: out.HealthFeatures{NudgesDefault: h.services.Features().NudgesDefault}})
 }

@@ -24,7 +24,7 @@ func (h *Handler) devChatTarget(c *fiber.Ctx) (*max.Fake, *domain.Employee, int6
 	}
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return nil, nil, 0, 0, errs.NewValidationError("Некорректный id новичка").
+		return nil, nil, 0, 0, errs.NewValidationError("Некорректный id сотрудника").
 			WithDetails(errs.FieldError{Field: "id", Code: errs.CodeInvalidFormat, Message: "Нужен UUID"})
 	}
 	card, err := h.services.Newcomers.Get(c.UserContext(), id)
@@ -73,7 +73,7 @@ func (h *Handler) DevChatPress(c *fiber.Ctx) error {
 		return errs.NewConflictError("Новичок не подключён к боту — сначала simulate-start")
 	}
 	if !fake.HasMessage(chat, user, input.MessageID) {
-		return errs.NewNotFoundError("Сообщения нет в диалоге с новичком")
+		return errs.NewNotFoundError("Сообщения нет в диалоге с сотрудником")
 	}
 	cb := fake.JournalPress(chat, user, input.MessageID, input.Payload)
 	bot := h.services.Bot

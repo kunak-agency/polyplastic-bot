@@ -292,7 +292,7 @@ func ExtraNumbers(text, input string) []string {
 func TemplateDigestText(agg DigestAggregates) DigestText {
 	t := agg.Totals
 	var b strings.Builder
-	fmt.Fprintf(&b, "На связи %s, ответили %d", plural(t.OnPulse, "новичок", "новичка", "новичков"), t.Answered)
+	fmt.Fprintf(&b, "На связи %s, ответили %d", plural(t.OnPulse, "сотрудник", "сотрудника", "сотрудников"), t.Answered)
 	if t.ResponseRatePct != nil {
 		fmt.Fprintf(&b, " (%d %%)", *t.ResponseRatePct)
 	}
@@ -320,7 +320,7 @@ func TemplateDigestText(agg DigestAggregates) DigestText {
 	if len(agg.Themes) > 0 {
 		parts := make([]string, 0, len(agg.Themes))
 		for _, th := range agg.Themes {
-			p := fmt.Sprintf("%s — %s", capitalize(th.Label), plural(th.Count, "новичок", "новичка", "новичков"))
+			p := fmt.Sprintf("%s — %s", capitalize(th.Label), plural(th.Count, "сотрудник", "сотрудника", "сотрудников"))
 			if len(th.Sites) > 0 {
 				p += ", " + strings.Join(th.Sites, " и ")
 			}

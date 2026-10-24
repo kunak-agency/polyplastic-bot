@@ -5,7 +5,7 @@
 <rect x="10" y="10" width="2380" height="1330" rx="14" fill="none" stroke="#1f5fbf" stroke-width="1.5"/>
 <rect x="24" y="26" width="2352" height="776" rx="14" fill="#fff" stroke="#e1e8f2" stroke-width="1"/>
 <rect x="40" y="40" width="960" height="60" rx="10" fill="#dde9f8" stroke="none" stroke-width="1.2"/>
-<text x="62" y="81" font-size="30" font-weight="bold" fill="#1f5fbf" text-anchor="start">1. Бот сопровождает новичка и отвечает по документам</text>
+<text x="62" y="81" font-size="30" font-weight="bold" fill="#1f5fbf" text-anchor="start">1. Бот сопровождает сотрудника и отвечает по документам</text>
 <text x="2360" y="76" font-size="15" font-weight="normal" fill="#8a96a6" text-anchor="end">Корсик · ПОЛИПЛАСТИК · «Открой#Моспром» 2026</text>
 <rect x="36" y="118" width="290" height="666" rx="16" fill="#f2f6fc" stroke="#c7d6ec" stroke-width="1.2"/>
 <circle cx="66" cy="150" r="17" fill="#1f5fbf"/>
@@ -18,7 +18,7 @@
 <path d="M 298 295 L 370 295" fill="none" stroke="#8a96a6" stroke-width="1.6" marker-end="url(#ah)"/>
 <rect x="52" y="430" width="258" height="330" rx="10" fill="#fff" stroke="#c9d4e3" stroke-width="1.2"/>
 <text x="70" y="466" font-size="19" font-weight="bold" fill="#1b2a3d" text-anchor="start">Кто участвует</text>
-<text x="70" y="506" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="start">Новичок</text>
+<text x="70" y="506" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="start">Сотрудник</text>
 <text x="70" y="526" font-size="14" font-weight="normal" fill="#5b6675" text-anchor="start">чат в MAX</text>
 <text x="70" y="564" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="start">HR, рекрутер</text>
 <text x="70" y="584" font-size="14" font-weight="normal" fill="#5b6675" text-anchor="start">кабинет</text>
@@ -52,7 +52,7 @@
 <path d="M 388 431 A 84.0 11 0 0 0 556 431 L 556 491 A 84.0 11 0 0 1 388 491 Z" fill="#fff" stroke="#1f5fbf" stroke-width="1.4"/>
 <ellipse cx="472.0" cy="431" rx="84.0" ry="11" fill="#dde9f8" stroke="#1f5fbf" stroke-width="1.4"/>
 <text x="472.0" y="464.5" font-size="15" font-weight="bold" fill="#1b2a3d" text-anchor="middle">Postgres 16</text>
-<text x="472.0" y="485.0" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="middle">сценарии, новички</text>
+<text x="472.0" y="485.0" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="middle">сценарии, сотрудники</text>
 <rect x="620" y="432" width="220" height="46" rx="23" fill="#dde9f8" stroke="#1f5fbf" stroke-width="1.2"/>
 <text x="730" y="461" font-size="15" font-weight="bold" fill="#1f5fbf" text-anchor="middle">Версия сценария</text>
 <path d="M 730 405 L 730 430" fill="none" stroke="#8a96a6" stroke-width="1.6" marker-end="url(#ah)"/>
@@ -62,12 +62,12 @@
 <text x="740" y="503" font-size="12" font-weight="normal" fill="#5b6675" text-anchor="start">публикация</text>
 <rect x="372" y="520" width="468" height="240" rx="10" fill="#fff" stroke="#c9d4e3" stroke-width="1.2"/>
 <text x="388" y="548" font-size="16" font-weight="bold" fill="#1b2a3d" text-anchor="start">Планировщик</text>
-<text x="388" y="570" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">отсчитывает шаги от даты выхода новичка</text>
+<text x="388" y="570" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">отсчитывает шаги от даты выхода сотрудника</text>
 <text x="388" y="588" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">учитывает площадку и рабочие часы (пн–чт 9–18, пт 9–17)</text>
-<text x="388" y="606" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">пока новичок не ответил на вопрос, следующий шаг ждёт</text>
+<text x="388" y="606" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">пока сотрудник не ответил на вопрос, следующий шаг ждёт</text>
 <text x="388" y="624" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">если ответа нет, напоминает и не задерживает остальных</text>
 <text x="388" y="708" font-size="40" font-weight="bold" fill="#1f5fbf" text-anchor="start">33–35</text>
-<text x="388" y="728" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="start">сообщений за 90 дней получит новичок, который не отвечает</text>
+<text x="388" y="728" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="start">сообщений за 90 дней получит сотрудник, который не отвечает</text>
 <text x="388" y="745" font-size="12.5" font-weight="normal" fill="#5b6675" text-anchor="start">(раньше доходило 1)</text>
 <path d="M 840 600 L 871 600 L 871 237 L 900 237" fill="none" stroke="#8a96a6" stroke-width="1.6" marker-end="url(#ah)"/>
 <text x="866" y="625" font-size="11.5" font-weight="bold" fill="#5b6675" text-anchor="middle">MAX</text>
@@ -76,7 +76,7 @@
 <text x="916" y="156" font-size="17" font-weight="bold" fill="#fff" text-anchor="middle">3</text>
 <text x="944" y="157" font-size="20" font-weight="bold" fill="#1b2a3d" text-anchor="start">Ответы по документам</text>
 <rect x="902" y="185" width="180" height="105" rx="10" fill="#fff" stroke="#c9d4e3" stroke-width="1.2"/>
-<text x="918" y="213" font-size="16" font-weight="bold" fill="#1b2a3d" text-anchor="start">Новичок в MAX</text>
+<text x="918" y="213" font-size="16" font-weight="bold" fill="#1b2a3d" text-anchor="start">Сотрудник в MAX</text>
 <text x="918" y="235" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">получает шаги,</text>
 <text x="918" y="253" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">пишет вопрос текстом</text>
 <text x="918" y="271" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">или голосом (T-one)</text>
@@ -201,7 +201,7 @@
 <text x="94" y="951" font-size="20" font-weight="bold" fill="#1b2a3d" text-anchor="start">Проверки</text>
 <rect x="52" y="975" width="204" height="321" rx="10" fill="#fff" stroke="#c9d4e3" stroke-width="1.2"/>
 <text x="68" y="1003" font-size="16" font-weight="bold" fill="#1b2a3d" text-anchor="start">Сверка с ТЗ</text>
-<text x="68" y="1025" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">18 тестовых новичков,</text>
+<text x="68" y="1025" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">18 тестовых сотрудников,</text>
 <text x="68" y="1043" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">3 площадки, D−3 … D+92,</text>
 <text x="68" y="1061" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">автотест сценария</text>
 <text x="68" y="1261" font-size="50" font-weight="bold" fill="#1f5fbf" text-anchor="start">70</text>
@@ -244,7 +244,7 @@
 <text x="1268" y="951" font-size="20" font-weight="bold" fill="#1b2a3d" text-anchor="start">Продукт и инфраструктура</text>
 <rect x="1226" y="975" width="268" height="175" rx="10" fill="#fff" stroke="#c9d4e3" stroke-width="1.2"/>
 <text x="1242" y="1003" font-size="16" font-weight="bold" fill="#1b2a3d" text-anchor="start">Кабинет HR · Vue 3</text>
-<text x="1242" y="1025" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">обзор, новички, обращения,</text>
+<text x="1242" y="1025" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">обзор, сотрудники, обращения,</text>
 <text x="1242" y="1043" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">конструктор, база знаний,</text>
 <text x="1242" y="1061" font-size="13" font-weight="normal" fill="#5b6675" text-anchor="start">медиатека, аналитика</text>
 <rect x="1516" y="975" width="268" height="175" rx="10" fill="#fff" stroke="#c9d4e3" stroke-width="1.2"/>
@@ -274,7 +274,7 @@
 <text x="1264" y="1215" font-size="18" font-weight="bold" fill="#1d5e36" text-anchor="start">Подтверждено</text>
 <text x="1232" y="1244" font-size="13.5" fill="#1d5e36"><tspan font-weight="bold">Работает в живом MAX: </tspan>приглашение, ответ</text>
 <text x="1232" y="1266" font-size="13.5" fill="#1d5e36"><tspan font-weight="bold"></tspan>со ссылкой на пункт, передача HR, ответ HR в чат.</text>
-<text x="1232" y="1290" font-size="13.5" fill="#1d5e36"><tspan font-weight="bold">Автотест сценария: </tspan>70 строк ТЗ, 18 новичков, 3 площадки.</text>
+<text x="1232" y="1290" font-size="13.5" fill="#1d5e36"><tspan font-weight="bold">Автотест сценария: </tspan>70 строк ТЗ, 18 сотрудников, 3 площадки.</text>
 <rect x="1660" y="1180" width="704" height="132" rx="12" fill="#15305a" stroke="#15305a" stroke-width="1.2"/>
 <text x="1684" y="1240" font-size="40" font-weight="bold" fill="#ffffff" text-anchor="start">70</text>
 <text x="1684" y="1268" font-size="13" font-weight="normal" fill="#b9cdee" text-anchor="start">строк ТЗ проверено</text>

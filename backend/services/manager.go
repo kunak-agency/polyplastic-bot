@@ -105,7 +105,7 @@ func (s *ManagerService) Invite(ctx context.Context, employeeID uuid.UUID) (*Man
 	name := strings.TrimSpace(e.ManagerName)
 	if name == "" {
 		return nil, errs.NewValidationError("В карточке не указан руководитель").
-			WithDetails(errs.FieldError{Field: "manager_name", Code: errs.CodeRequired, Message: "Укажите руководителя в карточке новичка"})
+			WithDetails(errs.FieldError{Field: "manager_name", Code: errs.CodeRequired, Message: "Укажите руководителя в карточке сотрудника"})
 	}
 	now := s.now()
 	inv, err := s.repos.Manager().ActiveInvite(ctx, name, now)

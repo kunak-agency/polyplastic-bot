@@ -227,7 +227,7 @@ func BuildHRLeadDashboard(rows *repositories.OverviewRows, users []domain.User, 
 		if th.Owner != nil || th.Newcomers < AnonymityMinGroup {
 			continue
 		}
-		reason := fmt.Sprintf("Тема недели «%s»: %d новичков", th.Label, th.Newcomers)
+		reason := fmt.Sprintf("Тема недели «%s»: %d сотрудников", th.Label, th.Newcomers)
 		if th.Delta != nil && *th.Delta != 0 {
 			reason += fmt.Sprintf(" (%s)", signed(*th.Delta))
 		}
@@ -326,7 +326,7 @@ func BuildDigestCard(dg *Digest) *DigestCard {
 	case len(dg.Themes) == 0:
 		theme.Text = "Тем недели нет"
 	case theme.Enough:
-		theme.Text = fmt.Sprintf("Главная тема: «%s» — %d новичков", theme.Label, theme.N) + arrow(theme.Delta, "")
+		theme.Text = fmt.Sprintf("Главная тема: «%s» — %d сотрудников", theme.Label, theme.N) + arrow(theme.Delta, "")
 	default:
 		theme.Text = "Главная тема: мало данных"
 	}

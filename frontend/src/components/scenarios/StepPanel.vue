@@ -19,6 +19,7 @@ import MediaField from '@/components/scenarios/MediaField.vue'
 import SurveyEditor from '@/components/scenarios/SurveyEditor.vue'
 import AiRewriteBadge from '@/components/scenarios/AiRewriteBadge.vue'
 import { SITES } from '@/stores/site'
+import { useHealthStore } from '@/stores/health'
 import { formatDayOffset } from '@/lib/calendar'
 import { STAGES, STEP_KINDS, defaultSurvey, textToFirstQuestion } from '@/lib/scenarioSteps'
 import {
@@ -27,6 +28,7 @@ import {
   branchFor,
   branchHasContent,
   labelLength,
+  noAnswerView,
   statsBadge,
   type Issue,
 } from '@/lib/scenarioBranches'
@@ -68,6 +70,13 @@ const heading = computed(() =>
 const errors = computed(() => props.issues.filter((i) => i.level === 'error'))
 const warnings = computed(() => props.issues.filter((i) => i.level === 'warning'))
 const asks = computed(() => asksSomething(props.step))
+// FEATURE_NUDGES_DEFAULT comes from /health (features.nudges_default).
+const health = useHealthStore()
+if (!health.last) void health.check()
+const noAnswer = computed(() => noAnswerView(props.step, health.nudgesDefault))
+function setOwnRule(on: boolean): void {
+  patch({ no_answer: on ? { ...REMIND } : null })
+}
 const showAlt = ref(props.step.alt_text != null)
 
 function patch(p: Partial<ScenarioStep>): void {
@@ -489,7 +498,28 @@ function minutes(s: number | null): string {
         <span v-if="!hasNextInBlock" class="field-hint">{{ t('scenarios.advance.last') }}</span>
       </FormField>
 
-      <FormField v-if="asks" :label="t('scenarios.noAnswer.label')" html-for="sp-noanswer">
+      <FormField
+        v-if="asks && health.nudgesDefault"
+        :label="t('scenarios.noAnswer.label')"
+        html-for="sp-noanswer-own"
+      >
+        <p v-if="noAnswer === 'default'" class="hint-box txt-sm">
+          {{ t('scenarios.noAnswer.default') }}
+        </p>
+        <label class="check check--sm">
+          <input
+            id="sp-noanswer-own"
+            type="checkbox"
+            :checked="noAnswer === 'custom'"
+            @change="setOwnRule(($event.target as HTMLInputElement).checked)"
+          />
+          {{ t('scenarios.noAnswer.own') }}
+        </label>
+        <span v-if="noAnswer === 'custom'" class="field-hint">
+          {{ t('scenarios.noAnswer.ownHint') }}
+        </span>
+      </FormField>
+      <FormField v-else-if="asks" :label="t('scenarios.noAnswer.label')" html-for="sp-noanswer">
         <select
           id="sp-noanswer"
           class="input"

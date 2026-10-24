@@ -136,7 +136,7 @@ func (s *SchedulerService) remindSurveys(ctx context.Context) (int, error) {
 			if ev.Reminded >= due || !InWorkHours(now, s.SiteFor(e)) {
 				continue
 			}
-			text := strings.TrimSpace(stepText(domain.ScenarioStep{TextTy: rule.TextTy, TextVy: rule.TextVy}, e, now))
+			text := strings.TrimSpace(stepTextIn(domain.ScenarioStep{TextTy: rule.TextTy, TextVy: rule.TextVy}, e, now, s.SiteFor(e)))
 			if ev.Title != "" {
 				text += "\n\n" + strings.Replace(textSurveyReminderTail, "%s", ev.Title, 1)
 			}

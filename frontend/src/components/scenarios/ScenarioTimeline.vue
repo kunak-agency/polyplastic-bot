@@ -294,7 +294,6 @@ function sitesShort(s: ScenarioStep): string {
   min-width: 0;
   padding: 6px 8px;
   border: 1px solid var(--border);
-  border-left-width: 3px;
   border-radius: var(--radius-md);
   background: var(--surface);
   text-align: left;
@@ -304,13 +303,10 @@ function sitesShort(s: ScenarioStep): string {
   border-color: var(--border-strong);
 }
 .tl__card--warning {
-  border-left-color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
 }
 .tl__card--error {
-  border-left-color: var(--danger);
-}
-.tl__card--ok {
-  border-left-color: var(--success);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
 }
 .tl__card--hr {
   background: var(--bg-subtle);

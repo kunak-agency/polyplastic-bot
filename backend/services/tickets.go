@@ -633,5 +633,5 @@ func (s *TicketService) sendResolved(ctx context.Context, e *domain.Employee, t 
 	if _, err := s.max.Send(ctx, ticketResolvedMessage(to, e, t)); err != nil {
 		logger.Warn("обращение #%d: «Вопрос закрыт» не ушёл: %v", t.Number, err)
 	}
-	_ = s.repos.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgBot, Text: "«Вопрос закрыт», новичку предложено оценить помощь."})
+	_ = s.repos.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgBot, Text: "«Вопрос закрыт», сотруднику предложено оценить помощь."})
 }

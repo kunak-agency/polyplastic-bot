@@ -6,6 +6,8 @@ import (
 
 	"main/domain"
 	"main/repositories"
+
+	"github.com/google/uuid"
 )
 
 // Поздний вход (FEATURE_CATCHUP, план итерации 24.10 §3.5). Новичок ответил на согласие после
@@ -16,7 +18,10 @@ import (
 //   - обязательные вопросы и опросы с обязательными вопросами — догоняющая очередь
 //     (ScheduledEvent.Catchup): первый блок — в той же сессии сразу после сводки, остальные — по
 //     одному в день в начале рабочего окна, раньше обычного шага того же дня;
-//   - опрос старше 7 дней (пульс дня, итоги недели) — skipped «не задан (поздний вход)».
+//   - опрос старше 7 дней (пульс дня, итоги недели) — skipped «не задан (поздний вход)»; взамен,
+//     если пропущен хоть один такой, — один догоняющий пульс «Как прошли первые недели?» (шкала
+//     1–5, ниже порога — кнопки причин, как у обычного пульса), первым догоняющим блоком сразу
+//     после сводки (catchupPulse).
 //
 // Бюджет: догоняющий блок и наджи вместе — не больше 2 проактивных сообщений в день, догоняющих
 // блоков — не больше одного (budgetLeft); не влез — переезжает на следующий рабочий день.
@@ -30,6 +35,57 @@ const catchupStaleAfter = 7 * 24 * time.Hour
 
 // skipLateSurvey — причина в таймлайне HR у устаревшего опроса.
 const skipLateSurvey = "не задан (поздний вход)"
+
+// catchupPulseKey — блок догоняющего пульса (замена устаревшим опросам).
+const catchupPulseKey = "catchup:pulse"
+
+// Догоняющий пульс. Шаг виртуальный: в версиях сценария его нет, событие несёт его в Snapshot
+// (как «Отправить себе», но IsTest=false — ответы идут в пульс, риск и дайджест как обычно).
+const (
+	catchupPulseTitle     = "Догоняющий пульс"
+	catchupPulseIntroTy   = "Ты подключился позже — вместо пропущенных опросов один короткий вопрос."
+	catchupPulseIntroVy   = "Вы подключились позже — вместо пропущенных опросов один короткий вопрос."
+	catchupPulseQuestion  = "Как прошли первые недели? Что было сложнее всего?"
+	catchupPulseThreshold = 4 // 1–3 — экран причин (defaultReasons)
+)
+
+// catchupPulseID — детерминированный id события и шага пульса новичка: повторная сборка очереди
+// второй пульс не создаёт.
+func catchupPulseID(empID uuid.UUID) uuid.UUID {
+	return uuid.NewSHA1(empID, []byte(catchupPulseKey))
+}
+
+// catchupPulseStep — виртуальный шаг пульса: старый (legacy) вопрос шкалы 1–5 с порогом — ниже
+// порога бот показывает кнопки причин (commentScreen → ScreenReasons).
+func catchupPulseStep(id uuid.UUID, day int) domain.ScenarioStep {
+	return domain.ScenarioStep{
+		ID: id, DayOffset: day, Kind: domain.KindSurvey, Title: catchupPulseTitle,
+		TextTy: catchupPulseIntroTy, TextVy: catchupPulseIntroVy,
+		Survey: &domain.Survey{Scale: domain.Scale5, Threshold: catchupPulseThreshold,
+			Questions: []domain.SurveyQuestion{{Text: catchupPulseQuestion}}},
+	}
+}
+
+// catchupPulse — событие догоняющего пульса (статус scheduled, в догоняющей очереди); nil — уже
+// есть или опросы новичку не шлём (нет согласия).
+func catchupPulse(e *domain.Employee, events []domain.ScheduledEvent, day int) *domain.ScheduledEvent {
+	id := catchupPulseID(e.ID)
+	for i := range events {
+		if events[i].ID == id {
+			return nil
+		}
+	}
+	st := catchupPulseStep(id, day)
+	if !sendable(e, st) {
+		return nil
+	}
+	snap := domain.StepSnap(st)
+	return &domain.ScheduledEvent{
+		ID: id, EmployeeID: e.ID, StepID: id, ScenarioVersion: e.ScenarioVersion, DayOffset: day,
+		Title: st.Title, Kind: st.Kind, Status: domain.EventScheduled, Snapshot: &snap,
+		Block: catchupPulseKey, Catchup: true,
+	}
+}
 
 // catchupMaxMedia — вложений материалов сразу после сводки, не больше (сообщений).
 const catchupMaxMedia = 3
@@ -67,10 +123,11 @@ func (s *SchedulerService) BuildCatchup(ctx context.Context, tx *repositories.Re
 	}
 	var blocks []string                              // ключи догоняющих блоков-вопросов по порядку
 	byBlock := map[string][]*domain.ScheduledEvent{} // события блока
-	queued := 0
+	queued, stale := 0, false
+	pulseID := catchupPulseID(e.ID)
 	for i := range events {
 		ev := &events[i]
-		if ev.FireAt.After(now) || ev.DayOffset >= today {
+		if ev.ID == pulseID || ev.FireAt.After(now) || ev.DayOffset >= today {
 			continue
 		}
 		if ev.Snapshot == nil {
@@ -88,6 +145,7 @@ func (s *SchedulerService) BuildCatchup(ctx context.Context, tx *repositories.Re
 			err = skip(ev, skipMissed)
 		case isSurvey(st) && now.Sub(ev.FireAt) > catchupStaleAfter:
 			err = skip(ev, skipLateSurvey)
+			stale = true
 		case isSurvey(st) && (st.Required || surveyRequired(st)), !isSurvey(st) && st.Required && isQuestion(st):
 			ev.Catchup = true
 			if _, seen := byBlock[ev.Block]; !seen {
@@ -107,6 +165,15 @@ func (s *SchedulerService) BuildCatchup(ctx context.Context, tx *repositories.Re
 			return err
 		}
 	}
+	// догоняющий пульс вместо устаревших опросов — первым блоком, сразу после сводки
+	var pulse *domain.ScheduledEvent
+	if stale {
+		if pulse = catchupPulse(e, events, today); pulse != nil {
+			blocks = append([]string{catchupPulseKey}, blocks...)
+			byBlock[catchupPulseKey] = []*domain.ScheduledEvent{pulse}
+			queued++
+		}
+	}
 	// первый блок — в этой сессии (после сводки: runEmployee ставит сводку первой), остальные — по
 	// одному в рабочий день с начала окна
 	day := civilDate(now.In(site.Loc), site.Loc)
@@ -118,7 +185,11 @@ func (s *SchedulerService) BuildCatchup(ctx context.Context, tx *repositories.Re
 		}
 		for _, ev := range byBlock[key] {
 			ev.FireAt = at
-			if err := tx.Events.Save(ctx, ev); err != nil {
+			save := tx.Events.Save
+			if ev == pulse {
+				save = tx.Events.Create
+			}
+			if err := save(ctx, ev); err != nil {
 				return err
 			}
 		}

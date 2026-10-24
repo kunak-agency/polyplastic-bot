@@ -81,7 +81,7 @@ func (b *BotService) question(ctx context.Context, u max.Update, emp *domain.Emp
 			return err
 		}
 		qid := q.ID
-		b.classifyAsync(ctx, emp, flagInput{text: text, context: flagsCtx, where: "в сообщении новичка", mid: u.MessageID,
+		b.classifyAsync(ctx, emp, flagInput{text: text, context: flagsCtx, where: "в сообщении сотрудника", mid: u.MessageID,
 			questionID: &qid, regexCodes: codes})
 		return nil
 	}
@@ -95,7 +95,7 @@ func (b *BotService) question(ctx context.Context, u max.Update, emp *domain.Emp
 	}
 	ready := make(chan struct{})
 	qid := q.ID
-	b.classifyAsync(ctx, emp, flagInput{text: text, context: flagsCtx, where: "в сообщении новичка", mid: u.MessageID,
+	b.classifyAsync(ctx, emp, flagInput{text: text, context: flagsCtx, where: "в сообщении сотрудника", mid: u.MessageID,
 		questionID: &qid, questionReady: ready})
 	// rag отвечает до RAG_ASK_TIMEOUT: ждём в фоне, чтобы не держать чтение апдейтов остальных.
 	b.wg.Add(1)
@@ -136,7 +136,7 @@ func (b *BotService) touch(ctx context.Context, empID uuid.UUID, codes []string)
 		now := b.now()
 		e.LastActivityAt = &now
 		if codes != nil {
-			markRisk(e, domain.RiskRed, "сигнал "+strings.Join(codes, ", ")+" в сообщении новичка")
+			markRisk(e, domain.RiskRed, "сигнал "+strings.Join(codes, ", ")+" в сообщении сотрудника")
 		}
 		return tx.Employees.Save(ctx, e)
 	})
@@ -162,7 +162,7 @@ func (b *BotService) flagSignal(ctx context.Context, to recipient, emp *domain.E
 		}
 		now := b.now()
 		e.LastActivityAt = &now
-		markRisk(e, domain.RiskRed, "сигнал "+strings.Join(codes, ", ")+" в сообщении новичка")
+		markRisk(e, domain.RiskRed, "сигнал "+strings.Join(codes, ", ")+" в сообщении сотрудника")
 		if err := tx.Employees.Save(ctx, e); err != nil {
 			return err
 		}
@@ -505,7 +505,7 @@ func (b *BotService) flagDetails(ctx context.Context, u max.Update, emp *domain.
 		}
 		t, created, err := b.tickets.open(ctx, tx, e, ticketDraft{
 			cat: cat, source: domain.TicketFromFlag, quote: q.Question, questionID: &q.ID,
-			what: fmt.Sprintf("Сработал сигнал %s в свободном тексте, новичок дописал подробности.", strings.Join(q.Flags, ", ")),
+			what: fmt.Sprintf("Сработал сигнал %s в свободном тексте, сотрудник дописал подробности.", strings.Join(q.Flags, ", ")),
 		})
 		if err != nil {
 			return err

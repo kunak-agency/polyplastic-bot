@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"main/config"
 	"main/out"
 	"main/services"
 
@@ -24,7 +25,11 @@ type stubRAG struct{ err error }
 func (r stubRAG) Health(context.Context, time.Duration) error { return r.err }
 
 func newTestApp(db, rag error) *fiber.App {
-	svc := &services.Services{Health: services.NewHealthService(stubPinger{db}, stubRAG{rag}, time.Second)}
+	return newTestAppF(db, rag, config.Features{})
+}
+
+func newTestAppF(db, rag error, f config.Features) *fiber.App {
+	svc := (&services.Services{Health: services.NewHealthService(stubPinger{db}, stubRAG{rag}, time.Second)}).WithFeatures(f)
 	h := NewHandlerManager(svc)
 	app := fiber.New(ServerConfig(DefaultTimeouts))
 	app.Use(RequestID)
@@ -47,6 +52,23 @@ func TestHealthShape(t *testing.T) {
 	}
 	if got != (out.Health{Status: "ok", DB: "ok", RAG: "down"}) {
 		t.Fatalf("тело %+v", got)
+	}
+}
+
+// features.nudges_default — FEATURE_NUDGES_DEFAULT: конструктор показывает правило по умолчанию.
+func TestHealthFeatures(t *testing.T) {
+	app := newTestAppF(nil, nil, config.Features{NudgesDefault: true})
+	resp, err := app.Test(httptest.NewRequest("GET", "/api/health", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	f, ok := got["features"].(map[string]any)
+	if !ok || f["nudges_default"] != true {
+		t.Fatalf("тело %v", got)
 	}
 }
 

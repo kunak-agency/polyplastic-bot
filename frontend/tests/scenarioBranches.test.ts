@@ -12,6 +12,7 @@ import {
   statsBadge,
   labelIsLong,
   LABEL_WARN,
+  noAnswerView,
   validateScenario,
   validateStep,
 } from '../src/lib/scenarioBranches.ts'
@@ -231,4 +232,14 @@ test('survey option branches and outcomes are validated like button branches', (
       ['handoffNoTarget', undefined],
     ],
   )
+})
+
+test('no-answer view: default reminders under FEATURE_NUDGES_DEFAULT, own rule wins', () => {
+  const rule = { remind_after_h: [24, 48], max: 2 }
+  assert.equal(noAnswerView({ no_answer: null }, true), 'default')
+  assert.equal(noAnswerView({}, true), 'default')
+  assert.equal(noAnswerView({ no_answer: rule }, true), 'custom')
+  // Flag off: as before, silent or the step's own rule.
+  assert.equal(noAnswerView({ no_answer: null }, false), 'silent')
+  assert.equal(noAnswerView({ no_answer: rule }, false), 'custom')
 })

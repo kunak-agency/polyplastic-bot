@@ -634,14 +634,8 @@ function when(iso: string): string {
 </template>
 
 <style scoped>
-.head-card {
-  border-left: 4px solid var(--priority-p2);
-}
 .head-card--P0 {
-  border-left-color: var(--priority-p0);
-}
-.head-card--P1 {
-  border-left-color: var(--priority-p1);
+  border-color: color-mix(in srgb, var(--priority-p0) 45%, var(--border));
 }
 .head {
   display: flex;

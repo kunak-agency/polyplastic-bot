@@ -71,9 +71,8 @@ const restricted = computed(() => isRestricted(props.ticket))
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px 10px 14px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-left: 4px solid var(--priority-p2);
   border-radius: var(--radius-md);
   background: var(--surface);
   color: var(--fg);
@@ -86,23 +85,12 @@ const restricted = computed(() => isRestricted(props.ticket))
   border-color: var(--border-strong);
   box-shadow: var(--shadow-sm);
 }
+/* Priority is the P0/P1/P2 badge; P0 also gets a soft red frame, no side stripe. */
 .tcard--P0 {
-  border-left-color: var(--priority-p0);
+  border-color: color-mix(in srgb, var(--priority-p0) 45%, var(--border));
 }
-.tcard--P1 {
-  border-left-color: var(--priority-p1);
-}
-.tcard--P2 {
-  border-left-color: var(--priority-p2);
-}
-.tcard:hover.tcard--P0 {
-  border-left-color: var(--priority-p0);
-}
-.tcard:hover.tcard--P1 {
-  border-left-color: var(--priority-p1);
-}
-.tcard:hover.tcard--P2 {
-  border-left-color: var(--priority-p2);
+.tcard--P0:hover {
+  border-color: var(--priority-p0);
 }
 .tcard__top {
   display: flex;

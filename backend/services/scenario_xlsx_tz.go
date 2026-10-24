@@ -403,7 +403,7 @@ func (p *tzParser) row(n int, row []string) {
 	if flag {
 		f := flagRecruiter
 		st.FlagRequired = &f
-		p.warn(n, stepIdx, warnRecruiter, "Шаг «по отмашке рекрутера»: уйдёт, только если у новичка включён флаг recruiter_enabled")
+		p.warn(n, stepIdx, warnRecruiter, "Шаг «по отмашке рекрутера»: уйдёт, только если у сотрудника включён флаг recruiter_enabled")
 	}
 
 	// Заголовок: повод, иначе первая строка текста.
@@ -1188,7 +1188,7 @@ func (p *tzParser) postProcess() {
 			}
 			if i > b.first && reGreeting.MatchString(st.TextTy) && reGreeting.MatchString(steps[i-1].TextTy) &&
 				steps[i-1].Survey == nil && sitesEqual(steps[i-1].Sites, st.Sites) {
-				p.warn(p.stepRow[i], i, warnDupGreeting, "Два приветствия подряд в одном блоке — новичок получит «Привет» дважды; объедините или уберите одно")
+				p.warn(p.stepRow[i], i, warnDupGreeting, "Два приветствия подряд в одном блоке — сотрудник получит «Привет» дважды; объедините или уберите одно")
 			}
 		}
 		if surveyWord >= 0 && !hasSurvey {

@@ -50,7 +50,7 @@ function str(v: unknown): string {
 }
 
 function notFound(): MockResult {
-  return error(404, 'NOT_FOUND', 'Новичок не найден')
+  return error(404, 'NOT_FOUND', 'Сотрудник не найден')
 }
 
 function list(req: MockRequest): MockResult {
@@ -233,7 +233,7 @@ function timeTravel(req: MockRequest): MockResult {
       },
     ])
   if (n.connection !== 'connected')
-    return error(409, 'CONFLICT', 'Новичок ещё не подключился к боту — отправлять некому')
+    return error(409, 'CONFLICT', 'Сотрудник ещё не подключился к боту — отправлять некому')
   for (const e of events) if (e.day_offset <= day) send(n, e, true)
   return { status: 200, data: { items: events.map((e) => ({ ...e })) } }
 }

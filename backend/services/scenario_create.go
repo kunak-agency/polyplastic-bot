@@ -21,7 +21,7 @@ const (
 	msgScenarioNameTaken   = "Сценарий с таким названием уже есть — выберите другое"
 	msgSourceNotFound      = "Сценарий-источник не найден"
 	msgScenarioPublishedRm = "Сценарий уже публиковался — удалить можно только черновик без публикаций"
-	msgScenarioHasNewcomer = "По сценарию запущены новички — удалить его нельзя"
+	msgScenarioHasNewcomer = "По сценарию запущены сотрудники — удалить его нельзя"
 )
 
 // CreateDraft — POST /api/scenarios: черновик версии 0. from — источник копии: шаги его

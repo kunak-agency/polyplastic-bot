@@ -498,7 +498,7 @@ func BuildRecruiterDashboard(rows *repositories.OverviewRows, events []repositor
 			}
 			// Обращение F7 создаётся только после согласия новичка на передачу (bot_tickets.go).
 			if t.Category == "F7" {
-				row(RowF7, SevRed, "Намерение уйти: новичок согласился на разговор", t.SLADueAt, &id, ActContact, ActOpen)
+				row(RowF7, SevRed, "Намерение уйти: сотрудник согласился на разговор", t.SLADueAt, &id, ActContact, ActOpen)
 			}
 		}
 		if slaHot {

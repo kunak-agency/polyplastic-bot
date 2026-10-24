@@ -38,6 +38,15 @@ type Services struct {
 	features config.Features
 }
 
+// Features — фича-флаги слоя (GET /api/health отдаёт кабинету те, от которых зависит его вид).
+func (s *Services) Features() config.Features { return s.features }
+
+// WithFeatures — флаги для тестов HTTP-слоя без NewServices.
+func (s *Services) WithFeatures(f config.Features) *Services {
+	s.features = f
+	return s
+}
+
 // Options — настройки слоя.
 type Options struct {
 	RAGTimeout time.Duration // срок проверки rag в health

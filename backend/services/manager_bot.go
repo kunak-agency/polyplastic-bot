@@ -19,8 +19,8 @@ import (
 
 const (
 	textManagerWelcome = "Здравствуйте! Я Корсик, бот адаптации. Подключил вас как руководителя: %s.\n\n" +
-		"Буду писать, когда новичку стоит уделить время: второй низкий пульс подряд, молчит больше 3 дней, " +
-		"месяц в компании, скоро решение по испытательному сроку. Ответы новичков и обращения я не пересылаю — только повод встретиться 1:1."
+		"Буду писать, когда сотруднику стоит уделить время: второй низкий пульс подряд, молчит больше 3 дней, " +
+		"месяц в компании, скоро решение по испытательному сроку. Ответы сотрудников и обращения я не пересылаю — только повод встретиться 1:1."
 	textManagerBroken = "Ссылка не сработала: она устарела или уже использована. Попросите HR прислать новую."
 	textManagerMet    = "Отмечено: встреча проведена. Спасибо!"
 	textManagerPlan   = "Отмечено: встреча запланирована. Напомню в кабинете, пока не отметите «Встретился»."
@@ -56,8 +56,8 @@ func (b *BotService) managerStart(ctx context.Context, u max.Update) (bool, erro
 		return true, err
 	}
 	logger.Info("бот: руководитель подключён user=%d, новичков %d", u.UserID, n)
-	b.send(ctx, to.msg(fmt.Sprintf(textManagerWelcome, plural(n, "новичок", "новичка", "новичков")), "",
-		[][]max.Button{{{Text: "Мои новички", URL: ManagerPageURL(managerCabinetURL, inv.ManagerName)}}}))
+	b.send(ctx, to.msg(fmt.Sprintf(textManagerWelcome, plural(n, "сотрудник", "сотрудника", "сотрудников")), "",
+		[][]max.Button{{{Text: "Мои сотрудники", URL: ManagerPageURL(managerCabinetURL, inv.ManagerName)}}}))
 	return true, nil
 }
 

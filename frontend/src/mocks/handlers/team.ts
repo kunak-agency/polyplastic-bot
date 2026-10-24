@@ -366,7 +366,7 @@ function hrLeadDashboard(req: MockRequest): MockResult {
       week: '2026-W43',
       lines: [
         'Индекс W 81 (▲ 4), ответили 55 из 67',
-        'Главная тема: доступы и СИЗ — 11 новичков, GrPP и GTP',
+        'Главная тема: доступы и СИЗ — 11 сотрудников, GrPP и GTP',
         'GTP: W 75 (▼ 3) · GrPP: W 84 (▲ 6) · Luzhniki: мало данных',
       ],
     },
@@ -418,7 +418,7 @@ function nudge(id: string, kind: NudgeItem['kind'], n: number, at: string): Nudg
 }
 
 function markContacted(req: MockRequest): MockResult {
-  if (!newcomers.has(req.params.id)) return err(404, 'NOT_FOUND', 'Новичок не найден')
+  if (!newcomers.has(req.params.id)) return err(404, 'NOT_FOUND', 'Сотрудник не найден')
   contacted.add(req.params.id)
   const list = nudges.get(req.params.id) ?? []
   list.push(nudge(req.params.id, 'contacted', 0, new Date().toISOString()))
@@ -428,7 +428,7 @@ function markContacted(req: MockRequest): MockResult {
 
 function listNudges(req: MockRequest): MockResult {
   const n = newcomers.get(req.params.id)
-  if (!n) return err(404, 'NOT_FOUND', 'Новичок не найден')
+  if (!n) return err(404, 'NOT_FOUND', 'Сотрудник не найден')
   const items = (nudges.get(n.id) ?? []).slice().sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
   return { status: 200, data: { items, total: items.length, tz: zoneOf(n) } }
 }
@@ -437,7 +437,7 @@ const IP_VALUES: IpDecision[] = ['keep', 'extend', 'part']
 
 function ipDecision(req: MockRequest): MockResult {
   const n = newcomers.get(req.params.id)
-  if (!n) return err(404, 'NOT_FOUND', 'Новичок не найден')
+  if (!n) return err(404, 'NOT_FOUND', 'Сотрудник не найден')
   const me = currentUser()
   if (me && me.role === 'manager') return forbidden()
   const d = req.body.decision
@@ -467,7 +467,7 @@ function devRecruiterMorning(): MockResult {
 // The multipart body does not reach the mock (parseBody keeps objects only),
 // so the answer names a generic file.
 function uploadFile(req: MockRequest): MockResult {
-  if (!newcomers.has(req.params.id)) return err(404, 'NOT_FOUND', 'Новичок не найден')
+  if (!newcomers.has(req.params.id)) return err(404, 'NOT_FOUND', 'Сотрудник не найден')
   return {
     status: 201,
     data: {
@@ -484,9 +484,9 @@ function uploadFile(req: MockRequest): MockResult {
 // second press returns the same planned nudge); 409 nothing to remind about.
 function remind(req: MockRequest): MockResult {
   const n = newcomers.get(req.params.id)
-  if (!n) return err(404, 'NOT_FOUND', 'Новичок не найден')
+  if (!n) return err(404, 'NOT_FOUND', 'Сотрудник не найден')
   if (n.connection !== 'connected')
-    return err(409, 'CONFLICT', 'Новичок не подключён к боту — напоминать некуда')
+    return err(409, 'CONFLICT', 'Сотрудник не подключён к боту — напоминать некуда')
   const q = openQuestion(n.id)
   if (!q) return err(409, 'NOTHING_TO_REMIND', 'Напоминать не о чем: вопросов без ответа нет')
   const tz = zoneOf(n)
@@ -499,7 +499,7 @@ function remind(req: MockRequest): MockResult {
         status: 'planned',
         at: pending.at,
         tz,
-        message: 'Отправится в 08:00 по времени новичка',
+        message: 'Отправится в 08:00 по времени сотрудника',
         nudge: pending,
       },
     }
@@ -528,7 +528,7 @@ function remind(req: MockRequest): MockResult {
         status: 'planned',
         at: item.at,
         tz,
-        message: 'Отправится в 08:00 по времени новичка',
+        message: 'Отправится в 08:00 по времени сотрудника',
         nudge: item,
       },
     }

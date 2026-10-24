@@ -91,14 +91,10 @@ watch(() => props.newcomerId, load, { immediate: true })
   gap: 8px;
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--priority-p2);
   border-radius: var(--radius-sm);
 }
 .nt__row--P0 {
-  border-left-color: var(--priority-p0);
-}
-.nt__row--P1 {
-  border-left-color: var(--priority-p1);
+  border-color: color-mix(in srgb, var(--priority-p0) 45%, var(--border));
 }
 .nt__link {
   color: var(--fg);

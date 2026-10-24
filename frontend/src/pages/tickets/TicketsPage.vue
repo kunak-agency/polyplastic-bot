@@ -261,6 +261,9 @@ const allClosed = computed(
   align-items: center;
   gap: 6px;
   border: 0;
+}
+/* Buttons reset only when inactive: the active tab keeps the shared white pill. */
+.tab:not(.active) {
   background: transparent;
 }
 .queue {

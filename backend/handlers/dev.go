@@ -62,7 +62,7 @@ func (h *Handler) SimulateStart(c *fiber.Ctx) error {
 	}
 	payload := invitePayload(card.InviteLink)
 	if payload == "" {
-		return errs.NewConflictError("У новичка нет действующего приглашения")
+		return errs.NewConflictError("У сотрудника нет действующего приглашения")
 	}
 	user := devUserID(input.NewcomerID)
 	h.devIncoming(user, user, max.JournalKindStart, "")

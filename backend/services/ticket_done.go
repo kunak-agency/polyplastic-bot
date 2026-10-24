@@ -52,7 +52,7 @@ func (s *TicketService) sendDoneNote(ctx context.Context, e *domain.Employee, t 
 		logger.Warn("обращение #%d: «что сделано» не ушло новичку: %v", t.Number, err)
 		return false
 	}
-	_ = s.repos.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgBot, Text: "Новичку ушло: «По сигналу: " + note + "»"})
+	_ = s.repos.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgBot, Text: "Сотруднику ушло: «По сигналу: " + note + "»"})
 	logger.Info("обращение #%d: «что сделано» ушло новичку", t.Number)
 	return true
 }

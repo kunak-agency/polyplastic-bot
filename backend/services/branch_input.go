@@ -97,7 +97,7 @@ func personalMissingTask(ctx context.Context, t *TicketService, e *domain.Employ
 	}
 	var tk *domain.Ticket
 	var created bool
-	what := fmt.Sprintf("Нет личного файла «%s» (%s): загрузите его в карточку новичка — бот пришлёт.", name, where)
+	what := fmt.Sprintf("Нет личного файла «%s» (%s): загрузите его в карточку сотрудника — бот пришлёт.", name, where)
 	err := t.repos.Transaction(ctx, func(tx *repositories.Repos) error {
 		var err error
 		tk, created, err = t.open(ctx, tx, e, ticketDraft{cat: taxonomy.Question(taxonomy.RouteHR), source: domain.TicketFromOther, what: what})
@@ -308,7 +308,7 @@ func (b *BotService) scenarioCommand(ctx context.Context, emp *domain.Employee, 
 		}
 		logger.Info("бот: команда сценария %s от новичка %s", cmd, emp.ID)
 		if strings.TrimSpace(c.TextTy+c.TextVy) != "" {
-			b.send(ctx, recipientOf(emp).msg(stepText(domain.ScenarioStep{TextTy: c.TextTy, TextVy: c.TextVy}, emp, b.now()), "", nil))
+			b.send(ctx, recipientOf(emp).msg(stepTextIn(domain.ScenarioStep{TextTy: c.TextTy, TextVy: c.TextVy}, emp, b.now(), b.siteFor(emp)), "", nil))
 		}
 		b.runPlan(ctx, &pressPlan{emp: emp, ev: domain.ScheduledEvent{}, step: domain.ScenarioStep{Title: "команда " + cmd},
 			acts: c.Actions, label: cmd})

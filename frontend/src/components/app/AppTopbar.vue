@@ -4,8 +4,6 @@ import { useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { breadcrumbTail } from '@/composables/useBreadcrumbs'
 import SiteSwitcher from '@/components/app/SiteSwitcher.vue'
-import ApiStatusBadge from '@/components/app/ApiStatusBadge.vue'
-import UserMenu from '@/components/app/UserMenu.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
@@ -45,8 +43,6 @@ const crumbs = computed<Crumb[]>(() => {
     <!-- Global site filter (ux-spec §3.0); the search box from the spec comes
          with the newcomers and tickets APIs. -->
     <SiteSwitcher v-if="showSites" />
-    <ApiStatusBadge />
-    <UserMenu />
   </header>
 </template>
 

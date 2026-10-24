@@ -90,7 +90,7 @@ func (h *Handler) SendStepTest(c *fiber.Ctx) error {
 	}
 	nid, err := uuid.Parse(strings.TrimSpace(body.NewcomerID))
 	if err != nil {
-		return errs.NewValidationError("newcomer_id: нужен UUID новичка")
+		return errs.NewValidationError("newcomer_id: нужен UUID сотрудника")
 	}
 	res, err := h.services.SendStepTest(c.UserContext(), id, stepID, nid, body.PressButton)
 	if err != nil {

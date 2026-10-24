@@ -153,6 +153,20 @@ export function asksSomething(step: Pick<ScenarioStep, 'buttons' | 'kind'>): boo
   return step.buttons.length > 0 || step.kind === 'survey' || step.kind === 'input'
 }
 
+// What the "if no answer" field shows. With FEATURE_NUDGES_DEFAULT a question
+// without its own no_answer is reminded by default (4 h / 24 h, holds the flow
+// at most 48 h); "custom" is the step's own rule. Without the flag the old
+// choice: silent or the step's own rule.
+export type NoAnswerView = 'default' | 'custom' | 'silent'
+
+export function noAnswerView(
+  step: Pick<ScenarioStep, 'no_answer'>,
+  nudgesDefault: boolean,
+): NoAnswerView {
+  if (step.no_answer) return 'custom'
+  return nudgesDefault ? 'default' : 'silent'
+}
+
 // ── Validation (verdict §Q3) ────────────────────────────────────────────────
 
 export type IssueLevel = 'error' | 'warning'

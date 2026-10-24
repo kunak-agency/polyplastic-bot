@@ -41,3 +41,27 @@ func TestTextsInNewcomerTZ(t *testing.T) {
 		t.Fatal("без планировщика — площадка")
 	}
 }
+
+// {start_day} в сообщениях веток и кнопках причин «Чего-то нет» — по поясу новичка с FEATURE_TZ,
+// без флага — по площадке.
+func TestBranchTextsInNewcomerTZ(t *testing.T) {
+	vy := domain.AddressVy
+	e := &domain.Employee{Site: domain.SiteGTP, TZ: strp(tzEkb), StartDate: date(2026, 11, 3), AddressForm: &vy}
+	at := msk(2026, 11, 2, 23, 30) // 01:30 3 ноября в Екатеринбурге
+	ev := &domain.ScheduledEvent{SentAt: &at}
+	m := domain.BranchMessage{TextVy: "Ждём вас {start_day}"}
+	on, off := &BotService{scheduler: tzScheduler(true)}, &BotService{scheduler: tzScheduler(false)}
+	if got := branchText(m, e, ev, on.siteFor(e)); got != "Ждём вас сегодня" {
+		t.Fatalf("ветка с флагом: %q", got)
+	}
+	if got := branchText(m, e, ev, off.siteFor(e)); got != "Ждём вас завтра" {
+		t.Fatalf("ветка без флага: %q", got)
+	}
+	st := domain.ScenarioStep{TextVy: "Выход {start_day}: чего нет?"}
+	if got := accessReasonsMessage(on.recipient(e), st, e, ev, at).Text; !strings.HasPrefix(got, "Выход сегодня: чего нет?") {
+		t.Fatalf("причины с флагом: %q", got)
+	}
+	if got := accessReasonsMessage(off.recipient(e), st, e, ev, at).Text; !strings.HasPrefix(got, "Выход завтра: чего нет?") {
+		t.Fatalf("причины без флага: %q", got)
+	}
+}

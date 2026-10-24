@@ -187,8 +187,9 @@ func ticketResolvedMessage(to recipient, e *domain.Employee, t *domain.Ticket) m
 }
 
 // accessReasonsMessage — шаг «Проверка доступов» после «Чего-то нет»: кнопки причин.
+// {start_day} — по календарю адресата (to.siteFor: с FEATURE_TZ — пояс новичка).
 func accessReasonsMessage(to recipient, s domain.ScenarioStep, e *domain.Employee, ev *domain.ScheduledEvent, at time.Time) max.OutMessage {
-	text := stepText(s, e, at)
+	text := stepTextIn(s, e, at, to.siteFor(e))
 	if ev.IsTest {
 		text = testPrefix + text
 	}
@@ -225,7 +226,7 @@ func categoryLabel(cat taxonomy.Category) string {
 func ticketSummary(cat taxonomy.Category, what string, day int, context int) string {
 	s := fmt.Sprintf("%s. %s День адаптации %s.", categoryLabel(cat), what, dayLabel(day))
 	if context > 0 {
-		s += fmt.Sprintf(" В переписке — последние сообщения новичка боту (%d).", context)
+		s += fmt.Sprintf(" В переписке — последние сообщения сотрудника боту (%d).", context)
 	}
 	return s
 }

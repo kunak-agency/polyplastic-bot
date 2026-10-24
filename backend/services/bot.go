@@ -925,7 +925,7 @@ func (b *BotService) message(ctx context.Context, u max.Update) error {
 		return b.inputAnswer(ctx, emp, u)
 	}
 	if emp.AwaitFreeText != nil && strings.TrimSpace(u.Text) != "" {
-		return b.freeText(ctx, emp, u.Text, u.MessageID)
+		return b.freeText(ctx, emp, u.Text, u.MessageID, len(u.Audio) > 0) // голосовое — контекст voice
 	}
 	if emp.AwaitEventID != nil && strings.TrimSpace(u.Text) != "" {
 		out, err := b.applySurvey(ctx, emp.ID, *emp.AwaitEventID, surveyAction{kind: "text", q: emp.AwaitQuestion, text: u.Text})

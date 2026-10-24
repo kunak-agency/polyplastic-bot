@@ -88,15 +88,15 @@ func handoffDraft(q *domain.BotQuestion, cat taxonomy.Category, prefix string) t
 	what := "Новичок попросил передать вопрос человеку."
 	switch q.Kind {
 	case domain.QuestionAnswer:
-		what = "Ответ бота по документам не помог, новичок попросил человека."
+		what = "Ответ бота по документам не помог, сотрудник попросил человека."
 	case domain.QuestionAbstain:
-		what = "Бот не нашёл ответа в документах, новичок попросил передать вопрос."
+		what = "Бот не нашёл ответа в документах, сотрудник попросил передать вопрос."
 	case domain.QuestionRouted:
-		what = "Вопрос на тему для человека (бот по документам не отвечает), новичок выбрал, кому передать."
+		what = "Вопрос на тему для человека (бот по документам не отвечает), сотрудник выбрал, кому передать."
 	case domain.QuestionError:
-		what = "Справочная база не ответила, новичок попросил передать вопрос."
+		what = "Справочная база не ответила, сотрудник попросил передать вопрос."
 	case domain.QuestionFlag:
-		what = fmt.Sprintf("Сработал сигнал %s в свободном тексте, новичок согласился на передачу.", strings.Join(q.Flags, ", "))
+		what = fmt.Sprintf("Сработал сигнал %s в свободном тексте, сотрудник согласился на передачу.", strings.Join(q.Flags, ", "))
 	}
 	if prefix == preQRecruiter {
 		what = strings.TrimSuffix(what, ".") + " (рекрутеру)."

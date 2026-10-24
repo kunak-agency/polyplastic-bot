@@ -600,7 +600,9 @@ func (s *SchedulerService) Release(ctx context.Context, empID, evID uuid.UUID) e
 		if ev == nil {
 			return nil
 		}
-		snapshot, test = ev.Snapshot != nil, ev.IsTest
+		// продолжения нет только у «Отправить себе»; догоняющий пульс (Snapshot без IsTest) —
+		// обычное событие таймлайна
+		snapshot, test = ev.Snapshot != nil && ev.IsTest, ev.IsTest
 		maxDay = ev.DayOffset
 		if e.VirtualDay != nil && *e.VirtualDay > maxDay {
 			maxDay = *e.VirtualDay

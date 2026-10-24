@@ -6,6 +6,7 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { NAV, NAV_FOOTER, type NavItem } from '@/router/nav'
 import AppLogo from '@/components/common/AppLogo.vue'
+import UserMenu from '@/components/app/UserMenu.vue'
 import { useTicketsStore } from '@/stores/tickets'
 import { useSiteStore } from '@/stores/site'
 import { useAuthStore } from '@/stores/auth'
@@ -105,6 +106,7 @@ function isActive(item: NavItem): boolean {
       </nav>
 
       <div class="sidebar-foot">
+        <UserMenu :collapsed="collapsed" />
         <RouterLink
           v-for="it in navFooter"
           :key="it.id"

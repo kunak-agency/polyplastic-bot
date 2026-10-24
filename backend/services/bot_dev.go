@@ -36,7 +36,7 @@ func (b *BotService) SimulateFlag(ctx context.Context, empID uuid.UUID, code, te
 		}
 		now := b.now()
 		e.LastActivityAt = &now
-		markRisk(e, domain.RiskRed, "сигнал "+code+" в сообщении новичка")
+		markRisk(e, domain.RiskRed, "сигнал "+code+" в сообщении сотрудника")
 		if err := tx.Employees.Save(ctx, e); err != nil {
 			return err
 		}

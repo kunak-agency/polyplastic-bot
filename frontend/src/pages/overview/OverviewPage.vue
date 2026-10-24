@@ -102,16 +102,18 @@ const empty = computed(
       <OverviewTiles :tiles="data.tiles" :stages="data.stages" @overdue="showOverdue" />
       <ActionToday :items="data.action_today" @overdue="showOverdue" />
       <div class="overview__grid">
-        <div ref="risksEl" class="overview__risks">
-          <RiskZones
-            v-model:overdue-only="overdueOnly"
-            :items="data.risk_zones.items"
-            :total="data.risk_zones.total"
-          />
+        <div class="overview__risks">
+          <TopicHeatmap :heatmap="data.heatmap" />
         </div>
         <div class="overview__charts">
           <PulseTrend :trend="data.trend" />
-          <TopicHeatmap :heatmap="data.heatmap" />
+          <div ref="risksEl">
+            <RiskZones
+              v-model:overdue-only="overdueOnly"
+              :items="data.risk_zones.items"
+              :total="data.risk_zones.total"
+            />
+          </div>
         </div>
       </div>
     </div>

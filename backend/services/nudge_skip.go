@@ -20,7 +20,7 @@ import (
 const preNudgeSkip = "nk:" // nk:<event>
 
 const (
-	answerNudgeSkipped = "пропущено новичком (из напоминания)"
+	answerNudgeSkipped = "пропущено сотрудником (из напоминания)"
 	labelNudgeSkipped  = "Пропущено"
 )
 
