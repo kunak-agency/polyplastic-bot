@@ -20,6 +20,7 @@ const (
 	whenAfter    = "after"    // только время («в 09.01») — сразу после предыдущего, тот же блок
 	whenBranch   = "branch"   // «В случае варианта ответа „Да“» — ветка последнего вопроса
 	whenRule     = "rule"     // «Если сотрудник …» — глобальное правило сценария
+	whenCommand  = "command"  // «Команда /food» — команда бота (строку пишет экспорт кабинета)
 	whenUnknown  = "unknown"
 )
 
@@ -55,6 +56,7 @@ var (
 	reWhenNthMon  = regexp.MustCompile(`первый\s+день\s+(\p{L}+)\s+месяц`)
 	reWhenQuoted  = regexp.MustCompile(`[«"“]([^»"”]+)[»"”]`)
 	reSpaces      = regexp.MustCompile(`\s+`)
+	reWhenCommand = regexp.MustCompile(`^команда\s+/([a-z]\w*)`)
 )
 
 var ordinals = map[string]int{
@@ -81,6 +83,9 @@ func parseTZWhen(raw string) whenSpec {
 	}
 	if strings.HasPrefix(s, "если ") {
 		return whenSpec{kind: whenRule}
+	}
+	if m := reWhenCommand.FindStringSubmatch(s); m != nil {
+		return whenSpec{kind: whenCommand, answer: "/" + m[1]}
 	}
 	// Старый формат кабинета: D−3, D0 10:00, -1.
 	if day, hhmm, ok := parseWhen(raw); ok {

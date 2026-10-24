@@ -101,12 +101,34 @@ func parseScenarioFile(r io.Reader) (*tzImport, error) {
 	if len(sheets) == 0 {
 		return nil, errs.NewValidationError(msgImportEmpty)
 	}
-	// Первый лист — таймлайн; остальные (у заказчика «Лист1» — черновой дубль) пропускаем.
+	// Первый лист — таймлайн; остальные (у заказчика «Лист1» — черновой дубль) пропускаем, кроме
+	// листа «Корсик — расширения» из экспорта кабинета (scenario_xlsx_ext.go).
 	rows, err := f.GetRows(sheets[0])
 	if err != nil {
 		return nil, errs.NewValidationError(msgImportFile).WithCause(err)
 	}
+	imp, err := parseSheetRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range sheets[1:] {
+		if !isExtSheet(name) {
+			continue
+		}
+		ext, err := f.GetRows(name)
+		if err != nil {
+			break
+		}
+		if entries := readExtRows(ext); len(entries) > 0 {
+			applyExtReport(imp, applyExt(imp, rows, entries))
+		}
+		break
+	}
+	return imp, nil
+}
 
+// parseSheetRows — лист ТЗ: строка шапки (по словам), затем разбор строк.
+func parseSheetRows(rows [][]string) (*tzImport, error) {
 	header, cols := -1, map[string]int{}
 	for i := 0; i < len(rows) && i < headerSearchRows && header < 0; i++ {
 		for j, cell := range rows[i] {

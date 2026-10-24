@@ -117,6 +117,8 @@ type tzImport struct {
 	commands []domain.Command
 	sites    []string
 	report   ImportReport
+	rows     []int // строка Excel каждого шага (лист «Корсик — расширения» сверяется по ней)
+	cmdRows  []int // строка Excel команды («Команда /food»); 0 — команда найдена в тексте
 }
 
 type tzBlock struct {
@@ -248,6 +250,10 @@ func (p *tzParser) row(n int, row []string) {
 	case whenBranch:
 		p.openSurvey = -1
 		p.branchRow(n, w, rawText, tag, media)
+		return
+	case whenCommand:
+		p.openSurvey = -1
+		p.command(n, w.answer, rawText, title, media)
 		return
 	case whenUnknown:
 		p.warn(n, -1, warnUnknownWhen, fmt.Sprintf("«Когда» не разобрано («%s») — строка добавлена в предыдущий блок", truncateRunes(whenRaw, 60)))
@@ -779,6 +785,36 @@ func (p *tzParser) rule(n int, trigger, rawText, media string) {
 	p.out.rules = append(p.out.rules, r)
 }
 
+// command — строка «Команда /food» (её пишет экспорт кабинета): текст — ответ бота, колонка
+// изображения — файлы (send_file по площадке), повод «Связаться с HR/рекрутером» — handoff.
+func (p *tzParser) command(n int, name, rawText, title, media string) {
+	text := withName(normalizeCell(rawText))
+	c := domain.Command{Name: name, TextTy: text, TextVy: text, Actions: []domain.Action{}}
+	if t, ok := defaultCommandTexts[name]; ok && text == t[0] {
+		c.TextVy = t[1] // текст по умолчанию: вторая форма известна
+	}
+	lo := strings.ToLower(title)
+	if strings.Contains(lo, "связ") {
+		switch {
+		case strings.Contains(lo, "hr"):
+			c.Actions = append(c.Actions, domain.Action{Type: domain.ActionHandoff, To: "hr"})
+		case strings.Contains(lo, "рекрутер"):
+			c.Actions = append(c.Actions, domain.Action{Type: domain.ActionHandoff, To: "recruiter"})
+		}
+	}
+	for _, m := range splitMediaNames(media) {
+		c.Actions = append(c.Actions, domain.Action{Type: domain.ActionSendFile, Media: m, PerTag: true})
+	}
+	for i := range p.out.commands {
+		if p.out.commands[i].Name == name {
+			p.out.commands[i], p.out.cmdRows[i] = c, n
+			return
+		}
+	}
+	p.out.commands = append(p.out.commands, c)
+	p.out.cmdRows = append(p.out.cmdRows, n)
+}
+
 // finish — время блоков, ключи шагов, вопросы без вариантов, команды, «ты/вы», счётчики.
 func (p *tzParser) finish() {
 	steps := p.out.steps
@@ -890,6 +926,7 @@ func (p *tzParser) finish() {
 	if ty+vy > 0 {
 		p.warn(firstAddr, -1, warnAddressForm, fmt.Sprintf("Тексты ТЗ в одной форме обращения (на «ты» — %d, на «вы» — %d): вторая форма скопирована из найденной, перепишите её в редакторе", ty, vy))
 	}
+	p.out.rows = append([]int(nil), p.stepRow...)
 	rep.Messages = len(steps)
 	rep.Rules = len(p.out.rules)
 	rep.Commands = len(p.out.commands)
@@ -943,6 +980,9 @@ func (p *tzParser) implicitYesNo(st *domain.ScenarioStep, nextSurvey bool) bool 
 // файлы ветки того же шага (r25: «Да» шлёт PDF «где пообедать» по площадке).
 func (p *tzParser) collectCommands() {
 	seen := map[string]bool{}
+	for _, c := range p.out.commands {
+		seen[c.Name] = true // строка «Команда /food» главнее найденной в тексте
+	}
 	for i, st := range p.out.steps {
 		texts := []string{st.TextTy}
 		var files []domain.Action
@@ -971,7 +1011,7 @@ func (p *tzParser) collectCommands() {
 		for _, t := range texts {
 			for _, m := range reCommand.FindAllStringSubmatch(t, -1) {
 				name := "/" + strings.ToLower(m[1])
-				if seen[name] {
+				if seen[name] || isBuiltin(name) { // /help, /menu, /human — свои команды бота
 					continue
 				}
 				seen[name] = true
@@ -985,6 +1025,7 @@ func (p *tzParser) collectCommands() {
 					p.warn(p.stepRow[i], i, warnCommand, fmt.Sprintf("Команда %s упомянута в тексте, но что она делает, из ТЗ не ясно — настройте действие", name))
 				}
 				p.out.commands = append(p.out.commands, c)
+				p.out.cmdRows = append(p.out.cmdRows, 0)
 			}
 		}
 	}
@@ -1175,7 +1216,7 @@ func (p *tzParser) postProcess() {
 	}
 	for i := range p.out.commands {
 		c := &p.out.commands[i]
-		if t, ok := defaultCommandTexts[c.Name]; ok {
+		if t, ok := defaultCommandTexts[c.Name]; ok && c.TextTy == "" && c.TextVy == "" {
 			c.TextTy, c.TextVy = t[0], t[1]
 		}
 	}

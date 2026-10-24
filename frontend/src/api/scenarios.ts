@@ -1,4 +1,5 @@
 import { http } from '@/api/http'
+import { filenameFromDisposition } from '@/lib/download'
 import type {
   ListResponse,
   PublishPreview,
@@ -125,4 +126,23 @@ export async function apiRewriteVy(id: string, body: RewriteVyRequest): Promise<
     { timeout: 40_000 },
   )
   return r.data
+}
+
+// GET /scenarios/:id/export.xlsx: the scenario in the customer's TZ format
+// (api_contract.md v4, export) - the TZ sheet plus the "Korsik extensions"
+// sheet the import reads back. No version - the draft, otherwise a published
+// version. The name comes from Content-Disposition (null when absent).
+export async function apiExportScenario(
+  id: string,
+  version?: number,
+): Promise<{ blob: Blob; filename: string | null }> {
+  const r = await http.get<Blob>(`/scenarios/${encodeURIComponent(id)}/export.xlsx`, {
+    params: version ? { version } : undefined,
+    responseType: 'blob',
+  })
+  const disposition = r.headers?.['content-disposition']
+  return {
+    blob: r.data,
+    filename: filenameFromDisposition(typeof disposition === 'string' ? disposition : null),
+  }
 }

@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"io"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -74,4 +77,48 @@ func TestImportedStepsRoundTrip(t *testing.T) {
 			a.json("PATCH", "/api/scenarios/"+id, map[string]any{"commands": got["commands"], "rules": got["rules"]}, 200)
 		})
 	}
+}
+
+// Экспорт: GET /api/scenarios/{id}/export.xlsx → .xlsx; импорт его обратно даёт те же шаги.
+func TestExportScenarioAPI(t *testing.T) {
+	a := newAPI(t)
+	b, err := os.ReadFile("../services/testdata/tz_synthetic.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	imp := a.upload("/api/scenarios/import", "tz.xlsx", b, "Синтетика", 201)
+	id := imp["id"].(string)
+
+	resp, err := a.app.Test(httptest.NewRequest("GET", "/api/scenarios/"+id+"/export.xlsx", nil), 10_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != mimeXLSX {
+		t.Fatalf("экспорт: %d %s %s", resp.StatusCode, resp.Header.Get("Content-Type"), data)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, "attachment;") || !strings.Contains(cd, "filename*=UTF-8''") {
+		t.Fatalf("Content-Disposition: %q", cd)
+	}
+	again := a.upload("/api/scenarios/import", "Синтетика — черновик.xlsx", data, "", 201)
+	if again["name"] != "Синтетика — черновик" {
+		t.Fatalf("имя из файла: %v", again["name"])
+	}
+	strip := func(steps any) string {
+		var out []any
+		for _, s := range steps.([]any) {
+			m := s.(map[string]any)
+			delete(m, "id")
+			out = append(out, m)
+		}
+		j, _ := json.Marshal(out)
+		return string(j)
+	}
+	if strip(imp["steps"]) != strip(again["steps"]) {
+		t.Errorf("шаги после круга через API расходятся")
+	}
+
+	a.json("GET", "/api/scenarios/"+id+"/export.xlsx?version=1", nil, 404)
+	a.json("GET", "/api/scenarios/"+id+"/export.xlsx?version=abc", nil, 422)
+	a.json("GET", "/api/scenarios/0199a000-0000-7000-8000-00000000ffff/export.xlsx", nil, 404)
 }

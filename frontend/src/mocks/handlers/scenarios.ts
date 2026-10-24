@@ -479,6 +479,19 @@ function sendTest(req: MockRequest): MockResult {
   return { status: 200, data: { status: 'sent', messages: 1 } }
 }
 
+// GET /scenarios/:id/export.xlsx: the mock has no Excel writer, so it hands back
+// the scenario as JSON under an .xlsx name - enough to exercise the download.
+function exportXlsx(req: MockRequest): MockResult {
+  const s = scenarios.get(req.params.id)
+  if (!s) return notFound()
+  const version = Number(req.query.version ?? 0)
+  if (version > s.version) return notFound()
+  const blob = new Blob([JSON.stringify(detail(s), null, 2)], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  return { status: 200, data: blob }
+}
+
 const routes: MockRoute[] = [
   {
     method: 'GET',
@@ -508,6 +521,7 @@ const routes: MockRoute[] = [
   { method: 'POST', path: '/scenarios/:id/publish', handler: publish },
   { method: 'POST', path: '/scenarios/:id/publish/preview', handler: preview },
   { method: 'GET', path: '/scenarios/:id/stats', handler: stats },
+  { method: 'GET', path: '/scenarios/:id/export.xlsx', handler: exportXlsx },
   { method: 'POST', path: '/scenarios/:id/steps/:stepId/send-test', handler: sendTest },
   { method: 'POST', path: '/scenarios/import', handler: importExcel },
 ]

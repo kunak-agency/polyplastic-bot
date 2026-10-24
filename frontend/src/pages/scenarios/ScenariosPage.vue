@@ -12,6 +12,7 @@ import ErrorState from '@/components/common/ErrorState.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import ScenarioStatus from '@/components/scenarios/ScenarioStatus.vue'
 import CreateScenarioDialog from '@/components/scenarios/CreateScenarioDialog.vue'
+import ScenarioRowMenu from '@/components/scenarios/ScenarioRowMenu.vue'
 import { Button } from '@/components/ui/button'
 import { apiImportScenario } from '@/api/scenarios'
 import { rememberImportReport } from '@/components/scenarios/importReport'
@@ -127,6 +128,9 @@ async function onFile(e: Event): Promise<void> {
             <th>{{ t('scenarios.columns.status') }}</th>
             <th class="td-num">{{ t('scenarios.columns.active') }}</th>
             <th>{{ t('scenarios.columns.updated') }}</th>
+            <th class="td-menu">
+              <span class="sr-only">{{ t('scenarios.columns.actions') }}</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -147,6 +151,7 @@ async function onFile(e: Event): Promise<void> {
             <td><ScenarioStatus :scenario="s" /></td>
             <td class="td-num tabular">{{ s.active_newcomers }}</td>
             <td class="tabular muted">{{ d(new Date(s.updated_at), 'long') }}</td>
+            <td class="td-menu"><ScenarioRowMenu :scenario="s" /></td>
           </tr>
         </tbody>
       </table>
@@ -163,6 +168,10 @@ async function onFile(e: Event): Promise<void> {
 }
 .cell-link:hover {
   text-decoration: underline;
+}
+.td-menu {
+  width: 40px;
+  text-align: right;
 }
 .sr-only {
   position: absolute;

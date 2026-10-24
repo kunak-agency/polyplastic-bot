@@ -4,6 +4,7 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   CircleAlert,
+  FileDown,
   FileSpreadsheet,
   ListPlus,
   Plus,
@@ -45,6 +46,7 @@ import { useMediaStore } from '@/stores/media'
 import { apiListNewcomers } from '@/api/newcomers'
 import { useBreadcrumbTail } from '@/composables/useBreadcrumbs'
 import { useToast } from '@/composables/useToast'
+import { useScenarioExport } from '@/composables/useScenarioExport'
 import { errorMessage, isApiError } from '@/lib/apiError'
 import { formatDayOffset } from '@/lib/calendar'
 import { uuidV4 } from '@/lib/ids'
@@ -77,6 +79,7 @@ const savedJson = ref('[]')
 const selectedId = ref<string | null>(null)
 const saving = ref(false)
 const publishOpen = ref(false)
+const { exporting, download: downloadExcel } = useScenarioExport()
 const publishing = ref(false)
 
 const dirty = computed(() => JSON.stringify(steps.value) !== savedJson.value)
@@ -490,6 +493,15 @@ async function onPublish(body: PublishRequest): Promise<void> {
           <Button :disabled="!dirty || saving" @click="onSave">
             <Save :size="14" />{{
               saving ? t('common.actions.saving') : t('scenarios.editor.save')
+            }}
+          </Button>
+          <Button
+            :disabled="steps.length === 0 || exporting"
+            :title="t('scenarios.export.hint')"
+            @click="downloadExcel(scenario, { dirty })"
+          >
+            <FileDown :size="14" />{{
+              exporting ? t('scenarios.export.downloading') : t('scenarios.export.button')
             }}
           </Button>
           <Button

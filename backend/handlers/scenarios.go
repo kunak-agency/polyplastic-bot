@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"fmt"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"main/in"
@@ -184,4 +187,52 @@ func (h *Handler) DeleteScenario(c *fiber.Ctx) error {
 		return err
 	}
 	return c.SendStatus(http.StatusNoContent)
+}
+
+// MIME-тип .xlsx.
+const mimeXLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+const msgExportVersion = "version — номер опубликованной версии (целое больше 0)"
+
+// ExportScenario — GET /api/scenarios/{id}/export.xlsx?version= → .xlsx формата ТЗ заказчика:
+// лист ТЗ и лист «Корсик — расширения». Без version — черновик, иначе опубликованная версия.
+func (h *Handler) ExportScenario(c *fiber.Ctx) error {
+	id, err := pathID(c)
+	if err != nil {
+		return err
+	}
+	version := 0
+	if v := strings.TrimSpace(c.Query("version")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return errs.NewValidationError(msgExportVersion).
+				WithDetails(errs.FieldError{Field: "version", Code: errs.CodeInvalidFormat, Message: msgExportVersion})
+		}
+		version = n
+	}
+	exp, err := h.services.Scenarios.ExportExcel(c.UserContext(), id, version)
+	if err != nil {
+		return err
+	}
+	c.Set(fiber.HeaderContentType, mimeXLSX)
+	c.Set(fiber.HeaderContentDisposition, contentDisposition(exp.FileName))
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	return c.Send(exp.Data)
+}
+
+// contentDisposition — attachment с ASCII-именем для старых клиентов и UTF-8 по RFC 5987.
+func contentDisposition(name string) string {
+	ascii := strings.Map(func(r rune) rune {
+		if r < 0x20 || r > 0x7e || r == '"' || r == '\\' || r == '/' {
+			return -1
+		}
+		return r
+	}, name)
+	ascii = strings.Join(strings.Fields(ascii), " ")
+	if !strings.ContainsFunc(strings.TrimSuffix(ascii, ".xlsx"), func(r rune) bool {
+		return r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z'
+	}) {
+		ascii = "scenario.xlsx" // кириллица целиком — старым клиентам нейтральное имя
+	}
+	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, ascii, url.PathEscape(name))
 }

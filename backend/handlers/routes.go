@@ -37,6 +37,7 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 	api.Put("/scenarios/:id/steps", h.PutSteps)
 	api.Post("/scenarios/:id/publish", h.PublishScenario)
 	api.Post("/scenarios/:id/import", h.ImportSteps)
+	api.Get("/scenarios/:id/export.xlsx", h.ExportScenario) // v4: экспорт в формат ТЗ (scenario_xlsx_export.go)
 	// v4 — статистика кнопок и последствия публикации (scenario_stats.go).
 	api.Get("/scenarios/:id/stats", h.ScenarioStats)
 	api.Post("/scenarios/:id/publish/preview", h.PublishPreview)
