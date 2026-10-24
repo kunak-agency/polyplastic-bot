@@ -22,6 +22,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import ErrorState from '@/components/common/ErrorState.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import ScenarioStatus from '@/components/scenarios/ScenarioStatus.vue'
+import { DialogContent, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 import StepPanel from '@/components/scenarios/StepPanel.vue'
 import StepsTable from '@/components/scenarios/StepsTable.vue'
 import ScenarioTimeline from '@/components/scenarios/ScenarioTimeline.vue'
@@ -606,7 +607,7 @@ async function onPublish(body: PublishRequest): Promise<void> {
         :saving="savingRules"
         @save="onSaveRules"
       />
-      <div v-else :class="['editor', { 'editor--with-panel': selected }]">
+      <div v-else class="editor">
         <SectionCard body-padding="none">
           <EmptyState
             v-if="steps.length === 0"
@@ -658,34 +659,46 @@ async function onPublish(body: PublishRequest): Promise<void> {
             :issues="issues"
             :legacy="legacy"
             :stats="stats"
-            :compact="!!selected"
+            :compact="false"
             @select="selectedId = $event"
             @move="onMove"
             @insert-after="onInsertAfter"
           />
         </SectionCard>
 
-        <div v-if="selected" class="side">
-          <StepPanel
-            :key="selected.id"
-            v-model:tab="tab"
-            v-model:recipient="recipient"
-            :step="selected"
-            :has-next-in-block="hasNextInBlock"
-            :issues="issues.get(selected.id) ?? []"
-            :stats="stats.get(selected.id) ?? null"
-            :goto-options="gotoOptions"
-            :media-names="mediaNames"
-            :sending="sending"
-            :recipients="recipients"
-            @patch="patchSelected"
-            @remove="removeSelected"
-            @insert-after="onInsertAfter(selected.id)"
-            @close="selectedId = null"
-            @send-test="onSendTest"
-          />
-          <PhonePreview :block="selectedBlock" :selected-id="selected.id" :tab="tab" />
-        </div>
+        <!-- The step opens in a wide modal: the table keeps the full page width,
+             the panel and the phone sit side by side. Esc or a click outside
+             closes it, like the panel's own X. -->
+        <DialogRoot :open="!!selected" @update:open="(v) => !v && (selectedId = null)">
+          <DialogPortal>
+            <DialogOverlay class="modal-backdrop step-modal__overlay">
+              <DialogContent v-if="selected" class="step-modal" :aria-describedby="undefined">
+                <DialogTitle class="sr-only">{{ selected.title }}</DialogTitle>
+                <div class="side">
+                  <StepPanel
+                    :key="selected.id"
+                    v-model:tab="tab"
+                    v-model:recipient="recipient"
+                    :step="selected"
+                    :has-next-in-block="hasNextInBlock"
+                    :issues="issues.get(selected.id) ?? []"
+                    :stats="stats.get(selected.id) ?? null"
+                    :goto-options="gotoOptions"
+                    :media-names="mediaNames"
+                    :sending="sending"
+                    :recipients="recipients"
+                    @patch="patchSelected"
+                    @remove="removeSelected"
+                    @insert-after="onInsertAfter(selected.id)"
+                    @close="selectedId = null"
+                    @send-test="onSendTest"
+                  />
+                  <PhonePreview :block="selectedBlock" :selected-id="selected.id" :tab="tab" />
+                </div>
+              </DialogContent>
+            </DialogOverlay>
+          </DialogPortal>
+        </DialogRoot>
       </div>
 
       <PublishDialog
@@ -750,41 +763,31 @@ async function onPublish(body: PublishRequest): Promise<void> {
   gap: 16px;
   align-items: start;
 }
-.editor--with-panel {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 700px);
+.step-modal__overlay {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 16px;
+  overflow-y: auto;
+}
+.step-modal {
+  width: min(1180px, 100%);
+  outline: none;
 }
 /* Panel and phone side by side; the phone drops under the panel when narrow.
-   The whole side sticks under the top bar: a step clicked at the bottom of a
-   long table opens in view, and the side scrolls inside itself. */
+   The panel scrolls inside itself within the screen height. */
 .side {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-columns: minmax(0, 1fr) 300px;
   gap: 12px;
   align-items: start;
-  align-self: start;
-  position: sticky;
-  top: 68px;
-  max-height: calc(100vh - 84px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
-@media (max-width: 1500px) {
-  .editor--with-panel {
-    grid-template-columns: minmax(0, 1fr) 440px;
-  }
+.side :deep(.panel) {
+  max-height: calc(100vh - 48px);
+}
+@media (max-width: 1000px) {
   .side {
     grid-template-columns: 1fr;
-  }
-}
-@media (max-width: 1100px) {
-  .editor--with-panel {
-    grid-template-columns: 1fr;
-  }
-  /* One column: the panel goes under the table, in the page flow. */
-  .side {
-    position: static;
-    max-height: none;
-    overflow: visible;
   }
 }
 </style>
