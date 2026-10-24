@@ -185,3 +185,10 @@ State: IMPLEMENTING
 Summary: Финальный план после внешнего ресерча принят с 4 поправками; старт волны 0 (схема и флаги).
 Files changed: agency/tasks/2026-10-24-checkpoint-feedback.md, agency/playbook/artifacts/research/2026-10-24-iteration-plan.md
 Next: DB-агент (волна 0)
+
+### Documenter-for-Human — 2026-10-24T~20:00+03:00
+State: IMPLEMENTING (без изменения)
+Summary: Питч и документы для человека обновлены под итерацию 24.10: тизер, слайды и сценарий демо (3 роли + телефон, 2:30 / нарезка 1:30), спич на 3 и 5 минут, 14 новых вопросов жюри, пересчёт критериев (15 → 17 из 21), README («Что умеет», ИИ-инструменты п. 4.3.4, пометка п. 4.3.3).
+Files changed: agency/pitch/teaser.md, agency/pitch/deck.md, agency/pitch/speech.md, agency/pitch/qa.md, agency/system/Human/00-index.md, 02-bot-behaviour.md, 06-hr-cabinet-guide.md, 07-risk-and-escalation.md, 11-limitations-and-roadmap.md, 13-criteria-coverage.md, README.md
+Next: orchestrator
+Notes: Цифр агента H (промпт v2, 60 текстов) в LOG нет — везде только 0,92 на 50. Всё новое, кроме реплаев на проде, помечено «подделка MAX»; после прогона волны 3 на телефоне поправить метки в README, deck §2 и слайде 8. Ограничение обязательного вопроса 48 ч (#27) в документах указано как «в плане».
