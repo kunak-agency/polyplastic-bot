@@ -64,10 +64,6 @@ flowchart TD
     V -->|да| OK["Ответ + «📄 Источник: п. X»"]
     V -->|нет| NO
     GEN -.->|"модель не ответила вовремя"| QUOTE["Дословная цитата пункта"]
-    style OK fill:#e8f5e9
-    style QUOTE fill:#e8f5e9
-    style NO fill:#fff3e0
-    style HUMAN fill:#fff3e0
 ```
 
 ### Шаги простыми словами
