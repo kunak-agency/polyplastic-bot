@@ -9,3 +9,6 @@ __pycache__/
 # Материалы кейса ПОЛИПЛАСТИК (регламенты, ТЗ, презентации) — конфиденциальны, в git не едут
 agency/playbook/artifacts/case/*
 !agency/playbook/artifacts/case/.gitkeep
+
+# Внутренняя кухня команды (планы, ресерчи, питч) — только локально
+agency/
