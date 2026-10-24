@@ -16,9 +16,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// LLM-разметка свободного текста новичка (POST /flags, промпт flags-classify v1). Порядок: regex
-// (pkg/flags) — приоритет и без LLM; не сработал — /flags в фоне, ответ новичку (rag, опрос) её не
-// ждёт. Что делать с флагом, решает код по data/taxonomy.yaml (правило UX 6), а не модель:
+// LLM-разметка свободного текста новичка (POST /flags, промпт flags-classify v2). Порядок: regex
+// (pkg/flags) — приоритет и без LLM, эскалация по нему сразу; /flags — в фоне всегда (и при
+// сработавшем regex), ответ новичку (rag, опрос, «Передаю…») её не ждёт.
+//
+// Сработал regex — модель только дополняет: тон (вместо neg кодом), уверенность в тоне, цитату и
+// строку для HR — в запись текста и в обращение. Слияние: код — максимальная серьёзность,
+// уверенность — максимальная (mergeFlags). Повторной эскалации нет: новые коды модели — только
+// риск и коды в ответе опроса; исключение — F0 (угроза жизни), он идёт обычным путём. Модель
+// degraded — остаётся тон neg по regex. Тон в решении об обращении не участвует нигде.
+// Что делать с флагом, решает код по data/taxonomy.yaml (правило UX 6), а не модель:
 //   - уверенность ниже manual_review_floor — флаг только в агрегатах (коды в ответе опроса);
 //   - escalate_if (severity ≥ 2 или критический код) и уверенность ≥ auto_escalation_threshold
 //     категории — обращение по существующему пути: F5/F9 — сразу, как regex («Передаю…»); F7 —
@@ -59,8 +66,34 @@ type flagInput struct {
 	// Запись создаёт ask в фоне; questionReady закрывается, когда она создана (или не будет).
 	questionID    *uuid.UUID
 	questionReady <-chan struct{}
-	// sentiment — тональность из /flags (domain.Sentiment*): в запись сигнала F5/F7/F9 по LLM.
-	sentiment string
+	// regexCodes — коды regex, по которым эскалация уже была: модель их не эскалирует повторно.
+	regexCodes []string
+	// consent — новичок согласился на обработку сообщений: цитата и строка модели пишутся в
+	// свободный вопрос только тогда (как и сам текст вопроса).
+	consent bool
+	// notes — разметка модели (заполняет llmFlags): в запись сигнала F5/F7/F9 и в обращение.
+	notes *modelNotes
+}
+
+// modelNotes — то, чем модель дополняет разметку (/flags v2): тон и уверенность в нём, цитата,
+// строка для HR. Тон — подсказка: в решении об обращении не участвует.
+type modelNotes struct {
+	tone     string // domain.Sentiment*
+	toneConf *float64
+	quote    string // дословный фрагмент, rag проверил подстроку и ПДн; при F10 пусто
+	summary  string // ≤ 120 символов, без ПДн; при F10 пусто
+}
+
+func notesFrom(r *rag.FlagsResponse) modelNotes {
+	return modelNotes{tone: normSentiment(r.Sentiment), toneConf: r.ToneConfidence,
+		quote: strings.TrimSpace(r.Quote), summary: strings.TrimSpace(r.Summary)}
+}
+
+func nonEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // sentimentWait — сколько разметка ждёт запись вопроса (ask до RAG_ASK_TIMEOUT и позднего окна).
@@ -75,16 +108,19 @@ func normSentiment(s string) string {
 	return domain.SentimentNeu
 }
 
-// saveSentiment — тональность текста в его запись: ответ опроса (eventID) или свободный вопрос
-// (questionID). Разметка /flags — единственный источник тона, кроме regex (там neg кодом).
-func (b *BotService) saveSentiment(ctx context.Context, in flagInput, s string) error {
+// saveMarkup — разметка модели в запись текста: ответ опроса (eventID) или свободный вопрос
+// (questionID). Тон модели заменяет neg, поставленный кодом по regex. У свободного вопроса без
+// согласия — только тон и уверенность (текста вопроса там тоже нет). Обращение из этого вопроса,
+// если уже есть, получает строку модели и цитату (noteQuestionTicket).
+func (b *BotService) saveMarkup(ctx context.Context, in flagInput, m modelNotes) error {
 	if in.eventID != nil {
 		return b.repos.Transaction(ctx, func(tx *repositories.Repos) error {
 			a, err := tx.Events.Answer(ctx, *in.eventID, in.questionNo)
 			if err != nil || a == nil || strings.TrimSpace(a.Text) != strings.TrimSpace(in.text) {
 				return err // текст уже переписан — его разметит следующий вызов
 			}
-			a.Sentiment = &s
+			a.Sentiment, a.ToneConfidence = &m.tone, m.toneConf
+			a.Quote, a.Summary = nonEmpty(m.quote), nonEmpty(m.summary)
 			return tx.Events.UpsertAnswer(ctx, a)
 		})
 	}
@@ -92,6 +128,10 @@ func (b *BotService) saveSentiment(ctx context.Context, in flagInput, s string) 
 		return nil // «свой вариант» ветки: текст живёт в обращении, своей записи нет
 	}
 	id := *in.questionID
+	var quote, summary *string
+	if in.consent {
+		quote, summary = nonEmpty(m.quote), nonEmpty(m.summary)
+	}
 	b.wg.Add(1)
 	go func() {
 		defer b.wg.Done()
@@ -101,13 +141,61 @@ func (b *BotService) saveSentiment(ctx context.Context, in flagInput, s string) 
 			case <-time.After(sentimentWait):
 			}
 		}
-		if ok, err := b.repos.Questions.SetSentiment(ctx, id, s); err != nil {
-			logger.Warn("бот: тональность вопроса %s не сохранена: %v", id, err)
+		if ok, err := b.repos.Questions.SetMarkup(ctx, id, m.tone, m.toneConf, quote, summary); err != nil {
+			logger.Warn("бот: разметка вопроса %s не сохранена: %v", id, err)
+			return
 		} else if !ok {
-			logger.Info("бот: тональность вопроса %s — записи нет, не сохранена", id)
+			logger.Info("бот: разметка вопроса %s — записи нет, не сохранена", id)
+			return
+		}
+		if err := b.noteQuestionTicket(ctx, id, summary, quote); err != nil {
+			logger.Warn("бот: строка модели в обращение по вопросу %s не записана: %v", id, err)
 		}
 	}()
 	return nil
+}
+
+// noteQuestionTicket — обращение, созданное из вопроса qid до прихода разметки (regex F5/F9):
+// строка модели и цитата вместо полного текста. Полный текст остаётся в переписке обращения.
+func (b *BotService) noteQuestionTicket(ctx context.Context, qid uuid.UUID, summary, quote *string) error {
+	if b.tickets == nil || (summary == nil && quote == nil) {
+		return nil
+	}
+	cur, err := b.repos.Tickets.ByQuestion(ctx, qid)
+	if err != nil || cur == nil {
+		return err
+	}
+	return b.repos.Transaction(ctx, func(tx *repositories.Repos) error {
+		t, err := tx.Tickets.ByIDForUpdate(ctx, cur.ID)
+		if err != nil || t == nil {
+			return err
+		}
+		e, err := tx.Employees.ByID(ctx, t.EmployeeID)
+		if err != nil || e == nil {
+			return err
+		}
+		if !setTicketNotes(e, b.tickets.category(t.Category, t.Route), t, summary, quote) {
+			return nil
+		}
+		return tx.Tickets.Save(ctx, t)
+	})
+}
+
+// setTicketNotes — строка модели в SummaryModel и цитата модели в Quote (вместо полного текста:
+// он уже в переписке обращения). Правила те же, что для текста: согласие и store_quote категории
+// (keepText); F10 — без цитаты и строки (rag их и не даёт). false — ничего не поменялось.
+func setTicketNotes(e *domain.Employee, cat taxonomy.Category, t *domain.Ticket, summary, quote *string) bool {
+	changed := false
+	if summary != nil && *summary != "" && consented(e) && cat.StoreQuote {
+		s := *summary
+		t.SummaryModel, changed = &s, true
+	}
+	if quote != nil {
+		if q := keepText(e, cat, *quote); q != "" {
+			t.Quote, changed = &q, true
+		}
+	}
+	return changed
 }
 
 // Что код делает с LLM-флагом.
@@ -188,6 +276,7 @@ func (b *BotService) classifyAsync(ctx context.Context, emp *domain.Employee, in
 	if f == nil || strings.TrimSpace(in.text) == "" {
 		return
 	}
+	in.consent = consented(emp)
 	b.wg.Add(1)
 	go func() {
 		defer b.wg.Done()
@@ -209,12 +298,20 @@ func (b *BotService) llmFlags(ctx context.Context, f RAGFlagger, empID uuid.UUID
 		return nil
 	}
 	if resp.Degraded {
+		// при regex тон уже neg кодом — так и остаётся
 		logger.Warn("бот: rag /flags без LLM (degraded), новичок %s: разметки нет, только regex", empID)
 		return nil
 	}
-	in.sentiment = normSentiment(resp.Sentiment)
-	if err := b.saveSentiment(ctx, in, in.sentiment); err != nil {
-		logger.Warn("бот: тональность новичка %s не сохранена: %v", empID, err)
+	m := notesFrom(resp)
+	in.notes = &m
+	if err := b.saveMarkup(ctx, in, m); err != nil {
+		logger.Warn("бот: разметка новичка %s не сохранена: %v", empID, err)
+	}
+	model := resp.Flags
+	if len(in.regexCodes) > 0 {
+		merged := mergeFlags(in.regexCodes, resp.Flags)
+		logger.Info("бот: regex %v + модель → %s (новичок %s)", in.regexCodes, flagsLog(merged), empID)
+		model = extraFlags(merged, in.regexCodes)
 	}
 	var prev domain.StringList
 	if in.eventID != nil {
@@ -222,14 +319,114 @@ func (b *BotService) llmFlags(ctx context.Context, f RAGFlagger, empID uuid.UUID
 			return err
 		}
 	}
-	ds := decideFlags(b.tickets.tax, resp.Flags, prev)
-	if len(ds) == 0 {
-		return nil
+	ds := decideFlags(b.tickets.tax, model, prev)
+	if len(in.regexCodes) > 0 {
+		ds = noReescalation(ds)
 	}
 	for _, d := range ds {
 		logger.Info("бот: LLM-флаг %s sev %d conf %.2f повтор %v → %s (новичок %s)", d.code, d.severity, d.confidence, d.repeated, d.act, empID)
 	}
-	return b.applyFlagDecisions(ctx, empID, in, ds)
+	if len(ds) > 0 {
+		if err := b.applyFlagDecisions(ctx, empID, in, ds); err != nil {
+			return err
+		}
+	}
+	b.maybeClarify(ctx, empID, in, resp)
+	return nil
+}
+
+// regexSeverity, regexConfidence — regex-кандидат при слиянии: основа слова названа прямо
+// (уверенность 1), серьёзность «мешает» — модель может поднять до 3.
+const (
+	regexSeverity   = 2
+	regexConfidence = 1.0
+)
+
+// mergeFlags — regex и модель в одну разметку: по коду — максимальная серьёзность и
+// максимальная уверенность; порядок — по серьёзности, затем уверенности (первый — итоговый код).
+func mergeFlags(regex []string, model []rag.Flag) []rag.Flag {
+	var out []rag.Flag
+	idx := map[string]int{}
+	add := func(f rag.Flag) {
+		if i, ok := idx[f.Code]; ok {
+			out[i].Severity = max(out[i].Severity, f.Severity)
+			out[i].Confidence = max(out[i].Confidence, f.Confidence)
+			return
+		}
+		idx[f.Code] = len(out)
+		out = append(out, f)
+	}
+	for _, c := range regex {
+		add(rag.Flag{Code: c, Severity: regexSeverity, Confidence: regexConfidence})
+	}
+	for _, f := range model {
+		add(f)
+	}
+	slices.SortStableFunc(out, func(a, b rag.Flag) int {
+		if a.Severity != b.Severity {
+			return b.Severity - a.Severity
+		}
+		switch {
+		case a.Confidence > b.Confidence:
+			return -1
+		case a.Confidence < b.Confidence:
+			return 1
+		}
+		return 0
+	})
+	return out
+}
+
+// extraFlags — флаги слияния, которых не было в regex: только их код ещё обрабатывает.
+func extraFlags(merged []rag.Flag, regex []string) []rag.Flag {
+	var out []rag.Flag
+	for _, f := range merged {
+		if !slices.Contains(regex, f.Code) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// noReescalation — regex уже эскалировал: новые коды модели — только риск и коды в ответе опроса,
+// без второго обращения и второго «Передаю…». Кроме F0: угрозу жизни не глушим.
+func noReescalation(ds []flagDecision) []flagDecision {
+	for i := range ds {
+		if ds[i].act != flagActRisk && ds[i].code != "F0" {
+			ds[i].act = flagActRisk
+		}
+	}
+	return ds
+}
+
+func flagsLog(fs []rag.Flag) string {
+	parts := make([]string, 0, len(fs))
+	for _, f := range fs {
+		parts = append(parts, fmt.Sprintf("%s/%d/%.2f", f.Code, f.Severity, f.Confidence))
+	}
+	return "[" + strings.Join(parts, " ") + "]"
+}
+
+// Уточняющий вопрос по подсказке модели (clarify.go, FEATURE_CLARIFY): уверенность флага этого
+// кода в окне 0,3–0,6 — проблема угадывается, но неясна. Только ответы опроса и не при regex.
+const (
+	clarifyConfMin = 0.3
+	clarifyConfMax = 0.6
+)
+
+func (b *BotService) maybeClarify(ctx context.Context, empID uuid.UUID, in flagInput, resp *rag.FlagsResponse) {
+	hint := resp.Hint()
+	if hint == "" || in.eventID == nil || len(in.regexCodes) > 0 || in.questionNo < 1 {
+		return
+	}
+	for _, f := range resp.Flags {
+		if f.Code == hint && f.Confidence >= clarifyConfMin && f.Confidence <= clarifyConfMax {
+			if b.offerClarify(ctx, empID, *in.eventID, in.questionNo-1, hint) {
+				logger.Info("бот: уточнение %s по подсказке модели (новичок %s, вопрос %d)", hint, empID, in.questionNo)
+			}
+			return
+		}
+	}
 }
 
 // applyFlagDecisions — риск и коды в ответ опроса, затем обращения и сигналы.
@@ -304,8 +501,11 @@ func (b *BotService) applyFlagDecisions(ctx context.Context, empID uuid.UUID, in
 	q := &domain.BotQuestion{EmployeeID: emp.ID, TraceID: newTraceID(), Flags: domain.StringList{}, Sources: domain.SourceList{}, IsTest: emp.IsTest}
 	q.CreatedAt = b.now()
 	q.SourceMID = midOf(in.mid)
-	if in.sentiment != "" {
-		q.Sentiment = strPtr(in.sentiment)
+	if n := in.notes; n != nil {
+		q.Sentiment, q.ToneConfidence = strPtr(n.tone), n.toneConf
+		if consented(emp) {
+			q.Quote, q.Summary = nonEmpty(n.quote), nonEmpty(n.summary)
+		}
 	}
 	if consented(emp) {
 		q.Question = strings.TrimSpace(in.text)
@@ -364,6 +564,12 @@ func (b *BotService) flagTicket(ctx context.Context, emp *domain.Employee, in fl
 		})
 		if err != nil {
 			return err
+		}
+		// строка модели и её цитата — в карточку; полный текст open уже положил в переписку
+		if n := in.notes; created && n != nil && setTicketNotes(e, d.cat, t, nonEmpty(n.summary), nonEmpty(n.quote)) {
+			if err := tx.Tickets.Save(ctx, t); err != nil {
+				return err
+			}
 		}
 		res = handoffResult{ticket: t, created: created, lead: flagLead(e, d.code), replyTo: in.mid}
 		return nil

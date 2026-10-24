@@ -75,7 +75,7 @@ def test_flags_without_llm_degraded(client):
     flags.reset_classifier(None)
     r = client.post("/flags", json={"text": "наставник третью смену не объясняет", "context": "pulse_d5"})
     assert r.status_code == 200
-    assert r.json() == {"flags": [], "sentiment": "neu", "quote": "", "degraded": True}
+    assert r.json() == {"flags": [], "sentiment": "neu", "quote": "", "degraded": True, "tone_confidence": None, "summary": "", "clarify_hint": None}
 
 
 def test_flags_validation(client):

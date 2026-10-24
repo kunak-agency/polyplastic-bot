@@ -30,6 +30,23 @@ func (r *QuestionRepo) SetSentiment(ctx context.Context, id uuid.UUID, s string)
 	return res.RowsAffected > 0, res.Error
 }
 
+// SetMarkup — разметка /flags v2 в запись вопроса: тон, уверенность в тоне, цитата, строка для HR.
+// nil-поля не трогаются. false — записи нет.
+func (r *QuestionRepo) SetMarkup(ctx context.Context, id uuid.UUID, sentiment string, toneConf *float64, quote, summary *string) (bool, error) {
+	upd := map[string]any{"sentiment": sentiment}
+	if toneConf != nil {
+		upd["tone_confidence"] = *toneConf
+	}
+	if quote != nil {
+		upd["quote"] = *quote
+	}
+	if summary != nil {
+		upd["summary"] = *summary
+	}
+	res := r.db.WithContext(ctx).Model(&domain.BotQuestion{}).Where("id = ?", id).Updates(upd)
+	return res.RowsAffected > 0, res.Error
+}
+
 func (r *QuestionRepo) ByID(ctx context.Context, id uuid.UUID) (*domain.BotQuestion, error) {
 	var q domain.BotQuestion
 	return ignoreNotFound(&q, r.db.WithContext(ctx).First(&q, "id = ?", id).Error)

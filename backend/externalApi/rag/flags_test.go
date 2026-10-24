@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -57,5 +58,34 @@ func TestFlagsErrors(t *testing.T) {
 	}
 	if FlagsContextPulse(-3) != "pulse_d0" {
 		t.Fatal("отрицательный день — pulse_d0")
+	}
+}
+
+// v2: tone_confidence, summary, clarify_hint; ответ старого rag без них — нулевые значения.
+func TestFlagsV2Fields(t *testing.T) {
+	body := `{"flags":[],"sentiment":"neg","quote":"","degraded":false,"tone_confidence":1.4,"summary":"` +
+		strings.Repeat("я", 130) + `","clarify_hint":"F4"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+	defer srv.Close()
+	resp, err := New(srv.URL, time.Second).Flags(context.Background(), FlagsRequest{Text: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.ToneConfidence != nil || len([]rune(resp.Summary)) != 120 || resp.Hint() != "F4" {
+		t.Fatalf("%+v", resp)
+	}
+	body = `{"flags":[],"sentiment":"neu","quote":"","degraded":false,"tone_confidence":0.6,"summary":"Новичок спрашивает о графике.","clarify_hint":null}`
+	if resp, err = New(srv.URL, time.Second).Flags(context.Background(), FlagsRequest{Text: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if resp.ToneConfidence == nil || *resp.ToneConfidence != 0.6 || resp.Summary != "Новичок спрашивает о графике." || resp.Hint() != "" {
+		t.Fatalf("%+v", resp)
+	}
+	body = `{"flags":[],"sentiment":"neu","quote":"","degraded":false}`
+	if resp, err = New(srv.URL, time.Second).Flags(context.Background(), FlagsRequest{Text: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if resp.ToneConfidence != nil || resp.Summary != "" || resp.Hint() != "" {
+		t.Fatalf("старый rag: %+v", resp)
 	}
 }

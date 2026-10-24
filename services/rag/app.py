@@ -247,6 +247,11 @@ class FlagsResponse(BaseModel):
     quote: str
     # true — LLM не задан, не ответил или дважды ответил не по схеме: «не размечено», а не «флагов нет»
     degraded: bool = False
+    # v2 (flags-classify): уверенность в тоне 0–1 (null — модель не дала), строка для HR ≤ 120
+    # символов без ПДн (при F10 пусто), код категории для уточняющего вопроса или null
+    tone_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    summary: str = ""
+    clarify_hint: Literal["F1", "F2", "F3", "F4", "F6", "F8"] | None = None
 
 
 @app.post("/flags", response_model=FlagsResponse)

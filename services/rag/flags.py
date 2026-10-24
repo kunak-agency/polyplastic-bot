@@ -1,4 +1,4 @@
-"""Разметка текста новичка по таксономии F0–F10 (POST /flags) — промпт flags-classify v1.
+"""Разметка текста новичка по таксономии F0–F10 (POST /flags) — промпт flags-classify v2.
 
 Промпт не вшит в код: system, шаблон user, JSON-схема и few-shot читаются из
 `prompts/flags-classify.md` — копии источника истины `agency/prompts/flags-classify.md`
@@ -8,6 +8,9 @@
 LLM только размечает. Маршрут, порог, эскалацию и видимость решает Go по `data/taxonomy.yaml`.
 Здесь — проверки кодом (п. E промпта): код из таксономии, severity 1–3, confidence 0–1 и
 не ниже 0.3, quote — дословная подстрока текста, у F10 и при ПДн quote пустой.
+v2: tone_confidence (0–1 или None), summary (без телефона, почты, паспорта; ≤ 120 символов; при
+F10 пусто), clarify_hint (F1/F2/F3/F4/F6/F8 или None). Нет новых полей в ответе модели — они
+пустые, ответ валиден (совместимость с v1).
 
 Карточка T-lite: temperature и presence_penalty в каждом запросе — их ставит build_payload().
 LLM не задан, не ответил или дважды ответил не по схеме → пустая разметка с degraded=true:
@@ -33,7 +36,7 @@ from textnorm import is_quote_in
 log = logging.getLogger("rag.flags")
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "flags-classify.md"
-PROMPT_VERSION = "v1"  # должна совпадать с «Версия: **v1**» в prompts/flags-classify.md
+PROMPT_VERSION = "v2"  # должна совпадать с «Версия: **v2**» в prompts/flags-classify.md
 
 # Таксономия: TAXONOMY_PATH или data/taxonomy.yaml из корня репозитория. В Docker-образе файла
 # нет — тогда коды берутся из enum схемы промпта (тест сверяет их с таксономией).
@@ -48,6 +51,11 @@ MAX_QUOTE_CHARS = 150
 SENTIMENTS = ("neg", "neu", "pos")
 CONTEXTS_DEFAULT = "free_text"
 NO_QUOTE_CODES = {"F10"}  # личное и здоровье: категория есть, цитаты нет
+MAX_SUMMARY_CHARS = 120
+# уточняющий вопрос — только для категорий с шаблоном уточнения (ресерч 2026-10-24, #6)
+CLARIFY_CODES = {"F1", "F2", "F3", "F4", "F6", "F8"}
+# при этих кодах уточнение не задаётся: свои сценарии (помощь, «Передать», без вопросов)
+NO_CLARIFY_CODES = {"F0", "F5", "F7", "F9", "F10"}
 
 # ПДн в цитате (п. E): телефон, e-mail, паспорт — цитата обнуляется.
 _PII = (
@@ -158,7 +166,7 @@ class FlagsConfig:
     temperature: float = 0.1
     presence_penalty: float = 1.0
     top_p: float = 0.8
-    max_tokens: int = 200
+    max_tokens: int = 320
     timeout_s: float = 10.0
     structured: str = "json_schema"
 
@@ -182,7 +190,7 @@ class FlagsConfig:
             temperature=float(os.getenv("FLAGS_TEMPERATURE", "0.1")),
             presence_penalty=float(os.getenv("FLAGS_PRESENCE_PENALTY", os.getenv("LLM_PRESENCE_PENALTY", "1.0"))),
             top_p=float(os.getenv("FLAGS_TOP_P", "0.8")),
-            max_tokens=int(os.getenv("FLAGS_MAX_TOKENS", "200")),
+            max_tokens=int(os.getenv("FLAGS_MAX_TOKENS", "320")),
             timeout_s=float(os.getenv("FLAGS_TIMEOUT_S", "10")),
             structured=os.getenv("LLM_STRUCTURED", "json_schema"),
         )
@@ -235,9 +243,13 @@ class FlagsResult:
     sentiment: str = "neu"
     quote: str = ""
     degraded: bool = False
+    tone_confidence: float | None = None
+    summary: str = ""
+    clarify_hint: str | None = None
 
     def as_dict(self) -> dict:
-        return {"flags": self.flags, "sentiment": self.sentiment, "quote": self.quote, "degraded": self.degraded}
+        return {"flags": self.flags, "sentiment": self.sentiment, "quote": self.quote, "degraded": self.degraded,
+                "tone_confidence": self.tone_confidence, "summary": self.summary, "clarify_hint": self.clarify_hint}
 
 
 def degraded() -> FlagsResult:
@@ -249,6 +261,37 @@ _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
 def _has_pii(s: str) -> bool:
     return any(p.search(s) for p in _PII)
+
+
+def clean_summary(summary, flags: list[dict]) -> str:
+    """summary модели → строка для HR: одна строка, без телефона, почты, паспорта, ≤ 120
+    символов (по слову, с «…»); при F10 — пусто."""
+    if not isinstance(summary, str) or any(f["code"] in NO_QUOTE_CODES for f in flags):
+        return ""
+    s = summary
+    for p in _PII:
+        s = p.sub(" ", s)
+    s = re.sub(r"\s+", " ", s).strip(" ,;:—-")
+    s = re.sub(r"\s+([,.;:!?])", r"\1", s).strip()
+    if len(s) > MAX_SUMMARY_CHARS:
+        cut = s[: MAX_SUMMARY_CHARS - 1]
+        if " " in cut[MAX_SUMMARY_CHARS // 2:]:
+            cut = cut[: cut.rfind(" ")]
+        s = cut.rstrip(" ,;:—-") + "…"
+    return s
+
+
+def clean_tone_confidence(v) -> float | None:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    return round(min(1.0, max(0.0, float(v))), 3)
+
+
+def clean_clarify_hint(v, flags: list[dict]) -> str | None:
+    code = str(v or "").strip().upper()
+    if code not in CLARIFY_CODES or any(f["code"] in NO_CLARIFY_CODES for f in flags):
+        return None
+    return code
 
 
 def postprocess(content: str, text: str, codes: tuple[str, ...]) -> FlagsResult:
@@ -292,7 +335,10 @@ def postprocess(content: str, text: str, codes: tuple[str, ...]) -> FlagsResult:
     if (not flags or any(f["code"] in NO_QUOTE_CODES for f in flags) or len(quote) > MAX_QUOTE_CHARS
             or not is_quote_in(quote, text) or _has_pii(quote)):
         quote = ""
-    return FlagsResult(flags=flags, sentiment=sentiment, quote=quote)
+    return FlagsResult(flags=flags, sentiment=sentiment, quote=quote,
+                       tone_confidence=clean_tone_confidence(data.get("tone_confidence")),
+                       summary=clean_summary(data.get("summary"), flags),
+                       clarify_hint=clean_clarify_hint(data.get("clarify_hint"), flags))
 
 
 # --- клиент ---

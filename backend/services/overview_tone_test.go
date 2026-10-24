@@ -119,11 +119,12 @@ func TestToneSavedForFreeQuestion(t *testing.T) {
 	}
 }
 
-// Regex F7: модель не вызывается, тон ставит код — neg.
+// Regex F7, модель degraded: тон ставит код — neg (как до v2).
 func TestToneRegexIsNegative(t *testing.T) {
-	e, f, c := flagsEnv(t, `{"flags":[],"sentiment":"pos","quote":""}`)
+	e, f, c := flagsEnv(t, `{"flags":[],"sentiment":"neu","quote":"","degraded":true}`)
 	e.ask("думаю уволиться")
-	if n := len(f.flagRequests()); n != 0 {
+	e.svc.Bot.Wait()
+	if n := len(f.flagRequests()); n != 1 {
 		t.Fatalf("/flags при regex: %d", n)
 	}
 	qs, _ := e.repos.Questions.Recent(context.Background(), c.Employee.ID, time.Time{}, 5)

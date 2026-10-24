@@ -1,4 +1,4 @@
-"""POST /flags: промпт flags-classify v1 на фейковом LLM (httpx.MockTransport).
+"""POST /flags: промпт flags-classify v2 на фейковом LLM (httpx.MockTransport).
 
 Настоящая модель не вызывается: все тексты и ответы LLM синтетические.
 """
@@ -64,15 +64,32 @@ def test_prompt_copy_matches_source_of_truth():
     assert copy.few_shot == src.few_shot
 
 
-def test_prompt_v1_parsed():
+def test_prompt_v2_parsed():
     p = load_prompt()
-    assert p.version == "v1"
+    assert p.version == "v2"
     assert p.system.startswith("Ты — разметчик")
     assert len(p.few_shot) == 8
-    assert p.few_shot[6].user.split("\n")[1].startswith("Вопрос опроса:")
+    assert p.few_shot[7].user.split("\n")[1].startswith("Вопрос опроса:")
+    assert sum(s.user.startswith("Контекст: voice") for s in p.few_shot) == 2
+    req = set(p.schema["required"])
+    assert {"flags", "sentiment", "quote"} <= req  # старые поля остались
+    assert {"tone_confidence", "summary", "clarify_hint"} <= req
     for shot in p.few_shot:
         assert shot.user.startswith("Контекст: ") and shot.user.endswith("</text>")
-        json.loads(shot.assistant)
+        a = json.loads(shot.assistant)
+        assert set(a) == set(p.schema["properties"])
+        assert len(a["summary"]) <= flags.MAX_SUMMARY_CHARS
+        if any(f["code"] == "F10" for f in a["flags"]):
+            assert a["summary"] == "" and a["quote"] == ""
+    # «спокойно: неделю нет 1С» — F2 и neg
+    one_c = json.loads(p.few_shot[0].assistant)
+    assert "1С" in p.few_shot[0].user and one_c["sentiment"] == "neg" and one_c["flags"][0]["code"] == "F2"
+
+
+def test_few_shot_not_in_eval_gold():
+    from eval.flags_eval import load_gold
+    shots = {s.user.split("<text>")[1].removesuffix("</text>") for s in load_prompt().few_shot}
+    assert not shots & {r["text"] for r in load_gold()}
 
 
 def test_schema_codes_match_taxonomy():
@@ -88,7 +105,7 @@ def test_every_request_has_sampling(mode):
     cfg = FlagsConfig(base_url="http://x/v1", api_key=None, model="m", structured=mode)
     p = build_payload(cfg, "текст", "free_text")
     assert p["temperature"] == 0.1 and p["presence_penalty"] == 1.0 and p["top_p"] == 0.8
-    assert p["max_tokens"] == 200
+    assert p["max_tokens"] == 320
     if mode == "json_schema":
         assert p["response_format"]["json_schema"]["schema"]["properties"]["flags"]["maxItems"] == 3
     elif mode == "structured_outputs":
@@ -188,7 +205,7 @@ def test_invalid_twice_degraded():
     fake = FakeLLM("не json", '{"flags": "F2"}')
     res = make(fake).classify("нет пропуска")
     assert len(fake.requests) == 2
-    assert res.as_dict() == {"flags": [], "sentiment": "neu", "quote": "", "degraded": True}
+    assert res.as_dict() == {"flags": [], "sentiment": "neu", "quote": "", "degraded": True, "tone_confidence": None, "summary": "", "clarify_hint": None}
 
 
 def test_truncated_answer_retried():
@@ -204,7 +221,7 @@ def test_llm_down_degraded_without_retry():
 
 def test_no_llm_configured_degraded():
     res = FlagsClassifier(None).classify("нет пропуска")
-    assert res.as_dict() == {"flags": [], "sentiment": "neu", "quote": "", "degraded": True}
+    assert res.as_dict() == {"flags": [], "sentiment": "neu", "quote": "", "degraded": True, "tone_confidence": None, "summary": "", "clarify_hint": None}
 
 
 def test_empty_text_not_degraded():
@@ -229,7 +246,8 @@ def test_endpoint_with_fake_llm(api):
     body = r.json()
     assert body == {"flags": [{"code": "F7", "severity": 3, "confidence": 0.9},
                               {"code": "F4", "severity": 2, "confidence": 0.85}],
-                    "sentiment": "neg", "quote": "я уже резюме обновил", "degraded": False}
+                    "sentiment": "neg", "quote": "я уже резюме обновил", "degraded": False,
+                    "tone_confidence": None, "summary": "", "clarify_hint": None}
     assert "Вопрос опроса: Как дела с наставником?" in fake.payloads[0]["messages"][-1]["content"]
 
 
@@ -237,8 +255,75 @@ def test_endpoint_without_llm_degraded(api):
     flags.reset_classifier(FlagsClassifier(None))
     r = api.post("/flags", json={"text": "пропуск не работает", "context": "free_text"})
     assert r.status_code == 200
-    assert r.json() == {"flags": [], "sentiment": "neu", "quote": "", "degraded": True}
+    assert r.json() == {"flags": [], "sentiment": "neu", "quote": "", "degraded": True, "tone_confidence": None, "summary": "", "clarify_hint": None}
 
 
 def test_endpoint_rejects_bad_context(api):
     assert api.post("/flags", json={"text": "x", "context": "email"}).status_code == 422
+
+
+# --- v2: tone_confidence, summary, clarify_hint ---
+
+def v2(flags_, sentiment="neg", quote="", **extra):
+    a = ans(flags_, sentiment, quote)
+    a.update(extra)
+    return a
+
+
+def test_v2_fields_parsed():
+    fake = FakeLLM(v2([("F2", 2, 0.5)], tone_confidence=0.7, summary="Новичок неделю без пропуска.", clarify_hint="f2"))
+    res = make(fake).classify("пропуск не работает неделю")
+    assert res.tone_confidence == 0.7 and res.summary == "Новичок неделю без пропуска." and res.clarify_hint == "F2"
+
+
+def test_v1_answer_still_valid():
+    res = make(FakeLLM(ans([("F2", 2, 0.9)]))).classify("нет пропуска")
+    assert not res.degraded and res.tone_confidence is None and res.summary == "" and res.clarify_hint is None
+
+
+def test_tone_confidence_clamped():
+    res = make(FakeLLM(v2([], tone_confidence=1.7))).classify("всё ок")
+    assert res.tone_confidence == 1.0
+    res = make(FakeLLM(v2([], tone_confidence="high"))).classify("всё ок")
+    assert res.tone_confidence is None
+
+
+def test_summary_pii_removed_and_one_line():
+    s = "Новичок просит перезвонить на +7 912 345-67-89\nили написать ivan@mail.ru, паспорт 4510 123456."
+    res = make(FakeLLM(v2([("F3", 2, 0.8)], summary=s))).classify("руководитель не отвечает")
+    assert "912" not in res.summary and "@" not in res.summary and "123456" not in res.summary
+    assert "\n" not in res.summary and res.summary.startswith("Новичок просит перезвонить")
+
+
+def test_summary_trimmed_to_120():
+    s = "Новичок сообщает, что " + "смены по двенадцать часов без выходных " * 6
+    res = make(FakeLLM(v2([("F6", 2, 0.8)], summary=s))).classify("смены по 12 часов")
+    assert len(res.summary) <= 120 and res.summary.endswith("…")
+
+
+def test_summary_empty_for_f10():
+    res = make(FakeLLM(v2([("F10", 1, 0.9)], summary="Новичок на больничном."))).classify("я на больничном")
+    assert res.summary == ""
+
+
+@pytest.mark.parametrize("hint,codes,want", [
+    ("F4", [("F4", 1, 0.5)], "F4"),
+    ("", [("F4", 1, 0.5)], None),
+    ("F7", [("F7", 2, 0.5)], None),         # не из шаблонов уточнения
+    ("F2", [("F2", 1, 0.5), ("F5", 2, 0.8)], None),  # F5 — только «Передать»
+    ("F99", [], None),
+])
+def test_clarify_hint(hint, codes, want):
+    res = make(FakeLLM(v2(codes, clarify_hint=hint))).classify("текст новичка")
+    assert res.clarify_hint == want
+
+
+def test_endpoint_v2_fields(api):
+    fake = FakeLLM(v2([("F4", 1, 0.5)], sentiment="neg", tone_confidence=0.6,
+                      summary="Новичку сложно с напарником.", clarify_hint="F4"))
+    flags.reset_classifier(make(fake))
+    r = api.post("/flags", json={"text": "с напарником как-то не очень", "context": "voice"})
+    body = r.json()
+    assert body["tone_confidence"] == 0.6 and body["summary"] == "Новичку сложно с напарником." and body["clarify_hint"] == "F4"
+    assert fake.payloads[0]["messages"][-1]["content"].startswith("Контекст: voice")
+    assert "Контекст: voice" in fake.payloads[0]["messages"][0]["content"] or "voice" in fake.payloads[0]["messages"][0]["content"]

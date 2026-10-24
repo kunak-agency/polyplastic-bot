@@ -111,15 +111,35 @@ func TestLLMFlagAboveThresholdOpensTicket(t *testing.T) {
 	}
 }
 
-// Regex в приоритете: при сработавшем regex /flags не вызывается.
-func TestLLMFlagsSkippedWhenRegexFires(t *testing.T) {
-	e, f, _ := flagsEnv(t, `{"flags":[{"code":"F4","severity":3,"confidence":0.9}],"sentiment":"neg","quote":""}`)
+// Regex в приоритете: эскалация по нему, /ask не зовётся; /flags — в фоне (v2), но новые коды
+// модели повторной эскалации не дают: F4 выше порога — только риск, обращения нет.
+func TestLLMFlagsRegexFiresModelOnlyEnriches(t *testing.T) {
+	e, f, c := flagsEnv(t, `{"flags":[{"code":"F4","severity":3,"confidence":0.9}],"sentiment":"neu","tone_confidence":0.7,"quote":"думаю уволиться","summary":"Новичок думает об увольнении.","clarify_hint":null}`)
 	e.ask("думаю уволиться")
-	if n := len(f.flagRequests()); n != 0 {
-		t.Fatalf("/flags вызван при regex: %d", n)
+	e.svc.Bot.Wait()
+	if n := len(f.flagRequests()); n != 1 {
+		t.Fatalf("/flags при regex: %d", n)
 	}
 	if n := len(f.requests()); n != 0 {
 		t.Fatalf("в rag /ask %d", n)
+	}
+	if n := len(e.tickets(t, c.Employee.ID)); n != 0 {
+		t.Fatalf("повторная эскалация: обращений %d", n)
+	}
+	offers := 0
+	for _, m := range e.fake.Sent() {
+		if strings.HasPrefix(m.Text, "Слышу вас") {
+			offers++
+		}
+	}
+	if offers != 1 {
+		t.Fatalf("предложений F7 %d", offers)
+	}
+	qs, _ := e.repos.Questions.Recent(context.Background(), c.Employee.ID, time.Time{}, 5)
+	if len(qs) != 1 || qs[0].Kind != domain.QuestionFlag || qs[0].Sentiment == nil || *qs[0].Sentiment != domain.SentimentNeu ||
+		qs[0].Summary == nil || *qs[0].Summary != "Новичок думает об увольнении." || qs[0].Quote == nil ||
+		qs[0].ToneConfidence == nil || *qs[0].ToneConfidence != 0.7 {
+		t.Fatalf("запись сигнала: %+v", qs)
 	}
 }
 

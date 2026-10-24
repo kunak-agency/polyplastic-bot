@@ -20,8 +20,9 @@ import (
 )
 
 // Свободный вопрос новичка → rag-сервис → ответ с источником или честный отказ (итерация 2,
-// UX-спецификация п. 2.5). Порядок: regex-флаги (pkg/flags) — если сработали, в rag не идём и
-// отвечаем по правилу трёх шагов (п. 2.7); иначе POST /ask.
+// UX-спецификация п. 2.5). Порядок: regex-флаги (pkg/flags) — если сработали, в /ask не идём и
+// отвечаем по правилу трёх шагов (п. 2.7), а /flags всё равно зовём в фоне (тон, строка для HR,
+// цитата — bot_flags.go); иначе POST /ask и /flags параллельно.
 //
 // Текст вопроса и ответа в лог не пишем: только id записи, вид ответа и trace_id.
 
@@ -62,11 +63,27 @@ func (b *BotService) question(ctx context.Context, u max.Update, emp *domain.Emp
 		q.Question = text
 	}
 
+	// голосовое (распознано в bot_voice.go) — модели контекст voice: паразиты, обрывы, без пунктуации
+	flagsCtx := rag.FlagsContextFreeText
+	if len(u.Audio) > 0 {
+		flagsCtx = rag.FlagsContextVoice
+	}
 	if codes := flags.Codes(text); codes != nil {
-		// regex F5/F7/F9 — модель не вызывается, тональность ставим кодом: текст с «уволюсь»,
-		// «ударил», «взятка» честно негативный (без отдельного вызова /flags ради тона).
+		// regex F5/F7/F9 — эскалация сразу, тон пока neg кодом: текст с «уволюсь», «ударил»,
+		// «взятка» честно негативный. Модель — в фоне после ответа: тон, строка для HR и цитата
+		// в запись и обращение; повторной эскалации она не делает (bot_flags.go). Модель degraded —
+		// тон остаётся neg.
 		q.Sentiment = strPtr(domain.SentimentNeg)
-		return b.flagSignal(ctx, to, emp, q, codes, flagViaRegex)
+		if id, err := uuid.NewV7(); err == nil {
+			q.ID = id
+		}
+		if err := b.flagSignal(ctx, to, emp, q, codes, flagViaRegex); err != nil {
+			return err
+		}
+		qid := q.ID
+		b.classifyAsync(ctx, emp, flagInput{text: text, context: flagsCtx, where: "в сообщении новичка", mid: u.MessageID,
+			questionID: &qid, regexCodes: codes})
+		return nil
 	}
 	if err := b.touch(ctx, emp.ID, nil); err != nil {
 		return err
@@ -78,7 +95,7 @@ func (b *BotService) question(ctx context.Context, u max.Update, emp *domain.Emp
 	}
 	ready := make(chan struct{})
 	qid := q.ID
-	b.classifyAsync(ctx, emp, flagInput{text: text, context: rag.FlagsContextFreeText, where: "в сообщении новичка", mid: u.MessageID,
+	b.classifyAsync(ctx, emp, flagInput{text: text, context: flagsCtx, where: "в сообщении новичка", mid: u.MessageID,
 		questionID: &qid, questionReady: ready})
 	// rag отвечает до RAG_ASK_TIMEOUT: ждём в фоне, чтобы не держать чтение апдейтов остальных.
 	b.wg.Add(1)
@@ -90,6 +107,15 @@ func (b *BotService) question(ctx context.Context, u max.Update, emp *domain.Emp
 		}
 	}()
 	return nil
+}
+
+// saveQuestionNotes — новое обращение из вопроса q: строка модели и цитата модели из разметки
+// вопроса (/flags v2), если она уже пришла; иначе их допишет noteQuestionTicket, когда придёт.
+func saveQuestionNotes(ctx context.Context, tx *repositories.Repos, e *domain.Employee, cat taxonomy.Category, t *domain.Ticket, created bool, q *domain.BotQuestion) error {
+	if !created || t == nil || !setTicketNotes(e, cat, t, q.Summary, q.Quote) {
+		return nil
+	}
+	return tx.Tickets.Save(ctx, t)
 }
 
 func newTraceID() string {
@@ -158,6 +184,9 @@ func (b *BotService) flagSignal(ctx context.Context, to recipient, emp *domain.E
 			what: fmt.Sprintf("Сработал сигнал %s %s, передано сразу.", strings.Join(codes, ", "), via),
 		})
 		if err != nil {
+			return err
+		}
+		if err := saveQuestionNotes(ctx, tx, e, cat, t, created, q); err != nil {
 			return err
 		}
 		res = handoffResult{ticket: t, created: created}
@@ -481,6 +510,9 @@ func (b *BotService) flagDetails(ctx context.Context, u max.Update, emp *domain.
 		if err != nil {
 			return err
 		}
+		if err := saveQuestionNotes(ctx, tx, e, cat, t, created, q); err != nil {
+			return err
+		}
 		if keep := keepText(e, cat, text); keep != "" {
 			if err := tx.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgNewcomer, Text: keep}); err != nil {
 				return err
@@ -623,6 +655,9 @@ func (b *BotService) questionCallback(ctx context.Context, u max.Update, emp *do
 			}
 			t, created, err := b.tickets.open(ctx, tx, emp, d)
 			if err != nil {
+				return err
+			}
+			if err := saveQuestionNotes(ctx, tx, emp, cat, t, created, q); err != nil {
 				return err
 			}
 			if prefix == preQChat && created { // «связаться с рекрутером» (r69) — сразу переписка

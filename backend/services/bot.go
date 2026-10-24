@@ -728,18 +728,18 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 			}
 			answer.Text = act.text
 			codes := flags.Codes(act.text)
-			answer.Sentiment = nil // новый текст — тональность разметит /flags (bot_flags.go)
+			// новый текст — разметит /flags (bot_flags.go), старая разметка не годится
+			answer.Sentiment, answer.ToneConfidence, answer.Quote, answer.Summary = nil, nil, nil, nil
 			if codes != nil {
 				answer.Flags = codes
-				// regex F5/F7/F9 — модель не вызывается; текст с «уволюсь», «ударил», «взятка» честно
-				// негативный, тональность ставим кодом без LLM.
+				// regex F5/F7/F9 — риск сразу, тон пока neg кодом; модель в фоне заменит тон и
+				// добавит строку для HR, цитату и свои коды (без повторной эскалации).
 				answer.Sentiment = strPtr(domain.SentimentNeg)
 				markRisk(e, domain.RiskRed, "сигнал "+strings.Join(codes, ", ")+" в ответе на опрос")
-			} else {
-				evID := ev.ID
-				out.flag = &flagInput{text: act.text, context: rag.FlagsContextPulse(ev.DayOffset), surveyQuestion: q.Text,
-					eventID: &evID, questionNo: st.Q + 1, where: "в ответе на опрос «" + step.Title + "»"}
 			}
+			evID := ev.ID
+			out.flag = &flagInput{text: act.text, context: rag.FlagsContextPulse(ev.DayOffset), surveyQuestion: q.Text,
+				eventID: &evID, questionNo: st.Q + 1, where: "в ответе на опрос «" + step.Title + "»", regexCodes: codes}
 			if len(st.Results) > st.Q {
 				st.Results[st.Q].Wrote = true
 				out.clarifyQ, out.clarifyCode = qi, textClarify(sv, q, st.Results[st.Q], act.text, codes)
@@ -932,6 +932,9 @@ func (b *BotService) message(ctx context.Context, u max.Update) error {
 		}
 		b.deliverEdit(ctx, out)
 		if out.flag != nil {
+			if len(u.Audio) > 0 { // распознанное голосовое: модели контекст voice
+				out.flag.context = rag.FlagsContextVoice
+			}
 			b.classifyAsync(ctx, emp, *out.flag)
 		}
 		b.afterSurvey(ctx, emp.ID, out)
