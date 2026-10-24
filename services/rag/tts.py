@@ -39,8 +39,12 @@ from tts_normalize import normalize, split_sentences
 
 log = logging.getLogger("rag.tts")
 
-SAMPLE_RATE = 8000
-MEDIA_TYPE = f"audio/L16;rate={SAMPLE_RATE};channels=1"
+SAMPLE_RATE = 8000  # по умолчанию; звонок просит 24000 — полное качество голоса
+RATES = (8000, 24000, 48000)  # что умеют и Silero, и Google LINEAR16
+
+
+def media_type(rate: int) -> str:
+    return f"audio/L16;rate={rate};channels=1"
 MAX_TEXT_CHARS = 1000
 FALLBACK_SPEAKER = "eugene"
 WARMUP_TEXT = "Здравствуйте! Это проверка синтеза речи."
@@ -78,11 +82,11 @@ class Engine:
         log.info("tts: %s загружена за %.2f с, прогрев %.2f с, голос=%s, device=%s",
                  self.model_path.name, t1 - t0, time.perf_counter() - t1, self.speaker, self.device)
 
-    def synth(self, text: str, speaker: str) -> bytes:
+    def synth(self, text: str, speaker: str, rate: int = SAMPLE_RATE) -> bytes:
         import torch
 
         with self.lock, torch.inference_mode():
-            audio = self.model.apply_tts(text=text, speaker=speaker, sample_rate=SAMPLE_RATE,
+            audio = self.model.apply_tts(text=text, speaker=speaker, sample_rate=rate,
                                          put_accent=True, put_yo=True)
         pcm = (audio.detach().cpu().clamp(-1.0, 1.0) * 32767.0).to(torch.int16)
         return pcm.numpy().astype("<i2", copy=False).tobytes()  # PCM16LE
@@ -106,11 +110,12 @@ class GoogleTTS:
     def enabled(self) -> bool:
         return bool(self.key)
 
-    def synth(self, text: str) -> bytes:
+    def synth(self, text: str, rate: int = SAMPLE_RATE) -> bytes:
         body = json.dumps({
             "input": {"text": text},
             "voice": {"languageCode": self.voice[:5], "name": self.voice},
-            "audioConfig": {"audioEncoding": "LINEAR16", "sampleRateHertz": SAMPLE_RATE},
+            "audioConfig": {"audioEncoding": "LINEAR16", "sampleRateHertz": rate,
+                            "effectsProfileId": ["headphone-class-device"]},
         }).encode()
         req = urllib.request.Request(self.URL, data=body, headers={
             "Content-Type": "application/json", "X-Goog-Api-Key": self.key})
@@ -159,6 +164,7 @@ router = APIRouter()
 class TTSRequest(BaseModel):
     text: str = Field(max_length=MAX_TEXT_CHARS)
     speaker: str | None = Field(default=None, max_length=32)
+    sample_rate: int = SAMPLE_RATE
 
 
 @router.post("/tts")
@@ -167,6 +173,9 @@ def tts(req: TTSRequest):
         raise HTTPException(status_code=503, detail="tts model is not ready")
     if not req.text.strip():
         raise HTTPException(status_code=400, detail="text is empty")
+    rate = req.sample_rate
+    if rate not in RATES:
+        raise HTTPException(status_code=400, detail=f"sample_rate: one of {RATES}")
     speaker = req.speaker or engine.speaker
     if engine.speakers and speaker not in engine.speakers:
         if google.enabled:
@@ -177,7 +186,7 @@ def tts(req: TTSRequest):
     if not chunks:
         raise HTTPException(status_code=400, detail="text has nothing to pronounce")
     # Google: все предложения сразу, параллельно; ждём по порядку.
-    futures = [google.pool.submit(google.synth, c) for c in chunks] if google.enabled else None
+    futures = [google.pool.submit(google.synth, c, rate) for c in chunks] if google.enabled else None
 
     def one(i: int, chunk: str) -> bytes:
         if futures is not None:
@@ -187,7 +196,7 @@ def tts(req: TTSRequest):
                 log.warning("tts: google не ответил на предложение %d/%d: %s — Silero", i + 1, len(chunks), exc)
                 if not engine.ready:
                     raise
-        return engine.synth(chunk, speaker)
+        return engine.synth(chunk, speaker, rate)
 
     def stream() -> Iterator[bytes]:
         t0 = time.perf_counter()
@@ -203,7 +212,7 @@ def tts(req: TTSRequest):
                 log.info("tts: первый чанк за %.0f мс", (time.perf_counter() - t0) * 1000)
             yield pcm
         log.info("tts: %d чанков, %.2f с звука за %.0f мс",
-                 len(chunks), total / 2 / SAMPLE_RATE, (time.perf_counter() - t0) * 1000)
+                 len(chunks), total / 2 / rate, (time.perf_counter() - t0) * 1000)
 
     # синхронный генератор Starlette гоняет в threadpool, каждый yield — отдельный HTTP-чанк
-    return StreamingResponse(stream(), media_type=MEDIA_TYPE, headers={"Cache-Control": "no-store"})
+    return StreamingResponse(stream(), media_type=media_type(rate), headers={"Cache-Control": "no-store"})

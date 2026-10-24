@@ -585,7 +585,7 @@ func (v *voiceCall) speakOne(p phrase) {
 			}
 		}
 	}()
-	buf := make([]byte, 0, 8*audio.FrameBytes)
+	buf := make([]byte, 0, 8*audio.OutFrameBytes)
 	first := true
 	play := func(pcm []byte) bool {
 		if first {
@@ -599,7 +599,7 @@ func (v *voiceCall) speakOne(p phrase) {
 	}
 	for c := range chunks {
 		buf = append(buf, c...)
-		if whole := len(buf) / audio.FrameBytes * audio.FrameBytes; whole > 0 {
+		if whole := len(buf) / audio.OutFrameBytes * audio.OutFrameBytes; whole > 0 {
 			if !play(buf[:whole]) {
 				for range chunks { // дочитать, чтобы горутина синтеза вышла
 				}

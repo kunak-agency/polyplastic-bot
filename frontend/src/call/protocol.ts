@@ -3,7 +3,7 @@
 // the site of the caller and the regulation sources of an answer.
 //
 // One socket per call; every text frame is JSON `{ type, ... }`. Binary frames
-// are PCM16LE mono 8 kHz audio in both directions and carry no type.
+// are PCM16LE mono audio (mic → server 8 kHz, server → browser 24 kHz) and carry no type.
 
 export type CallSite = 'GrPP' | 'GTP' | 'Luzhniki'
 export const CALL_SITES: readonly CallSite[] = ['GrPP', 'GTP', 'Luzhniki']

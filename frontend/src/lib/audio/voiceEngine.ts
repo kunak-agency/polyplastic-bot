@@ -1,7 +1,7 @@
 // Copied from hack-ru-clinik frontend/src/lib/audio/voiceEngine.ts (unchanged in substance).
 import captureWorkletUrl from './capture.worklet.ts?worker&url'
 import playbackWorkletUrl from './playback.worklet.ts?worker&url'
-import { frameToInt16, int16ToFloat32, LinearUpsampler, WIRE_RATE } from './pcm'
+import { frameToInt16, int16ToFloat32, LinearUpsampler, PLAY_RATE } from './pcm'
 
 // Browser side of a voice call: one AudioContext (8 kHz when the browser allows
 // it) for both the mic and the bot's speech — sharing it helps the browser's
@@ -87,7 +87,8 @@ export class VoiceEngine {
 
     let ctx: AudioContext | null = null
     try {
-      ctx = new AudioContext({ sampleRate: WIRE_RATE })
+      // The context runs at the playback rate; the capture worklet decimates the mic to 8 kHz.
+      ctx = new AudioContext({ sampleRate: PLAY_RATE })
     } catch (e) {
       if (!isNotSupported(e)) throw new MicError('failed', e)
     }
@@ -135,8 +136,8 @@ export class VoiceEngine {
     await ctx.audioWorklet.addModule(playbackWorkletUrl)
     if (this.closed) return
 
-    if (Math.abs(ctx.sampleRate - WIRE_RATE) > 1) {
-      this.upsampler = new LinearUpsampler(WIRE_RATE, ctx.sampleRate)
+    if (Math.abs(ctx.sampleRate - PLAY_RATE) > 1) {
+      this.upsampler = new LinearUpsampler(PLAY_RATE, ctx.sampleRate)
     }
 
     const capture = new AudioWorkletNode(ctx, 'pcm-capture', {

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"main/pkg/audio"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -114,8 +115,8 @@ func (p *fakePod) tts(w http.ResponseWriter, r *http.Request) {
 	ms := p.ttsMs
 	p.mu.Unlock()
 	w.Header().Set("Content-Type", rag.TTSFormat)
-	n := ms * 16 // 8000 Гц × 2 байта = 16 байт на мс
-	chunk := make([]byte, 1600)
+	n := ms * 48 // 24000 Гц × 2 байта = 48 байт на мс
+	chunk := make([]byte, 4800)
 	for sent := 0; sent < n; sent += len(chunk) {
 		if _, err := w.Write(chunk[:min(len(chunk), n-sent)]); err != nil {
 			return
@@ -311,11 +312,11 @@ func TestCallGreeting(t *testing.T) {
 		t.Fatalf("audio.start %v", st)
 	}
 	c.waitFor("audio.end", turnIs(1))
-	if got := c.binaryBytes(); got < 200*16 {
+	if got := c.binaryBytes(); got < 200*48 {
 		t.Fatalf("звука приветствия %d байт", got)
 	}
-	if got := c.binaryBytes(); got%320 != 0 {
-		t.Fatalf("звук не кадрами по 320 байт: %d", got)
+	if got := c.binaryBytes(); got%audio.OutFrameBytes != 0 {
+		t.Fatalf("звук не кадрами по %d байт: %d", audio.OutFrameBytes, got)
 	}
 	_, tts, _, _, bad := pod.snapshot()
 	if len(tts) != 1 || tts[0] != services.VoiceGreeting || bad != 0 {

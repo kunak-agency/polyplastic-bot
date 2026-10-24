@@ -42,11 +42,11 @@ func NewPacer(ctx context.Context, lead, margin time.Duration) *Pacer {
 	return p
 }
 
-// Play — отправить pcm (кадрами FrameBytes, хвост дополняется тишиной) в темпе реального
+// Play — отправить pcm (кадрами OutFrameBytes, хвост дополняется тишиной) в темпе реального
 // времени. Блокирует, пока всё не отправлено или не перебито. Часы общие для подряд идущих
 // вызовов: фраза, синтезированная кусками, звучит без щелчков на стыках.
 func (p *Pacer) Play(ctx context.Context, leg Leg, pcm []byte) (Played, error) {
-	total := time.Duration((len(pcm)+FrameBytes-1)/FrameBytes) * FrameDur
+	total := time.Duration((len(pcm)+OutFrameBytes-1)/OutFrameBytes) * FrameDur
 	p.mu.Lock()
 	stop := p.stop
 	p.mu.Unlock()
@@ -113,12 +113,12 @@ func (p *Pacer) run(ctx context.Context) {
 }
 
 func (p *Pacer) play(j *playJob) (pl Played) {
-	pl.Total = time.Duration((len(j.pcm)+FrameBytes-1)/FrameBytes) * FrameDur
+	pl.Total = time.Duration((len(j.pcm)+OutFrameBytes-1)/OutFrameBytes) * FrameDur
 	defer func() { pl.EndsAt = p.EndsAt() }()
 	timer := time.NewTimer(0)
 	<-timer.C
 	defer timer.Stop()
-	for off := 0; off < len(j.pcm); off += FrameBytes {
+	for off := 0; off < len(j.pcm); off += OutFrameBytes {
 		now := time.Now()
 		p.mu.Lock()
 		if p.clock.Before(now) {
@@ -143,8 +143,8 @@ func (p *Pacer) play(j *playJob) (pl Played) {
 		}
 		// Своя копия кадра: нога может отдать его писателю позже, а буфер вызывающего уже
 		// переиспользован под следующий кусок синтеза. Хвост короче кадра — тишина.
-		frame := make([]byte, FrameBytes)
-		copy(frame, j.pcm[off:min(off+FrameBytes, len(j.pcm))])
+		frame := make([]byte, OutFrameBytes)
+		copy(frame, j.pcm[off:min(off+OutFrameBytes, len(j.pcm))])
 		if err := j.leg.Send(frame); err != nil {
 			return pl
 		}

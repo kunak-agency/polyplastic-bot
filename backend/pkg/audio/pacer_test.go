@@ -16,7 +16,7 @@ func TestPacerKeepsRealTime(t *testing.T) {
 	const lead = 60 * time.Millisecond
 	p := NewPacer(ctx, lead, 200*time.Millisecond)
 	leg := NewMemLeg("x")
-	pcm := make([]byte, 25*FrameBytes) // 0,5 с
+	pcm := make([]byte, 25*OutFrameBytes) // 0,5 с
 	start := time.Now()
 	pl, err := p.Play(ctx, leg, pcm)
 	if err != nil || !pl.Complete || pl.Sent != 500*time.Millisecond || pl.Total != pl.Sent {
@@ -50,7 +50,7 @@ func TestPacerContinuousAcrossCalls(t *testing.T) {
 	leg := NewMemLeg("x")
 	start := time.Now()
 	for i := 0; i < 2; i++ {
-		if _, err := p.Play(ctx, leg, make([]byte, 10*FrameBytes)); err != nil {
+		if _, err := p.Play(ctx, leg, make([]byte, 10*OutFrameBytes)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -69,7 +69,7 @@ func TestPacerInterrupt(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		p.Interrupt()
 	}()
-	pl, err := p.Play(ctx, leg, make([]byte, 100*FrameBytes)) // 2 с
+	pl, err := p.Play(ctx, leg, make([]byte, 100*OutFrameBytes)) // 2 с
 	if !errors.Is(err, ErrInterrupted) || pl.Complete {
 		t.Fatalf("played %+v, err %v", pl, err)
 	}
@@ -82,7 +82,7 @@ func TestPacerInterrupt(t *testing.T) {
 		t.Fatal("после перебивания кадры продолжают уходить")
 	}
 	// Следующая фраза после перебивания играет как обычно.
-	if pl, err := p.Play(ctx, leg, make([]byte, 2*FrameBytes)); err != nil || !pl.Complete {
+	if pl, err := p.Play(ctx, leg, make([]byte, 2*OutFrameBytes)); err != nil || !pl.Complete {
 		t.Fatalf("после перебивания: %+v %v", pl, err)
 	}
 }
@@ -97,7 +97,7 @@ func TestPacerLegClosed(t *testing.T) {
 		time.Sleep(150 * time.Millisecond)
 		_ = leg.Close()
 	}()
-	pl, err := p.Play(ctx, leg, make([]byte, 100*FrameBytes))
+	pl, err := p.Play(ctx, leg, make([]byte, 100*OutFrameBytes))
 	if err == nil || pl.Complete || pl.Sent >= time.Second {
 		t.Fatalf("played %+v, err %v", pl, err)
 	}
@@ -109,11 +109,11 @@ func TestPacerPadsTail(t *testing.T) {
 	defer cancel()
 	p := NewPacer(ctx, 60*time.Millisecond, 0)
 	leg := NewMemLeg("x")
-	if _, err := p.Play(ctx, leg, make([]byte, FrameBytes+10)); err != nil {
+	if _, err := p.Play(ctx, leg, make([]byte, OutFrameBytes+10)); err != nil {
 		t.Fatal(err)
 	}
 	s := leg.Sent()
-	if len(s) != 2 || len(s[1].Data) != FrameBytes {
+	if len(s) != 2 || len(s[1].Data) != OutFrameBytes {
 		t.Fatalf("кадры: %d, хвост %d байт", len(s), len(s[len(s)-1].Data))
 	}
 }

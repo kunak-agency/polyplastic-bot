@@ -3,6 +3,8 @@
 // the wire format is PCM16LE mono 8000 Hz in both directions.
 
 export const WIRE_RATE = 8000
+// Korsik's voice comes back at 24 kHz (full synthesis quality); the mic stays at 8 kHz.
+export const PLAY_RATE = 24000
 // 20 ms at 8 kHz.
 export const FRAME_SAMPLES = 160
 

@@ -10,9 +10,9 @@ import (
 	"os"
 )
 
-// TTSFormat — что отдаёт POST /tts: PCM16LE моно 8 кГц (audio/L16;rate=8000), чанками по
+// TTSFormat — что отдаёт POST /tts: PCM16LE моно 24 кГц (audio/L16;rate=24000), чанками по
 // предложениям, пока синтез идёт.
-const TTSFormat = "audio/L16;rate=8000"
+const TTSFormat = "audio/L16;rate=24000"
 
 // Synthesize — POST /tts {text}: поток звука. Срок задаёт ctx вызывающего (на синтез, а не на
 // длину фразы); тело закрывает вызывающий.
@@ -20,7 +20,7 @@ func (c *Client) Synthesize(ctx context.Context, text string) (io.ReadCloser, er
 	if c == nil || c.baseURL == "" {
 		return nil, fmt.Errorf("rag: адрес не задан (RAG_BASE_URL)")
 	}
-	req := map[string]string{"text": text}
+	req := map[string]any{"text": text, "sample_rate": 24000}
 	// Голос звонка: CALL_TTS_SPEAKER (aidar | eugene у Silero v5_5_ru); пусто — голос пода по умолчанию.
 	if sp := os.Getenv("CALL_TTS_SPEAKER"); sp != "" {
 		req["speaker"] = sp
