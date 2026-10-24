@@ -131,3 +131,14 @@ def test_missing_weights_disable_tts(tmp_path, monkeypatch):
     with pytest.raises(FileNotFoundError):
         eng.load()
     assert not eng.ready
+
+
+def test_strip_wav_and_google_fallback(monkeypatch):
+    import struct
+
+    import tts
+
+    pcm = b"\x01\x00\x02\x00"
+    wav = b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " + b"\x00" * 20 + b"data" + struct.pack("<I", len(pcm)) + pcm
+    assert tts.strip_wav(wav) == pcm
+    assert tts.strip_wav(pcm) == pcm

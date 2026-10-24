@@ -1,4 +1,8 @@
-"""POST /tts: синтез речи для звонка Корсику (Silero v5_5_ru).
+"""POST /tts: синтез речи для звонка Корсику (Google Cloud TTS, запасной — Silero v5_5_ru).
+
+Google включается ключом RAG_GOOGLE_TTS_KEY (голос RAG_GOOGLE_TTS_VOICE, по умолчанию
+ru-RU-Wavenet-D): все предложения запрашиваются параллельно, отдаются по порядку. Если Google не
+ответил на предложение — оно синтезируется Silero, звонок не замолкает.
 
 {"text": str ≤ 1000, "speaker"?: str} -> audio/L16;rate=8000;channels=1 — сырой PCM16LE моно 8 кГц
 потоком: один HTTP-чанк на предложение, первое уходит до синтеза следующих.
@@ -17,8 +21,12 @@ from __future__ import annotations
 import logging
 import os
 import re
+import base64
+import json
 import threading
 import time
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterator
 
@@ -83,6 +91,45 @@ class Engine:
 engine = Engine()
 
 
+class GoogleTTS:
+    """Cloud Text-to-Speech REST v1: LINEAR16 8 кГц, WAV-заголовок срезаем."""
+
+    URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
+
+    def __init__(self):
+        self.key = os.getenv("RAG_GOOGLE_TTS_KEY", "").strip()
+        self.voice = os.getenv("RAG_GOOGLE_TTS_VOICE", "ru-RU-Wavenet-D").strip() or "ru-RU-Wavenet-D"
+        self.timeout = float(os.getenv("RAG_GOOGLE_TTS_TIMEOUT", "4"))
+        self.pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gtts")
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.key)
+
+    def synth(self, text: str) -> bytes:
+        body = json.dumps({
+            "input": {"text": text},
+            "voice": {"languageCode": self.voice[:5], "name": self.voice},
+            "audioConfig": {"audioEncoding": "LINEAR16", "sampleRateHertz": SAMPLE_RATE},
+        }).encode()
+        req = urllib.request.Request(self.URL, data=body, headers={
+            "Content-Type": "application/json", "X-Goog-Api-Key": self.key})
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            audio = base64.b64decode(json.load(resp)["audioContent"])
+        return strip_wav(audio)
+
+
+def strip_wav(audio: bytes) -> bytes:
+    """LINEAR16 от Google приходит WAV-файлом: отдаём только данные чанка data."""
+    if audio[:4] != b"RIFF":
+        return audio
+    i = audio.find(b"data", 12)
+    return audio[i + 8:] if i >= 0 else audio[44:]
+
+
+google = GoogleTTS()
+
+
 def warmup() -> None:
     """Фоновая загрузка на старте; без весов сервис работает, /tts отвечает 503."""
     try:
@@ -116,23 +163,38 @@ class TTSRequest(BaseModel):
 
 @router.post("/tts")
 def tts(req: TTSRequest):
-    if not engine.ready:
+    if not engine.ready and not google.enabled:
         raise HTTPException(status_code=503, detail="tts model is not ready")
     if not req.text.strip():
         raise HTTPException(status_code=400, detail="text is empty")
     speaker = req.speaker or engine.speaker
     if engine.speakers and speaker not in engine.speakers:
-        raise HTTPException(status_code=400, detail=f"unknown speaker; available: {engine.speakers}")
+        if google.enabled:
+            speaker = engine.speaker  # голос Silero нужен только запасному пути
+        else:
+            raise HTTPException(status_code=400, detail=f"unknown speaker; available: {engine.speakers}")
     chunks = split_sentences(normalize(speakable_clauses(req.text)))
     if not chunks:
         raise HTTPException(status_code=400, detail="text has nothing to pronounce")
+    # Google: все предложения сразу, параллельно; ждём по порядку.
+    futures = [google.pool.submit(google.synth, c) for c in chunks] if google.enabled else None
+
+    def one(i: int, chunk: str) -> bytes:
+        if futures is not None:
+            try:
+                return futures[i].result(timeout=google.timeout + 1)
+            except Exception as exc:
+                log.warning("tts: google не ответил на предложение %d/%d: %s — Silero", i + 1, len(chunks), exc)
+                if not engine.ready:
+                    raise
+        return engine.synth(chunk, speaker)
 
     def stream() -> Iterator[bytes]:
         t0 = time.perf_counter()
         total = 0
         for i, chunk in enumerate(chunks):
             try:
-                pcm = engine.synth(chunk, speaker)
+                pcm = one(i, chunk)
             except Exception:  # не валим весь поток из-за одного предложения
                 log.exception("tts: предложение %d/%d (%d символов) не синтезировалось", i + 1, len(chunks), len(chunk))
                 continue
