@@ -87,9 +87,57 @@ export interface Newcomer {
   // IANA zone overriding the site's; null — the site's zone applies.
   tz?: string | null
   site_tz?: string
+  // The zone the bot actually schedules by (api_contract.md, agent A): tz ??
+  // site_tz with FEATURE_TZ, site_tz without it. "10:00 newcomer's time" uses it.
+  effective_tz?: string
+  // Set after the second auto reminder without an answer; null — answering.
+  unresponsive_since?: string | null
+  // Late start catch-up queue; null — never built.
+  catchup?: CatchupProgress | null
+  // Decision on the probation period (agent F); null — not set.
+  ip_decision?: IpDecision | null
+  ip_decision_at?: string | null
+  ip_decision_by?: string | null
   // GET /api/newcomers/{id} only: tone of the last 5 labelled texts, newest
   // first, without the texts. Absent in the list and for the manager role.
   recent_tone?: NewcomerTone[]
+}
+
+export interface CatchupProgress {
+  done: number
+  total: number
+  finished?: boolean
+}
+
+export type IpDecision = 'keep' | 'extend' | 'part'
+
+// POST /api/newcomers/{id}/nudge (alias /remind): 200 sent|failed, 202 planned.
+export interface NudgeResult {
+  status: 'sent' | 'planned' | 'failed'
+  at?: string
+  tz?: string
+  message?: string
+  nudge?: NudgeItem
+}
+
+// GET /api/newcomers/{id}/nudges: one row of the reminder history. `contacted`
+// is the recruiter's "Mark: contacted" (api_contract_auth.md).
+export interface NudgeItem {
+  id: string
+  event_id: string | null
+  event_title?: string | null
+  kind: 'auto' | 'manual' | 'contacted'
+  n: number
+  at: string
+  planned: boolean
+  delivered: boolean
+  created_by: string | null
+}
+
+export interface NudgeList {
+  items: NudgeItem[]
+  total: number
+  tz: string
 }
 
 export interface NewcomerTone {
@@ -848,6 +896,8 @@ export interface ManagerCard {
   connection: string
   last_pulse: number | null
   probation_date: string
+  // Decision on the probation period; null or absent — not set yet.
+  ip_decision?: IpDecision | null
   attention: string[]
   meetings: ManagerTask[]
 }
@@ -968,6 +1018,8 @@ export interface TodayRow {
   reason: string
   newcomer_id: string | null
   newcomer_name: string | null
+  // Aggregate row (hr_lead no_recruiter): how many newcomers it stands for.
+  count?: number | null
   ticket_id: string | null
   recruiter_name?: string | null
   theme?: string | null

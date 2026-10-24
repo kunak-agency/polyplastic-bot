@@ -24,7 +24,8 @@ import ManagerInviteButton from '@/components/manager/ManagerInviteButton.vue'
 import NewcomerAssign from '@/components/newcomers/NewcomerAssign.vue'
 import ContactPanel from '@/components/newcomers/ContactPanel.vue'
 import PlanUpload from '@/components/newcomers/PlanUpload.vue'
-import { apiRemind } from '@/api/team'
+import NewcomerNudges from '@/components/newcomers/NewcomerNudges.vue'
+import { useRemind } from '@/composables/useRemind'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -40,6 +41,7 @@ import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/lib/apiError'
 import { formatDayOffset, isoToLocalDate } from '@/lib/calendar'
 import { TONE_ICON, recentToneRow } from '@/lib/tone'
+import { catchupState } from '@/lib/nudges'
 import type { Newcomer, TimelineEvent } from '@/types/api'
 
 const { t, d } = useI18n()
@@ -207,18 +209,27 @@ function setContact(open: boolean): void {
   void router.replace({ query: { ...route.query, contact: open ? '1' : undefined } })
 }
 const reminding = ref(false)
+const { remind: sendRemind } = useRemind()
+// Bumped after "Remind" and "Contacted": the reminder history reloads.
+const nudgesVersion = ref(0)
 async function remind(): Promise<void> {
   reminding.value = true
   try {
-    await apiRemind(id.value)
-    toast.success(t('dashboard.actions.reminded'))
-    await loadTimeline()
-  } catch (e) {
-    toast.error(errorMessage(e, 'dashboard.actions.failed'))
+    if (await sendRemind(id.value)) {
+      nudgesVersion.value++
+      await loadTimeline()
+    }
   } finally {
     reminding.value = false
   }
 }
+function onContacted(): void {
+  nudgesVersion.value++
+  setContact(false)
+}
+
+// "Not answering since …" and "Catching up N of M" (agent A).
+const catchup = computed(() => catchupState(newcomer.value?.catchup))
 
 // Recruiter or zone changed in the card; a new zone re-plans unsent steps.
 function onAssigned(n: Newcomer, replanned: boolean): void {
@@ -273,6 +284,30 @@ function consent(n: Newcomer): string {
                 t('newcomers.card.scenario', { version: newcomer.scenario_version })
               }}</Badge>
               <ConnectionBadge :connection="newcomer.connection" />
+            </div>
+            <div v-if="newcomer.unresponsive_since || catchup" class="head__badges" role="status">
+              <span
+                v-if="newcomer.unresponsive_since"
+                class="badge solid-danger"
+                :title="t('newcomers.status.unresponsiveHint')"
+              >
+                {{
+                  t('newcomers.status.unresponsive', {
+                    date: d(new Date(newcomer.unresponsive_since), 'dayMonth'),
+                  })
+                }}
+              </span>
+              <span
+                v-if="catchup"
+                :class="['badge', catchup.kind === 'done' ? 'solid-success' : 'solid-info']"
+                :title="t('newcomers.status.catchupHint')"
+              >
+                {{
+                  catchup.kind === 'done'
+                    ? t('newcomers.status.catchupDone')
+                    : t('newcomers.status.catchup', { done: catchup.done, total: catchup.total })
+                }}
+              </span>
             </div>
             <div class="head__risk">
               <RiskMark :risk="newcomer.risk" :reason="newcomer.risk_reason" detailed />
@@ -332,7 +367,7 @@ function consent(n: Newcomer): string {
           v-if="contactOpen"
           :newcomer-id="newcomer.id"
           :phone="newcomer.phone"
-          @done="setContact(false)"
+          @done="onContacted"
           @close="setContact(false)"
         />
 
@@ -392,6 +427,8 @@ function consent(n: Newcomer): string {
       </SectionCard>
 
       <NewcomerTickets :newcomer-id="newcomer.id" :site="newcomer.site" class="mt" />
+
+      <NewcomerNudges :newcomer-id="newcomer.id" :version="nudgesVersion" class="mt" />
 
       <SectionCard :title="t('newcomers.timeline.title')" class="mt">
         <LoadingState v-if="!timeline && !timelineError" :rows="6" />

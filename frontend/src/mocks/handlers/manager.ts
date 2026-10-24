@@ -49,6 +49,7 @@ function managerView(req: MockRequest): MockResult {
       connection: n.connection,
       last_pulse: n.last_pulse,
       probation_date: addDays(n.start_date, 90),
+      ip_decision: n.ip_decision ?? null,
       attention: n.last_pulse !== null && n.last_pulse <= 3 ? ['второй низкий пульс подряд'] : [],
       meetings:
         n.last_pulse !== null && n.last_pulse <= 3 && !closed.has(`t-${n.id}`)

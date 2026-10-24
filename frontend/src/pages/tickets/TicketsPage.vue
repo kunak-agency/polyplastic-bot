@@ -13,17 +13,20 @@ import LoadingState from '@/components/common/LoadingState.vue'
 import TicketCard from '@/components/tickets/TicketCard.vue'
 import { Button } from '@/components/ui/button'
 import { useTicketsStore } from '@/stores/tickets'
+import { useAuthStore } from '@/stores/auth'
 import { SITE_FILTERS, useSiteStore, type SiteFilter } from '@/stores/site'
 import { useNow } from '@/composables/useNow'
 import { errorMessage } from '@/lib/apiError'
 import {
   KANBAN_COLUMNS,
-  TICKET_VIEWS,
+  SECURITY_SLA_WORKING_DAYS,
   activeCount,
   applyView,
+  isSecurityOverdue,
   kanbanColumns,
   sortTickets,
   viewCounts,
+  viewsFor,
   type TicketSort,
   type TicketView,
 } from '@/lib/tickets'
@@ -36,13 +39,16 @@ const { items, loaded, loading, error } = storeToRefs(store)
 const site = useSiteStore()
 const { current: currentSite } = storeToRefs(site)
 const now = useNow()
+const auth = useAuthStore()
+// "Security" is the HR lead's view only (#21); the others are everyone's.
+const views = computed(() => viewsFor(auth.viewer))
 
 // View and mode live in the route query (?view=overdue&mode=kanban): a pasted
 // link opens the same queue. The site is the global filter of the topbar.
 type Mode = 'list' | 'kanban'
 const view = computed<TicketView>(() => {
   const v = route.query.view
-  return typeof v === 'string' && (TICKET_VIEWS as readonly string[]).includes(v)
+  return typeof v === 'string' && (views.value as readonly string[]).includes(v)
     ? (v as TicketView)
     : 'all'
 })
@@ -73,6 +79,10 @@ watch(currentSite, reload)
 onMounted(reload)
 
 const counts = computed(() => viewCounts(items.value, now.value))
+// Security tickets past their one-working-day SLA (counted on the client).
+const securityOverdue = computed(
+  () => items.value.filter((x) => isSecurityOverdue(x, now.value)).length,
+)
 const rows = computed(() => sortTickets(applyView(items.value, view.value, now.value), sort.value))
 const columns = computed(() => kanbanColumns(rows.value, sort.value))
 // Nothing waits for a person: the empty queue reads as success (ux-spec 3.4).
@@ -132,7 +142,7 @@ const allClosed = computed(
         <nav :aria-label="t('tickets.views.label')">
           <div class="views__head">{{ t('tickets.views.label') }}</div>
           <button
-            v-for="v in TICKET_VIEWS"
+            v-for="v in views"
             :key="v"
             type="button"
             :class="['views__item', { 'views__item--on': view === v }]"
@@ -143,7 +153,11 @@ const allClosed = computed(
             <span
               :class="[
                 'views__count tabular',
-                { 'views__count--alert': v === 'overdue' && counts.overdue > 0 },
+                {
+                  'views__count--alert':
+                    (v === 'overdue' && counts.overdue > 0) ||
+                    (v === 'security' && securityOverdue > 0),
+                },
               ]"
             >
               {{ counts[v] }}
@@ -164,6 +178,12 @@ const allClosed = computed(
       </aside>
 
       <div class="queue__main">
+        <p v-if="view === 'security'" class="security-note txt-sm" role="note">
+          {{ t('tickets.security.note', { days: SECURITY_SLA_WORKING_DAYS }) }}
+          <span v-if="securityOverdue > 0" class="security-note__warn">
+            · {{ t('tickets.security.overdue', { n: securityOverdue }, securityOverdue) }}
+          </span>
+        </p>
         <SectionCard v-if="(loading && !loaded) || (error && !loaded)">
           <LoadingState v-if="loading" variant="table" :rows="5" />
           <ErrorState v-else :message="errorMessage(error, 'tickets.loadFailed')">
@@ -224,6 +244,18 @@ const allClosed = computed(
 </template>
 
 <style scoped>
+.security-note {
+  margin: 0 0 var(--space-3);
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+}
+.security-note__warn {
+  color: var(--danger);
+  font-weight: 500;
+}
 .tab {
   display: inline-flex;
   align-items: center;

@@ -6,6 +6,7 @@
   "launchHint": "Время шагов — местное время новичка",
   "nextTitle": "Ближайший шаг «{title}»",
   "nextLocal": "{date}, {time} по времени {site} ({offset})",
+  "nextLocalOwn": "{date}, {time} по времени новичка ({offset})",
   "nextMine": "у вас {time} ({offset})",
   "nextPlain": "{date}, {time}",
   "city": {

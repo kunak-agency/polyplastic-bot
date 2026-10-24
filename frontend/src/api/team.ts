@@ -2,6 +2,8 @@ import { http } from '@/api/http'
 import type {
   HrLeadDashboard,
   ListResponse,
+  NudgeList,
+  NudgeResult,
   RecruiterDashboard,
   Role,
   SiteCode,
@@ -36,9 +38,38 @@ export async function apiMarkContacted(newcomerId: string, note?: string): Promi
 }
 
 // "Remind": one manual reminder through the bot, as a reply to the open
-// question (the backend counts it in the daily limit).
-export async function apiRemind(newcomerId: string): Promise<void> {
-  await http.post(`/newcomers/${encodeURIComponent(newcomerId)}/remind`)
+// question (api_contract.md, "Nudges"): 200 sent|failed, 202 planned for the
+// newcomer's working hours; 409 — nothing to remind about (thrown as ApiError).
+// `/remind` is the alias of `/nudge`.
+export async function apiRemind(
+  newcomerId: string,
+): Promise<{ httpStatus: number; result: NudgeResult | null }> {
+  const r = await http.post<NudgeResult | ''>(`/newcomers/${encodeURIComponent(newcomerId)}/remind`)
+  return { httpStatus: r.status, result: r.data && typeof r.data === 'object' ? r.data : null }
+}
+
+// Reminder history of the card, oldest first (the card reverses it).
+export async function apiGetNudges(newcomerId: string): Promise<NudgeList> {
+  const r = await http.get<NudgeList>(`/newcomers/${encodeURIComponent(newcomerId)}/nudges`)
+  return r.data
+}
+
+// Dev (agent L): the recruiters' morning summary now, without the 9-12 window.
+// The answer shape is loose: a count, a list of sent summaries, or nothing.
+export async function apiDevRecruiterMorning(): Promise<number | null> {
+  const r = await http.post<{ sent?: number; items?: unknown[]; total?: number } | unknown[] | ''>(
+    '/dev/recruiter-morning',
+    {},
+    { timeout: 30_000 },
+  )
+  const d = r.data
+  if (Array.isArray(d)) return d.length
+  if (d && typeof d === 'object') {
+    if (typeof d.sent === 'number') return d.sent
+    if (typeof d.total === 'number') return d.total
+    if (Array.isArray(d.items)) return d.items.length
+  }
+  return null
 }
 
 export async function apiGetTeam(): Promise<TeamResponse> {

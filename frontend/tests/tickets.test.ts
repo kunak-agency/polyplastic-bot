@@ -5,7 +5,11 @@ import assert from 'node:assert/strict'
 import type { Ticket } from '../src/types/api.ts'
 import {
   activeCount,
+  addWorkingDays,
   applyView,
+  isSecurity,
+  isSecurityOverdue,
+  viewsFor,
   canNotifyManager,
   signatureRole,
   durationParts,
@@ -103,6 +107,7 @@ test('views: unassigned, urgent, overdue, closed', () => {
     urgent: 2,
     overdue: 2,
     closed: 1,
+    security: 0,
   })
   assert.equal(activeCount(list), 4)
 })
@@ -202,4 +207,30 @@ test('initials of the assignee', () => {
   assert.equal(initials('Анна К.'), 'АК')
   assert.equal(initials('Дежурный СБ'), 'ДС')
   assert.equal(initials(null), '')
+})
+
+test('security view: F9 and restricted, hr_lead only, SLA one working day', () => {
+  assert.deepEqual(viewsFor('hr_lead').includes('security'), true)
+  assert.equal(viewsFor('recruiter').includes('security'), false)
+  assert.equal(viewsFor(null).includes('security'), false)
+  assert.equal(viewsFor('recruiter').includes('all'), true)
+  const list = [
+    ticket(1, { category: 'F9' }),
+    ticket(2, { category: 'F5', restricted: true } as Partial<Ticket>),
+    ticket(3, { category: 'F2' }),
+    ticket(4, { category: 'F9', status: 'resolved' }),
+  ]
+  assert.deepEqual(
+    applyView(list, 'security', NOW).map((t) => t.number),
+    [1, 2, 4],
+  )
+  assert.equal(isSecurity({ category: 'F7' }), false)
+  // Friday 12:00 -> Monday 12:00.
+  const fri = Date.parse('2026-10-23T12:00:00+03:00')
+  assert.equal(addWorkingDays(fri, 1), Date.parse('2026-10-26T12:00:00+03:00'))
+  const old = ticket(5, { category: 'F9', created_at: at(-2 * 24 * 60) })
+  const fresh = ticket(6, { category: 'F9', created_at: at(-60) })
+  assert.equal(isSecurityOverdue(old, NOW), true)
+  assert.equal(isSecurityOverdue(fresh, NOW), false)
+  assert.equal(isSecurityOverdue({ ...old, status: 'resolved' }, NOW), false)
 })

@@ -3,13 +3,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { Clock } from 'lucide-vue-next'
-import { apiPatchNewcomer } from '@/api/newcomers'
+import { apiPatchNewcomer, apiSetIpDecision } from '@/api/newcomers'
 import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/lib/apiError'
 import { TZ_OPTIONS, clockIn, dateIn, effectiveTz, nextStep, tzKey, tzOffsetLabel } from '@/lib/tz'
-import type { Newcomer, NewcomerPatch, TimelineEvent } from '@/types/api'
+import { IP_DECISIONS } from '@/lib/ipDecision'
+import type { IpDecision, Newcomer, NewcomerPatch, TimelineEvent } from '@/types/api'
 
 // Recruiter and time zone of the newcomer (api_contract_auth.md): hr_lead
 // picks the recruiter, everyone else sees the name; the zone is picked here
@@ -73,6 +74,37 @@ const siteOption = computed(() => {
   return siteTz ? t('tz.bySiteWith', { zone: zoneLabel(siteTz) }) : t('tz.bySite')
 })
 
+// ── Decision on the probation period (recruiter, hr_lead; agent F) ─────────
+// Shown only when the server sends the field (`ip_decision` present, maybe null).
+const hasIp = computed(() => props.newcomer.ip_decision !== undefined)
+const canDecide = computed(() => auth.viewer !== 'manager')
+const ip = ref<IpDecision | ''>(props.newcomer.ip_decision ?? '')
+watch(
+  () => props.newcomer.ip_decision,
+  (v) => (ip.value = v ?? ''),
+)
+async function onIp(): Promise<void> {
+  busy.value = true
+  try {
+    const n = await apiSetIpDecision(props.newcomer.id, ip.value || null)
+    toast.success(t('common.toast.saved'))
+    emit('updated', n, false)
+  } catch (e) {
+    ip.value = props.newcomer.ip_decision ?? ''
+    toast.error(errorMessage(e, 'common.toast.updateFailed'))
+  } finally {
+    busy.value = false
+  }
+}
+const ipMeta = computed(() => {
+  const n = props.newcomer
+  if (!n.ip_decision || !n.ip_decision_at) return null
+  return t('newcomers.ip.meta', {
+    date: d(new Date(n.ip_decision_at), 'dayMonth'),
+    by: n.ip_decision_by || t('newcomers.ip.byUnknown'),
+  })
+})
+
 // ── Nearest step ────────────────────────────────────────────────────────────
 const VIEWER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
 const viewerTz = computed(() => auth.user?.tz || VIEWER_TZ)
@@ -92,7 +124,9 @@ const nextLine = computed(() => {
     }
   }
   const at = new Date(e.fire_at)
-  const local = t('tz.nextLocal', {
+  // The site zone reads "GTP time"; the newcomer's own one reads "newcomer time".
+  const own = !!props.newcomer.site_tz && zone !== props.newcomer.site_tz
+  const local = t(own ? 'tz.nextLocalOwn' : 'tz.nextLocal', {
     date: d(new Date(`${dateIn(zone, e.fire_at)}T00:00:00`), 'short'),
     time: clockIn(zone, e.fire_at),
     site: t(`common.site.${props.newcomer.site}`),
@@ -143,6 +177,20 @@ const nextLine = computed(() => {
       </select>
     </label>
 
+    <label v-if="hasIp" class="assign__field assign__field--ip">
+      <span class="field-label">{{ t('newcomers.ip.label') }}</span>
+      <select v-if="canDecide" v-model="ip" class="input" :disabled="busy" @change="onIp">
+        <option value="">{{ t('newcomers.ip.value.none') }}</option>
+        <option v-for="v in IP_DECISIONS" :key="v" :value="v">
+          {{ t(`newcomers.ip.value.${v}`) }}
+        </option>
+      </select>
+      <span v-else class="assign__value">{{
+        t(`newcomers.ip.value.${newcomer.ip_decision ?? 'none'}`)
+      }}</span>
+      <span v-if="ipMeta" class="muted txt-xs">{{ ipMeta }}</span>
+    </label>
+
     <div v-if="nextLine" class="assign__next">
       <Clock :size="14" aria-hidden="true" class="assign__icon" />
       <div>
@@ -171,6 +219,9 @@ const nextLine = computed(() => {
   flex-direction: column;
   gap: 4px;
   width: 300px;
+}
+.assign__field--ip {
+  width: 220px;
 }
 .assign__value {
   display: flex;

@@ -35,6 +35,11 @@ test('effective zone: the newcomer’s, else the site’s', () => {
   assert.equal(effectiveTz({ tz: 'Asia/Omsk', site_tz: 'Europe/Moscow' }), 'Asia/Omsk')
   assert.equal(effectiveTz({ tz: null, site_tz: 'Europe/Moscow' }), 'Europe/Moscow')
   assert.equal(effectiveTz({}), null)
+  // The server's effective zone wins: without FEATURE_TZ it stays the site's.
+  assert.equal(
+    effectiveTz({ tz: 'Asia/Omsk', site_tz: 'Europe/Moscow', effective_tz: 'Europe/Moscow' }),
+    'Europe/Moscow',
+  )
   assert.equal(isValidTz('Asia/Yekaterinburg'), true)
   assert.equal(isValidTz('Mars/Olympus'), false)
 })

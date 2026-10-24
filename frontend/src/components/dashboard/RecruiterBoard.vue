@@ -9,7 +9,7 @@ import RiskMark from '@/components/newcomers/RiskMark.vue'
 import DashTiles from '@/components/dashboard/DashTiles.vue'
 import TodayList from '@/components/dashboard/TodayList.vue'
 import { Users } from 'lucide-vue-next'
-import { apiRemind } from '@/api/team'
+import { useRemind } from '@/composables/useRemind'
 import { apiAssignTicket } from '@/api/tickets'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -36,6 +36,7 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
+const { remind } = useRemind()
 
 const active = computed(() =>
   tileById(RECRUITER_TILES, typeof route.query.tile === 'string' ? route.query.tile : null),
@@ -58,9 +59,7 @@ async function onCall(row: TodayRow, call: 'remind' | 'take'): Promise<void> {
   busy.value = row.id
   try {
     if (call === 'remind' && row.newcomer_id) {
-      await apiRemind(row.newcomer_id)
-      toast.success(t('dashboard.actions.reminded'))
-      emit('reload')
+      if (await remind(row.newcomer_id)) emit('reload')
     } else if (call === 'take' && row.ticket_id) {
       await apiAssignTicket(row.ticket_id, {
         assignee_name: auth.user?.full_name ?? '',

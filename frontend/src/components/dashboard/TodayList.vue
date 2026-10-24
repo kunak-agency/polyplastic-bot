@@ -14,6 +14,19 @@ const { t } = useI18n()
 
 const list = computed(() => sortToday(props.rows))
 
+// The "no recruiter" row stands for several newcomers: one caption with the
+// count ("No recruiter — 5 newcomers") instead of a placeholder name.
+function aggregate(row: TodayRow): number | null {
+  if (row.kind !== 'no_recruiter' || row.newcomer_name) return null
+  const n = row.count ?? row.reason.match(/\d+/)?.[0]
+  return n === undefined || n === null ? null : Number(n)
+}
+
+// The server already names the recruiter in some reasons: do not repeat it.
+function showRecruiter(row: TodayRow): boolean {
+  return !!row.recruiter_name && !row.reason.includes(row.recruiter_name)
+}
+
 function buttons(row: TodayRow) {
   return row.actions
     .map((id: TodayActionId) => {
@@ -44,13 +57,18 @@ function buttons(row: TodayRow) {
         >
           <span class="sr-only">{{ t(`dashboard.zone.${r.zone}`) }}</span>
         </span>
-        <div class="today__text">
+        <div v-if="aggregate(r) !== null" class="today__text">
+          <span class="fw-medium">{{
+            t('dashboard.noRecruiterRow', { n: aggregate(r) }, aggregate(r) ?? 0)
+          }}</span>
+        </div>
+        <div v-else class="today__text">
           <span class="fw-medium">{{
             r.newcomer_name ?? r.theme ?? t(`dashboard.kind.${r.kind}`)
           }}</span>
           <span v-if="r.day !== null" class="muted txt-sm tabular">{{ dayLabel(r.day) }}</span>
           <span class="today__reason txt-sm">{{ r.reason }}</span>
-          <span v-if="r.recruiter_name" class="muted txt-sm">· {{ r.recruiter_name }}</span>
+          <span v-if="showRecruiter(r)" class="muted txt-sm">· {{ r.recruiter_name }}</span>
         </div>
         <div class="today__actions">
           <template v-for="b in buttons(r)" :key="b.id">

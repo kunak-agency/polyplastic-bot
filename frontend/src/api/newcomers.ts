@@ -1,5 +1,6 @@
 import { http } from '@/api/http'
 import type {
+  IpDecision,
   ListResponse,
   Newcomer,
   NewcomerCreate,
@@ -55,6 +56,15 @@ export async function apiTimeTravel(id: string, day: number): Promise<TimelineRe
 // Moves the start date; the answer is the newcomer with the new day and stage.
 export async function apiPatchNewcomer(id: string, body: NewcomerPatch): Promise<Newcomer> {
   const r = await http.patch<Newcomer>(`/newcomers/${encodeURIComponent(id)}`, body)
+  return r.data
+}
+
+// Decision on the probation period (agent F): recruiter and hr_lead; null —
+// back to "not set". Answers with the card.
+export async function apiSetIpDecision(id: string, decision: IpDecision | null): Promise<Newcomer> {
+  const r = await http.post<Newcomer>(`/newcomers/${encodeURIComponent(id)}/ip-decision`, {
+    decision,
+  })
   return r.data
 }
 

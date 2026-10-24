@@ -117,6 +117,13 @@ export function view(n: StoredNewcomer): Newcomer {
     open_tickets: openTicketsOf(n.id, n.open_tickets),
     recruiter_name: recruiter?.full_name ?? n.recruiter_name,
     site_tz: SITE_TZ[n.site] ?? 'Europe/Moscow',
+    // The mock plays FEATURE_TZ on: the newcomer's own zone wins.
+    effective_tz: zoneOf(n),
+    unresponsive_since: n.unresponsive_since ?? null,
+    catchup: n.catchup ?? null,
+    ip_decision: n.ip_decision ?? null,
+    ip_decision_at: n.ip_decision_at ?? null,
+    ip_decision_by: n.ip_decision_by ?? null,
   }
 }
 
@@ -240,6 +247,11 @@ export function ensureSeeded(): void {
       risk: s.risk,
       risk_reason: s.risk_reason,
       open_tickets: s.open_tickets,
+      // A silent newcomer after two auto reminders (agent A's status).
+      unresponsive_since:
+        s.silent_days !== null && s.silent_days >= 5 && s.connection === 'connected'
+          ? lastActivity
+          : null,
     }
     newcomers.set(s.id, stored)
     timelines.set(

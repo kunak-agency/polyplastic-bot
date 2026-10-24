@@ -16,7 +16,8 @@ import { errorMessage } from '@/lib/apiError'
 import { dayLabel } from '@/lib/overview'
 import { pulseLevel } from '@/lib/digest'
 import { isoToLocalDate } from '@/lib/calendar'
-import type { ManagerSummary, ManagerView } from '@/types/api'
+import { ipTone } from '@/lib/ipDecision'
+import type { IpDecision, ManagerSummary, ManagerView } from '@/types/api'
 import { useAuthStore } from '@/stores/auth'
 
 // "My newcomers" of ux-spec 3.1 for the head of unit (case role 03): D+N,
@@ -81,6 +82,10 @@ async function setTask(taskId: string, status: 'done' | 'planned'): Promise<void
 function date(iso: string): string {
   return d(isoToLocalDate(iso), 'short')
 }
+function ipBadge(v: IpDecision | null | undefined): string {
+  const tone = ipTone(v)
+  return tone ? `solid-${tone}` : ''
+}
 </script>
 
 <template>
@@ -137,8 +142,17 @@ function date(iso: string): string {
               {{ t(`manager.card.pulseLevel.${pulseLevel(c.last_pulse)}`) }}
             </span>
           </div>
-          <div class="mcard__row txt-sm muted">
-            {{ t('manager.card.probation', { date: date(c.probation_date) }) }}
+          <!-- IP decision: status only, the manager decides with the buttons in MAX (D+87). -->
+          <div class="mcard__row txt-sm" role="status">
+            <span class="muted">{{
+              t('manager.card.probation', { date: date(c.probation_date) })
+            }}</span>
+            <span
+              :class="['badge', ipBadge(c.ip_decision)]"
+              :title="c.ip_decision ? undefined : t('manager.card.ipHint')"
+            >
+              {{ t(`manager.card.ip.${c.ip_decision ?? 'none'}`) }}
+            </span>
           </div>
           <div v-if="c.attention.length" class="mcard__block">
             <div class="mcard__label">{{ t('manager.card.attention') }}</div>
@@ -180,9 +194,6 @@ function date(iso: string): string {
           <div class="mcard__later">
             <Button size="sm" variant="outline" disabled :title="t('manager.card.soon')">
               {{ t('manager.card.attachPlan') }}
-            </Button>
-            <Button size="sm" variant="outline" disabled :title="t('manager.card.soon')">
-              {{ t('manager.card.ipDecision') }}
             </Button>
           </div>
         </article>

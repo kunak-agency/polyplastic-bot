@@ -7,6 +7,7 @@ import PageHead from '@/components/common/PageHead.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import UsersPanel from '@/components/team/UsersPanel.vue'
+import DemoMorningPanel from '@/components/team/DemoMorningPanel.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
@@ -20,7 +21,10 @@ const showUsers = computed(() => auth.viewer === 'hr_lead')
     <PageHead :title="t('settings.title')">
       <template #subtitle>{{ t('settings.subtitle') }}</template></PageHead
     >
-    <UsersPanel v-if="showUsers" />
+    <template v-if="showUsers">
+      <UsersPanel />
+      <DemoMorningPanel class="mt" />
+    </template>
     <SectionCard v-else>
       <EmptyState
         :icon="Settings"
@@ -30,3 +34,9 @@ const showUsers = computed(() => auth.viewer === 'hr_lead')
     </SectionCard>
   </PageContainer>
 </template>
+
+<style scoped>
+.mt {
+  margin-top: 16px;
+}
+</style>

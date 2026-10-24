@@ -1,7 +1,7 @@
 // Ticket queue rules (ux-spec 3.4, api_contract.md v2): SLA state, views,
 // sorting and the visibility rules the cabinet applies on its side. Pure,
 // types-only imports, so the node tests load it directly.
-import type { Ticket, TicketCategory, TicketPriority, TicketStatus } from '@/types/api'
+import type { Role, Ticket, TicketCategory, TicketPriority, TicketStatus } from '@/types/api'
 
 // ── Visibility (contract v2, "rules of code") ───────────────────────────────
 
@@ -132,10 +132,58 @@ export function durationParts(ms: number): DurationParts {
 
 // ── Views (ux-spec 3.4, left rail) ──────────────────────────────────────────
 
-// "Mine" needs auth and "Security" needs roles, neither exists in v2; the site
-// view is the global site filter (stores/site.ts) sent as `site=`.
-export const TICKET_VIEWS = ['all', 'unassigned', 'urgent', 'overdue', 'closed'] as const
+// The site view is the global site filter (stores/site.ts) sent as `site=`.
+// "security" (wave 2, #21): F9 and restricted tickets, for the HR lead only.
+export const TICKET_VIEWS = [
+  'all',
+  'unassigned',
+  'urgent',
+  'overdue',
+  'closed',
+  'security',
+] as const
 export type TicketView = (typeof TICKET_VIEWS)[number]
+
+// Views only some roles get; a role (or no auth) outside the list does not see them.
+const VIEW_ROLES: Partial<Record<TicketView, readonly Role[]>> = { security: ['hr_lead'] }
+
+export function viewsFor(role: Role | null): TicketView[] {
+  return TICKET_VIEWS.filter((v) => {
+    const only = VIEW_ROLES[v]
+    return !only || (role !== null && only.includes(role))
+  })
+}
+
+// Security tickets: category F9 or the server's restricted flag (F5 included).
+export function isSecurity(t: Pick<Ticket, 'category'> & { restricted?: boolean }): boolean {
+  return t.category === 'F9' || t.restricted === true
+}
+
+// The security SLA is one working day: the same clock time on the next
+// working day (Saturday and Sunday skipped, holidays are the server's).
+export const SECURITY_SLA_WORKING_DAYS = 1
+
+export function addWorkingDays(fromMs: number, days: number): number {
+  const d = new Date(fromMs)
+  let left = days
+  while (left > 0) {
+    d.setDate(d.getDate() + 1)
+    const wd = d.getDay()
+    if (wd !== 0 && wd !== 6) left--
+  }
+  return d.getTime()
+}
+
+export function securityDue(t: Pick<Ticket, 'created_at'>): number {
+  return addWorkingDays(at(t.created_at), SECURITY_SLA_WORKING_DAYS)
+}
+
+export function isSecurityOverdue(
+  t: Pick<Ticket, 'status' | 'created_at' | 'category'> & { restricted?: boolean },
+  now: number,
+): boolean {
+  return isSecurity(t) && isActive(t) && securityDue(t) < now
+}
 
 export function isActive(t: Pick<Ticket, 'status'>): boolean {
   return t.status !== 'resolved'
@@ -153,6 +201,8 @@ export function matchesView(t: Ticket, view: TicketView, now: number): boolean {
       return isOverdue(t, now)
     case 'closed':
       return t.status === 'resolved'
+    case 'security':
+      return isSecurity(t)
   }
 }
 

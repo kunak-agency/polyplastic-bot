@@ -1,4 +1,5 @@
 import type { MockRequest, MockResult, MockRoute } from '../adapter'
+import { seedNudges } from './team'
 import type { Newcomer, SiteCode, TimelineEvent } from '@/types/api'
 import { SITES } from '@/stores/site'
 import {
@@ -288,6 +289,7 @@ export const newcomerRoutes: MockRoute[] = routes.map((r) => ({
   ...r,
   handler: (req) => {
     ensureSeeded()
+    seedNudges()
     return r.handler(req)
   },
 }))

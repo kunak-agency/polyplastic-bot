@@ -81,10 +81,13 @@ export function isValidTz(tz: string): boolean {
   }
 }
 
-// The zone the bot uses for the newcomer: their own, else the site's; null —
-// the backend sends neither yet.
-export function effectiveTz(n: Pick<Newcomer, 'tz' | 'site_tz'>): string | null {
-  return n.tz || n.site_tz || null
+// The zone the bot uses for the newcomer. The server's `effective_tz` wins: without
+// FEATURE_TZ it is the site's zone even when the card has its own `tz`. An older
+// backend without the field: their own, else the site's; null — neither sent.
+export function effectiveTz(
+  n: Pick<Newcomer, 'tz' | 'site_tz'> & { effective_tz?: string | null },
+): string | null {
+  return n.effective_tz || n.tz || n.site_tz || null
 }
 
 // The nearest step still to be sent (scheduled or held for the go-ahead).

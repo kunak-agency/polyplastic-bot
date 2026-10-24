@@ -1,12 +1,23 @@
 import type { MockRequest, MockResult, MockRoute } from '../adapter'
-import { ensureSeeded, newcomers, publicUser, tickets, users, view } from '../state'
+import {
+  ensureSeeded,
+  newcomers,
+  publicUser,
+  tickets,
+  timelines,
+  users,
+  view,
+  zoneOf,
+} from '../state'
 import { currentUser, forbidden } from './auth'
 import type {
   DashTile,
   DashboardItem,
   HrLeadDashboard,
+  IpDecision,
   LoadRow,
   Newcomer,
+  NudgeItem,
   RecruiterDashboard,
   Role,
   TeamMember,
@@ -15,6 +26,7 @@ import type {
   Zone,
 } from '@/types/api'
 import { addDays, localIsoDate } from '@/lib/calendar'
+import { utcOffsetMinutes } from '@/lib/tz'
 
 // Recruiter's dashboard, team, users and reassignment (api_contract_auth.md).
 
@@ -287,9 +299,22 @@ function hrLeadDashboard(req: MockRequest): MockResult {
       })
     }
   }
+  // One aggregate row for all of them, as the server sends it.
   const noRecruiter = all.filter((n) => !n.recruiter_id)
-  for (const n of noRecruiter)
-    rows.push(row(n, 'no_recruiter', 'yellow', 'новичок без рекрутера', ['pin']))
+  if (noRecruiter.length > 0)
+    rows.push({
+      id: 'no-recruiter',
+      kind: 'no_recruiter',
+      zone: 'yellow',
+      reason: `Без рекрутера: ${noRecruiter.length}`,
+      newcomer_id: null,
+      newcomer_name: null,
+      count: noRecruiter.length,
+      ticket_id: null,
+      due_at: null,
+      day: null,
+      actions: ['pin'],
+    })
   rows.push({
     id: 'theme-F2',
     kind: 'theme_no_owner',
@@ -350,10 +375,93 @@ function hrLeadDashboard(req: MockRequest): MockResult {
   return { status: 200, data }
 }
 
+// Reminder history per newcomer (api_contract.md, "Nudges").
+const nudges = new Map<string, NudgeItem[]>()
+let nudgesSeeded = false
+export function seedNudges(): void {
+  if (nudgesSeeded) return
+  nudgesSeeded = true
+  for (const [id, x] of Object.entries(EXTRA)) {
+    const n = newcomers.get(id)
+    if (n && x.catchup) n.catchup = x.catchup
+  }
+  for (const n of newcomers.values()) {
+    if (!n.unresponsive_since) continue
+    const base = Date.parse(n.unresponsive_since)
+    nudges.set(n.id, [
+      nudge(n.id, 'auto', 1, new Date(base - 20 * 3_600_000).toISOString()),
+      nudge(n.id, 'auto', 2, new Date(base).toISOString()),
+    ])
+  }
+}
+
+function openQuestion(id: string): { event_id: string; title: string } | null {
+  // A sent step still waiting for an answer: a survey first, else any sent step.
+  const sent = (timelines.get(id) ?? []).filter((e) => e.status === 'sent' && !e.answer)
+  const ev = sent.find((e) => e.kind === 'survey') ?? sent[sent.length - 1]
+  return ev ? { event_id: ev.event_id, title: ev.title } : null
+}
+
+function nudge(id: string, kind: NudgeItem['kind'], n: number, at: string): NudgeItem {
+  const q = openQuestion(id)
+  return {
+    id: crypto.randomUUID(),
+    event_id: kind === 'contacted' ? null : (q?.event_id ?? null),
+    event_title: kind === 'contacted' ? null : (q?.title ?? null),
+    kind,
+    n,
+    at,
+    planned: false,
+    delivered: true,
+    created_by: kind === 'auto' ? null : (currentUser()?.id ?? null),
+  }
+}
+
 function markContacted(req: MockRequest): MockResult {
   if (!newcomers.has(req.params.id)) return err(404, 'NOT_FOUND', 'Новичок не найден')
   contacted.add(req.params.id)
+  const list = nudges.get(req.params.id) ?? []
+  list.push(nudge(req.params.id, 'contacted', 0, new Date().toISOString()))
+  nudges.set(req.params.id, list)
   return { status: 204 }
+}
+
+function listNudges(req: MockRequest): MockResult {
+  const n = newcomers.get(req.params.id)
+  if (!n) return err(404, 'NOT_FOUND', 'Новичок не найден')
+  const items = (nudges.get(n.id) ?? []).slice().sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+  return { status: 200, data: { items, total: items.length, tz: zoneOf(n) } }
+}
+
+const IP_VALUES: IpDecision[] = ['keep', 'extend', 'part']
+
+function ipDecision(req: MockRequest): MockResult {
+  const n = newcomers.get(req.params.id)
+  if (!n) return err(404, 'NOT_FOUND', 'Новичок не найден')
+  const me = currentUser()
+  if (me && me.role === 'manager') return forbidden()
+  const d = req.body.decision
+  if (d !== null && !IP_VALUES.includes(d as IpDecision))
+    return err(422, 'VALIDATION_FAILED', 'Решение: оставить, продлить или расстаться')
+  n.ip_decision = (d as IpDecision | null) ?? null
+  n.ip_decision_at = d ? new Date().toISOString() : null
+  n.ip_decision_by = d ? (me?.full_name ?? 'HR') : null
+  return { status: 200, data: view(n) }
+}
+
+function devRecruiterMorning(): MockResult {
+  if (!isLead()) return forbidden()
+  const sent = [...users.values()].filter((u) => u.role === 'recruiter' && u.active !== false)
+  return {
+    status: 200,
+    data: {
+      sent: sent.length,
+      items: sent.map((u) => ({
+        user_id: u.id,
+        text: 'Доброе утро! Сегодня: срочные обращения — 1, не отвечают после напоминаний — 2.',
+      })),
+    },
+  }
 }
 
 // The multipart body does not reach the mock (parseBody keeps objects only),
@@ -372,13 +480,64 @@ function uploadFile(req: MockRequest): MockResult {
   }
 }
 
+// 200 sent; 202 planned when it is outside 8-18 of the newcomer's zone (a
+// second press returns the same planned nudge); 409 nothing to remind about.
 function remind(req: MockRequest): MockResult {
   const n = newcomers.get(req.params.id)
   if (!n) return err(404, 'NOT_FOUND', 'Новичок не найден')
   if (n.connection !== 'connected')
     return err(409, 'CONFLICT', 'Новичок не подключён к боту — напоминать некуда')
+  const q = openQuestion(n.id)
+  if (!q) return err(409, 'NOTHING_TO_REMIND', 'Напоминать не о чем: вопросов без ответа нет')
+  const tz = zoneOf(n)
+  const list = nudges.get(n.id) ?? []
+  const pending = list.find((x) => x.planned)
+  if (pending)
+    return {
+      status: 202,
+      data: {
+        status: 'planned',
+        at: pending.at,
+        tz,
+        message: 'Отправится в 08:00 по времени новичка',
+        nudge: pending,
+      },
+    }
+  const hour = Number(
+    new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' }).format(
+      new Date(),
+    ),
+  )
+  const count = list.filter((x) => x.event_id === q.event_id).length + 1
+  const item = nudge(n.id, 'manual', count, new Date().toISOString())
+  list.push(item)
+  nudges.set(n.id, list)
+  if (hour < 8 || hour >= 18) {
+    // 08:00 on the newcomer's clock: today before 8, tomorrow after 18.
+    const now = new Date()
+    const off = utcOffsetMinutes(tz, now)
+    const local = new Date(now.getTime() + off * 60_000)
+    if (hour >= 18) local.setUTCDate(local.getUTCDate() + 1)
+    local.setUTCHours(8, 0, 0, 0)
+    item.planned = true
+    item.delivered = false
+    item.at = new Date(local.getTime() - off * 60_000).toISOString()
+    return {
+      status: 202,
+      data: {
+        status: 'planned',
+        at: item.at,
+        tz,
+        message: 'Отправится в 08:00 по времени новичка',
+        nudge: item,
+      },
+    }
+  }
   botNudges++
-  return { status: 204 }
+  return {
+    status: 200,
+    data: { status: 'sent', at: item.at, tz, message: 'Напоминание отправлено', nudge: item },
+  }
 }
 
 function team(): MockResult {
@@ -485,6 +644,10 @@ const routes: MockRoute[] = [
   { method: 'GET', path: '/hrlead/dashboard', handler: hrLeadDashboard },
   { method: 'POST', path: '/newcomers/:id/contacted', handler: markContacted },
   { method: 'POST', path: '/newcomers/:id/remind', handler: remind },
+  { method: 'POST', path: '/newcomers/:id/nudge', handler: remind },
+  { method: 'GET', path: '/newcomers/:id/nudges', handler: listNudges },
+  { method: 'POST', path: '/newcomers/:id/ip-decision', handler: ipDecision },
+  { method: 'POST', path: '/dev/recruiter-morning', handler: devRecruiterMorning },
   { method: 'POST', path: '/newcomers/:id/files', handler: uploadFile },
   { method: 'GET', path: '/team', handler: team },
   { method: 'GET', path: '/users', handler: listUsers },
@@ -497,6 +660,7 @@ export const teamRoutes: MockRoute[] = routes.map((r) => ({
   ...r,
   handler: (req) => {
     ensureSeeded()
+    seedNudges()
     return r.handler(req)
   },
 }))
