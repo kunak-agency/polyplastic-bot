@@ -61,3 +61,17 @@ export async function apiSimulateStart(body: SimulateStartRequest): Promise<Newc
   const r = await http.post<Newcomer>('/dev/simulate-start', body)
   return r.data
 }
+
+// POST /api/newcomers/{id}/flags (contract v4): the recruiter's go-ahead
+// (recruiter_enabled) releases the steps held for it.
+export async function apiSetNewcomerFlag(
+  id: string,
+  flag: string,
+  value = true,
+): Promise<{ flags: Record<string, boolean> }> {
+  const r = await http.post<{ flags: Record<string, boolean> }>(
+    `/newcomers/${encodeURIComponent(id)}/flags`,
+    { flag, value },
+  )
+  return r.data
+}

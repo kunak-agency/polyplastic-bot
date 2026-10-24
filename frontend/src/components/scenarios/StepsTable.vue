@@ -110,6 +110,9 @@ function badge(s: ScenarioStep, label: string) {
             <td class="cell-text">
               <div class="fw-medium title">
                 <span>{{ s.title || t('scenarios.editor.untitled') }}</span>
+                <span v-if="compact && s.sites.length > 0" class="site-tag">{{
+                  sitesLabel(s)
+                }}</span>
                 <Mail
                   v-if="s.hr_task"
                   :size="12"
@@ -247,6 +250,17 @@ function badge(s: ScenarioStep, label: string) {
 }
 .cell-chips {
   max-width: 260px;
+}
+/* With the step panel open the sites column hides: site variants of one
+   step (r55/r56) keep their tag next to the title. */
+.site-tag {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  padding: 0 6px;
+  white-space: nowrap;
 }
 .steps--compact .cell-text {
   max-width: 190px;

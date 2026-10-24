@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Plus, Save, Terminal, X, Zap } from 'lucide-vue-next'
 import FormField from '@/components/common/FormField.vue'
@@ -47,6 +48,13 @@ function reset(): void {
 watch(() => [props.commands, props.rules], reset, { immediate: true })
 const dirty = computed(() => JSON.stringify([cmds.value, rls.value]) !== savedJson.value)
 defineExpose({ dirty })
+// Edits here are a draft of their own, apart from the steps: switching to the
+// table or the timeline used to drop them silently. Leaving the tab saves
+// them; leaving the page asks first.
+onBeforeUnmount(() => {
+  if (dirty.value) save()
+})
+onBeforeRouteLeave(() => !dirty.value || window.confirm(t('common.unsavedLeave')))
 
 // ── Commands ──
 function addCommand(preset?: 'food' | 'hr'): void {
@@ -146,6 +154,7 @@ function save(): void {
   <div class="rules">
     <div class="rules__bar">
       <p class="muted txt-sm">{{ t('scenarios.rules.intro') }}</p>
+      <span v-if="dirty" class="txt-sm dirty-note">{{ t('scenarios.rules.unsaved') }}</span>
       <Button variant="primary" :disabled="!dirty || saving" @click="save">
         <Save :size="14" />{{ saving ? t('common.actions.saving') : t('scenarios.rules.save') }}
       </Button>
@@ -341,6 +350,10 @@ function save(): void {
 </template>
 
 <style scoped>
+.dirty-note {
+  color: var(--warning);
+  margin-left: auto;
+}
 .rules {
   display: flex;
   flex-direction: column;

@@ -17,6 +17,9 @@ const { t } = useI18n()
 const GROUPS = ['A', 'B', 'C', 'D', 'E']
 const outcomes = computed(() => props.survey.outcomes ?? [])
 
+function firstCond(): OutcomeCondition {
+  return questionType(1) === 'multi' ? { q: 1, contains: [] } : { q: 1, in: [] }
+}
 function emitAll(list: SurveyOutcome[]): void {
   emit('update', list)
 }
@@ -27,7 +30,7 @@ function addRule(): void {
   const group = GROUPS[Math.min(outcomes.value.length, GROUPS.length - 1)]
   emitAll([
     ...outcomes.value,
-    { if: [{ q: 1, in: [] }], match: 'all', group, messages: [], actions: [] },
+    { if: [firstCond()], match: 'all', group, messages: [], actions: [] },
   ])
 }
 function removeRule(i: number): void {
@@ -43,7 +46,7 @@ function setCond(i: number, ci: number, p: Partial<OutcomeCondition>): void {
 }
 function addCond(i: number): void {
   const o = outcomes.value[i]
-  setRule(i, { if: [...o.if, { q: 1, in: [] }] })
+  setRule(i, { if: [...o.if, firstCond()] })
 }
 function removeCond(i: number, ci: number): void {
   const o = outcomes.value[i]
@@ -78,8 +81,16 @@ function setOp(i: number, ci: number, op: 'in' | 'contains'): void {
     op === 'contains' ? { contains: v, in: undefined } : { in: v, contains: undefined },
   )
 }
+// A multi answer holds several options: "contains" is the only condition
+// that reads it right, so it is the default for such a question.
 function setQuestion(i: number, ci: number, q: number): void {
-  setCond(i, ci, { q, in: [], contains: undefined })
+  setCond(
+    i,
+    ci,
+    questionType(q) === 'multi'
+      ? { q, contains: [], in: undefined }
+      : { q, in: [], contains: undefined },
+  )
 }
 function valueLabel(q: number, key: string, label: string | null): string {
   if (label !== null) return label

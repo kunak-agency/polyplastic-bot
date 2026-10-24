@@ -120,7 +120,9 @@ export interface NewcomerListQuery {
   risk?: Risk | null
 }
 
-export type EventStatus = 'scheduled' | 'sent' | 'answered' | 'skipped' | 'failed'
+// held — a step shown "on the recruiter's go-ahead" (flag_required) waits for the
+// flag in the newcomer's card (contract v4).
+export type EventStatus = 'scheduled' | 'sent' | 'answered' | 'skipped' | 'failed' | 'held'
 
 export interface TimelineEvent {
   event_id: string

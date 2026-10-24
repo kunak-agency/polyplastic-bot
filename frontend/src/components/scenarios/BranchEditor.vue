@@ -15,7 +15,14 @@ import {
   labelLength,
   type Issue,
 } from '@/lib/scenarioBranches'
-import type { ActionType, Branch, BranchAction, BranchMessage, BranchThen } from '@/types/api'
+import type {
+  ActionType,
+  Branch,
+  BranchAction,
+  BranchMessage,
+  BranchThen,
+  StepButton,
+} from '@/types/api'
 
 // What happens after one button (verdict §4): up to two messages with terminal
 // buttons, actions from a closed list, then "continue the block" or "end it".
@@ -81,6 +88,31 @@ function setTerminal(mi: number, bi: number, label: string): void {
   const m = branch.value?.messages[mi]
   if (!m) return
   setMessage(mi, { buttons: m.buttons.map((b, j) => (j === bi ? { ...b, label } : b)) })
+}
+// What a terminal button does (contract v4, canonical form as the import
+// writes it): one action in its own branch, no messages. Empty — the press is
+// only recorded. An import's string form ("handoff:hr") still shows its type.
+const TERMINAL_ACTIONS: ActionType[] = ['open_free_text', 'handoff', 'escalate', 'send_file']
+function terminalType(b: StepButton): ActionType | '' {
+  const own = b.branch?.actions[0]?.type
+  if (own) return own
+  const legacy = b.action.split(':')[0]
+  return legacy === 'handoff' || legacy === 'escalate' ? legacy : ''
+}
+function setTerminalButton(mi: number, bi: number, p: Partial<StepButton>): void {
+  const m = branch.value?.messages[mi]
+  if (!m) return
+  setMessage(mi, { buttons: m.buttons.map((b, j) => (j === bi ? { ...b, ...p } : b)) })
+}
+function setTerminalType(mi: number, bi: number, type: ActionType | ''): void {
+  setTerminalButton(mi, bi, {
+    action: '',
+    opens_free_text: undefined,
+    branch: type ? { messages: [], actions: [defaultAction(type)], then: 'continue' } : null,
+  })
+}
+function setTerminalAction(mi: number, bi: number, a: BranchAction): void {
+  setTerminalButton(mi, bi, { branch: { messages: [], actions: [a], then: 'continue' } })
 }
 function addTerminal(mi: number): void {
   const m = branch.value?.messages[mi]
@@ -194,26 +226,52 @@ const gotoInvalid = computed(() => props.issues.some((i) => i.code === 'gotoNowh
         />
         <div class="br__terminal">
           <span class="txt-sm muted">{{ t('scenarios.branch.terminal') }}</span>
-          <div v-for="(b, bi) in m.buttons" :key="bi" class="br__row">
-            <input
-              :class="['input', { err: !b.label.trim(), warn: labelIsLong(b.label) }]"
-              :title="labelIsLong(b.label) ? t('scenarios.issue.labelTooLong') : undefined"
-              :value="b.label"
-              :placeholder="t('scenarios.panel.buttonLabel')"
-              :aria-label="t('scenarios.panel.buttonLabel')"
-              @input="setTerminal(mi, bi, ($event.target as HTMLInputElement).value)"
+          <div v-for="(b, bi) in m.buttons" :key="bi" class="br__term">
+            <div class="br__row">
+              <input
+                :class="['input', { err: !b.label.trim(), warn: labelIsLong(b.label) }]"
+                :title="labelIsLong(b.label) ? t('scenarios.issue.labelTooLong') : undefined"
+                :value="b.label"
+                :placeholder="t('scenarios.panel.buttonLabel')"
+                :aria-label="t('scenarios.panel.buttonLabel')"
+                @input="setTerminal(mi, bi, ($event.target as HTMLInputElement).value)"
+              />
+              <span :class="['br__count', { 'br__count--over': labelIsLong(b.label) }]">{{
+                labelLength(b.label)
+              }}</span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                :aria-label="t('scenarios.panel.removeButton')"
+                @click="removeTerminal(mi, bi)"
+              >
+                <X :size="14" />
+              </Button>
+            </div>
+            <label class="br__field">
+              <span class="txt-sm muted">{{ t('scenarios.branch.terminalDoes') }}</span>
+              <select
+                class="input"
+                :aria-label="t('scenarios.branch.terminalDoesN', { label: b.label || bi + 1 })"
+                :value="terminalType(b)"
+                @change="
+                  setTerminalType(mi, bi, ($event.target as HTMLSelectElement).value as ActionType)
+                "
+              >
+                <option value="">{{ t('scenarios.branch.terminalRecord') }}</option>
+                <option v-for="a in TERMINAL_ACTIONS" :key="a" :value="a">
+                  {{ t(`scenarios.action.type.${a}`) }}
+                </option>
+              </select>
+            </label>
+            <ActionRow
+              v-if="b.branch?.actions[0]"
+              :action="b.branch.actions[0]"
+              :media-names="mediaNames"
+              :invalid="handoffInvalid(b.branch.actions[0])"
+              @update="setTerminalAction(mi, bi, $event)"
+              @remove="setTerminalType(mi, bi, '')"
             />
-            <span :class="['br__count', { 'br__count--over': labelIsLong(b.label) }]">{{
-              labelLength(b.label)
-            }}</span>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              :aria-label="t('scenarios.panel.removeButton')"
-              @click="removeTerminal(mi, bi)"
-            >
-              <X :size="14" />
-            </Button>
           </div>
           <Button
             size="sm"
@@ -364,6 +422,13 @@ const gotoInvalid = computed(() => props.issues.some((i) => i.code === 'gotoNowh
   height: 56px;
   padding: 6px 8px;
   resize: vertical;
+}
+.br__term {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border-subtle);
 }
 .br__terminal,
 .br__actions {

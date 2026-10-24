@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { CalendarClock, History, Link2, PlugZap } from 'lucide-vue-next'
+import { CalendarClock, History, Hourglass, Link2, PlugZap } from 'lucide-vue-next'
 import PageContainer from '@/components/common/PageContainer.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -19,6 +19,7 @@ import {
   apiGetNewcomer,
   apiGetTimeline,
   apiPatchNewcomer,
+  apiSetNewcomerFlag,
   apiSimulateStart,
   apiTimeTravel,
 } from '@/api/newcomers'
@@ -127,6 +128,26 @@ async function simulateStart(): Promise<void> {
     toast.error(errorMessage(e, 'newcomers.timeTravel.simulateFailed'))
   } finally {
     simulating.value = false
+  }
+}
+
+// ── Recruiter's go-ahead (flag_required steps, spec r34/r36) ──────────────────
+// The card has no flags of its own (GET does not return them): steps the bot
+// holds for the go-ahead show in the timeline as "held", and the button
+// releases them (POST /flags).
+const RECRUITER_FLAG = 'recruiter_enabled'
+const held = computed(() => (timeline.value ?? []).filter((e) => e.status === 'held'))
+const giving = ref(false)
+async function giveGoAhead(): Promise<void> {
+  giving.value = true
+  try {
+    await apiSetNewcomerFlag(id.value, RECRUITER_FLAG, true)
+    toast.success(t('newcomers.recruiterGo.done'))
+    await loadTimeline()
+  } catch (e) {
+    toast.error(errorMessage(e, 'newcomers.recruiterGo.failed'))
+  } finally {
+    giving.value = false
   }
 }
 
@@ -302,13 +323,53 @@ function consent(n: Newcomer): string {
           v-else-if="timeline && timeline.length === 0"
           :title="t('newcomers.timeline.empty')"
         />
-        <NewcomerTimeline v-else-if="timeline" :items="timeline" :today="newcomer.day" />
+        <template v-else-if="timeline">
+          <div v-if="held.length > 0" class="held" role="status">
+            <Hourglass :size="16" class="held__icon" aria-hidden="true" />
+            <div class="held__text">
+              <div class="fw-medium">
+                {{
+                  t(
+                    'newcomers.recruiterGo.held',
+                    {
+                      n: held.length,
+                      titles: held.map((e) => e.title).join(', '),
+                    },
+                    held.length,
+                  )
+                }}
+              </div>
+              <div class="txt-sm muted">{{ t('newcomers.recruiterGo.hint') }}</div>
+            </div>
+            <Button size="sm" variant="primary" :disabled="giving" @click="giveGoAhead">
+              {{ giving ? t('newcomers.recruiterGo.giving') : t('newcomers.recruiterGo.give') }}
+            </Button>
+          </div>
+          <NewcomerTimeline :items="timeline" :today="newcomer.day" />
+        </template>
       </SectionCard>
     </template>
   </PageContainer>
 </template>
 
 <style scoped>
+.held {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-md);
+}
+.held__icon {
+  color: var(--warning);
+  flex-shrink: 0;
+}
+.held__text {
+  flex: 1;
+  min-width: 0;
+}
 .head {
   display: flex;
   justify-content: space-between;

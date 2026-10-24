@@ -27,6 +27,7 @@ import ScenarioTimeline from '@/components/scenarios/ScenarioTimeline.vue'
 import PhonePreview from '@/components/scenarios/PhonePreview.vue'
 import PublishDialog from '@/components/scenarios/PublishDialog.vue'
 import ScenarioRules from '@/components/scenarios/ScenarioRules.vue'
+import RewriteVyButton from '@/components/scenarios/RewriteVyButton.vue'
 import { Button } from '@/components/ui/button'
 import {
   apiDeleteScenario,
@@ -478,6 +479,13 @@ async function onPublish(body: PublishRequest): Promise<void> {
           >
             <Trash2 :size="14" />{{ t('scenarios.editor.deleteDraft') }}
           </Button>
+          <RewriteVyButton
+            v-if="steps.length > 0"
+            :scenario-id="scenario.id"
+            :steps="steps"
+            :dirty="dirty"
+            @done="adopt"
+          />
           <Button @click="addStep"><Plus :size="14" />{{ t('scenarios.editor.addStep') }}</Button>
           <Button :disabled="!dirty || saving" @click="onSave">
             <Save :size="14" />{{

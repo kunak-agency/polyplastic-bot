@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, CheckCheck, Circle, CircleSlash, TriangleAlert } from 'lucide-vue-next'
+import { Check, CheckCheck, Circle, CircleSlash, Hourglass, TriangleAlert } from 'lucide-vue-next'
 import { formatDayOffset } from '@/lib/calendar'
 import type { EventStatus, TimelineEvent } from '@/types/api'
 
@@ -14,6 +14,7 @@ const ICONS: Record<EventStatus, Component> = {
   answered: CheckCheck,
   skipped: CircleSlash,
   failed: TriangleAlert,
+  held: Hourglass,
 }
 
 // One group per day of the scenario, in plan order; the server returns events
@@ -152,6 +153,10 @@ const groups = computed(() => {
 }
 .tl__event--failed .tl__icon {
   color: var(--danger);
+}
+.tl__event--held .tl__icon,
+.tl__event--held .tl__status {
+  color: var(--warning);
 }
 .tl__event--skipped .tl__icon {
   color: var(--fg-subtle);
