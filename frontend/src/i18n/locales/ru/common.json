@@ -46,7 +46,7 @@
   "nav": {
     "items": {
       "overview": "Обзор площадок",
-      "newcomers": "Сотрудники",
+      "newcomers": "Новые сотрудники",
       "tickets": "Обращения",
       "scenarios": "Сценарии",
       "knowledge": "База знаний",
@@ -63,7 +63,7 @@
   },
   "routes": {
     "overview": "Обзор площадок",
-    "newcomers": "Сотрудники",
+    "newcomers": "Новые сотрудники",
     "tickets": "Обращения",
     "scenarios": "Сценарии",
     "knowledge": "База знаний",
