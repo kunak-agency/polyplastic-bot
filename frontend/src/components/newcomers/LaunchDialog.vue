@@ -12,6 +12,9 @@ import { apiGetScenario } from '@/api/scenarios'
 import { useScenariosStore } from '@/stores/scenarios'
 import { SITES, useSiteStore } from '@/stores/site'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
+import { useUsersStore } from '@/stores/users'
+import { TZ_OPTIONS, tzKey, tzOffsetLabel } from '@/lib/tz'
 import { errorMessage } from '@/lib/apiError'
 import { addDays, buildPlanPreview, localIsoDate, weekStart } from '@/lib/calendar'
 import type { Newcomer, NewcomerCreate, ScenarioStep, Shift, SiteCode } from '@/types/api'
@@ -24,6 +27,19 @@ const toast = useToast()
 const scenariosStore = useScenariosStore()
 const { items: scenarios } = storeToRefs(scenariosStore)
 const siteStore = useSiteStore()
+// api_contract_auth.md: hr_lead picks the recruiter from the users, a
+// recruiter launches for himself; with auth off the name is typed as before.
+const auth = useAuthStore()
+const users = useUsersStore()
+const { recruiters } = storeToRefs(users)
+const recruiterMode = computed<'pick' | 'self' | 'text'>(() =>
+  auth.viewer === 'hr_lead' ? 'pick' : auth.viewer === 'recruiter' ? 'self' : 'text',
+)
+
+function zoneLabel(id: string): string {
+  const key = tzKey(id)
+  return t('tz.option', { city: key ? t(`tz.city.${key}`) : id, offset: tzOffsetLabel(id) })
+}
 
 type Form = Omit<NewcomerCreate, 'shift'> & { shift: Shift | '' }
 
@@ -36,7 +52,9 @@ function blank(): Form {
     position: '',
     manager_name: '',
     mentor_name: '',
-    recruiter_name: '',
+    recruiter_name: recruiterMode.value === 'self' ? (auth.user?.full_name ?? '') : '',
+    recruiter_id: recruiterMode.value === 'self' ? (auth.user?.id ?? '') : '',
+    tz: '',
     // Monday two weeks ahead: the usual distance between offer and start.
     start_date: addDays(weekStart(localIsoDate()), 14),
     shift: '',
@@ -92,6 +110,7 @@ watch(
     Object.assign(form, blank())
     touched.value = false
     pickScenario()
+    if (recruiterMode.value === 'pick') users.loadRecruiters().catch(() => undefined)
     // Fresh every time: a version published since the last launch must show.
     void scenariosStore.load()
   },
@@ -134,6 +153,11 @@ const preview = computed(() =>
   steps.value && form.start_date ? buildPlanPreview(steps.value, form.start_date, form.site) : null,
 )
 
+// The picked user's name goes along as recruiter_name: older servers key on it.
+function onPickRecruiter(): void {
+  form.recruiter_name = recruiters.value.find((u) => u.id === form.recruiter_id)?.full_name ?? ''
+}
+
 async function submit(): Promise<void> {
   touched.value = true
   if (Object.keys(errors.value).length > 0) return
@@ -143,6 +167,8 @@ async function submit(): Promise<void> {
       ...form,
       full_name: form.full_name.trim(),
       shift: form.shift || null,
+      recruiter_id: form.recruiter_id || undefined,
+      tz: form.tz || null,
     })
     toast.success(t('newcomers.launch.launched'))
     open.value = false
@@ -287,13 +313,34 @@ const SITE_CODES: readonly SiteCode[] = SITES
           required
           :error="errors.recruiter_name"
         >
+          <select
+            v-if="recruiterMode === 'pick'"
+            id="lf-rec"
+            v-model="form.recruiter_id"
+            class="input"
+            :class="{ err: errors.recruiter_name }"
+            @change="onPickRecruiter"
+          >
+            <option value="">{{ t('team.pickRecruiter') }}</option>
+            <option v-for="u in recruiters" :key="u.id" :value="u.id">{{ u.full_name }}</option>
+          </select>
           <input
+            v-else
             id="lf-rec"
             v-model="form.recruiter_name"
             class="input"
             :class="{ err: errors.recruiter_name }"
+            :readonly="recruiterMode === 'self'"
             :placeholder="t('newcomers.launch.placeholders.recruiter')"
           />
+        </FormField>
+        <FormField :label="t('tz.label')" html-for="lf-tz" :hint="t('tz.launchHint')">
+          <select id="lf-tz" v-model="form.tz" class="input">
+            <option value="">{{ t('tz.bySite') }}</option>
+            <option v-for="o in TZ_OPTIONS" :key="o.id" :value="o.id">
+              {{ zoneLabel(o.id) }}
+            </option>
+          </select>
         </FormField>
         <FormField
           :label="t('newcomers.launch.fields.scenario')"

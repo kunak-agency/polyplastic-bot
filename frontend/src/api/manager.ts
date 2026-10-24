@@ -17,3 +17,10 @@ export async function apiManagerInvite(newcomerId: string): Promise<ManagerInvit
   const r = await http.post<ManagerInvite>(`/newcomers/${newcomerId}/manager-invite`)
   return r.data
 }
+
+// The head of unit closes a 1:1 task from the cabinet: "Met" (done) or
+// "Planned" — the same as the mg:met / mg:plan buttons in MAX
+// (api_contract_auth.md, proposed route).
+export async function apiManagerTask(taskId: string, status: 'done' | 'planned'): Promise<void> {
+  await http.post(`/manager/tasks/${encodeURIComponent(taskId)}`, { status })
+}

@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRoute, RouterLink } from 'vue-router'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { CalendarClock, History, Hourglass, Link2, PlugZap } from 'lucide-vue-next'
+import {
+  BellRing,
+  CalendarClock,
+  History,
+  Hourglass,
+  Link2,
+  PhoneCall,
+  PlugZap,
+} from 'lucide-vue-next'
 import PageContainer from '@/components/common/PageContainer.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -13,6 +21,10 @@ import ConnectionBadge from '@/components/newcomers/ConnectionBadge.vue'
 import NewcomerTimeline from '@/components/newcomers/NewcomerTimeline.vue'
 import NewcomerTickets from '@/components/tickets/NewcomerTickets.vue'
 import ManagerInviteButton from '@/components/manager/ManagerInviteButton.vue'
+import NewcomerAssign from '@/components/newcomers/NewcomerAssign.vue'
+import ContactPanel from '@/components/newcomers/ContactPanel.vue'
+import PlanUpload from '@/components/newcomers/PlanUpload.vue'
+import { apiRemind } from '@/api/team'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -31,6 +43,7 @@ import type { Newcomer, TimelineEvent } from '@/types/api'
 
 const { t, d } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const toast = useToast()
 const { setBreadcrumbTail } = useBreadcrumbTail()
 
@@ -184,6 +197,31 @@ async function reschedule(): Promise<void> {
   }
 }
 
+// ── Contact / remind (dashboard "Contact" opens the card with ?contact=1) ─────
+const contactOpen = computed(() => route.query.contact === '1')
+function setContact(open: boolean): void {
+  void router.replace({ query: { ...route.query, contact: open ? '1' : undefined } })
+}
+const reminding = ref(false)
+async function remind(): Promise<void> {
+  reminding.value = true
+  try {
+    await apiRemind(id.value)
+    toast.success(t('dashboard.actions.reminded'))
+    await loadTimeline()
+  } catch (e) {
+    toast.error(errorMessage(e, 'dashboard.actions.failed'))
+  } finally {
+    reminding.value = false
+  }
+}
+
+// Recruiter or zone changed in the card; a new zone re-plans unsent steps.
+function onAssigned(n: Newcomer, replanned: boolean): void {
+  newcomer.value = n
+  if (replanned) void loadTimeline()
+}
+
 function addressForm(n: Newcomer): string {
   return t(`newcomers.card.addressForm.${n.address_form ?? 'unknown'}`)
 }
@@ -243,6 +281,13 @@ function consent(n: Newcomer): string {
               </RouterLink>
             </Button>
             <ManagerInviteButton :newcomer-id="newcomer.id" />
+            <PlanUpload :newcomer-id="newcomer.id" />
+            <Button :aria-expanded="contactOpen" @click="setContact(!contactOpen)">
+              <PhoneCall :size="14" />{{ t('newcomers.contact.button') }}
+            </Button>
+            <Button :disabled="reminding || !connected" @click="remind">
+              <BellRing :size="14" />{{ t('dashboard.actions.remind') }}
+            </Button>
             <Button :aria-expanded="rsOpen" @click="rsOpen = !rsOpen">
               <CalendarClock :size="14" />{{ t('newcomers.reschedule.button') }}
             </Button>
@@ -251,6 +296,16 @@ function consent(n: Newcomer): string {
             </Button>
           </div>
         </div>
+
+        <NewcomerAssign :newcomer="newcomer" :timeline="timeline" @updated="onAssigned" />
+
+        <ContactPanel
+          v-if="contactOpen"
+          :newcomer-id="newcomer.id"
+          :phone="newcomer.phone"
+          @done="setContact(false)"
+          @close="setContact(false)"
+        />
 
         <form v-if="rsOpen" class="tt-panel" @submit.prevent="reschedule">
           <div class="tt-panel__text">
@@ -398,8 +453,11 @@ function consent(n: Newcomer): string {
 }
 .head__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: flex-start;
+  max-width: 560px;
+  justify-content: flex-end;
 }
 .tt-panel {
   display: flex;

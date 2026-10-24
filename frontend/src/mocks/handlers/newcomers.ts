@@ -10,8 +10,12 @@ import {
   newId,
   scenarios,
   timelines,
+  users,
   view,
+  zoneOf,
 } from '../state'
+import { currentUser, forbidden } from './auth'
+import { isValidTz } from '@/lib/tz'
 
 // Mirrors the real API (backend/handlers, api_contract.md v1 + backend note):
 // the same statuses and codes — 422 VALIDATION_FAILED with details[], 404
@@ -49,10 +53,19 @@ function notFound(): MockResult {
 }
 
 function list(req: MockRequest): MockResult {
-  const { site, q, risk } = req.query
+  const { site, q, risk, mine, recruiter_id } = req.query
   const needle = (q ?? '').trim().toLowerCase()
+  const me = currentUser()
+  // A recruiter sees only his own, with or without ?mine=1.
+  const own = me && (mine === '1' || me.role === 'recruiter') ? me.id : null
   const items = [...newcomers.values()]
     .map(view)
+    .filter((n) => !own || n.recruiter_id === own)
+    .filter(
+      (n) =>
+        !recruiter_id ||
+        (recruiter_id === 'none' ? !n.recruiter_id : n.recruiter_id === recruiter_id),
+    )
     .filter((n) => !site || n.site === site)
     .filter((n) => !risk || n.risk === risk)
     .filter(
@@ -110,8 +123,18 @@ function create(req: MockRequest): MockResult {
       { field: 'scenario_id', code: 'OUT_OF_RANGE', message: 'Сценарий не для этой площадки' },
     ])
 
+  const me = currentUser()
+  const recruiterId =
+    typeof b.recruiter_id === 'string' && users.has(b.recruiter_id)
+      ? b.recruiter_id
+      : me?.role === 'recruiter'
+        ? me.id
+        : null
+  const tz = typeof b.tz === 'string' && isValidTz(b.tz) ? b.tz : null
   const stored: Omit<Newcomer, 'day' | 'stage'> = {
     id: newId(),
+    recruiter_id: recruiterId,
+    tz,
     full_name,
     phone,
     site,
@@ -139,21 +162,39 @@ function create(req: MockRequest): MockResult {
   return { status: 201, data: view(stored) }
 }
 
-// PATCH {"start_date"}: unsent events move with the date, sent ones stay.
+// PATCH {"start_date"?, "tz"?, "recruiter_id"?} (v5: every field optional):
+// unsent events move with the date or the zone, sent ones stay.
 function patch(req: MockRequest): MockResult {
   const n = newcomers.get(req.params.id)
   if (!n) return notFound()
-  const start_date = str(req.body.start_date)
-  if (!DATE_RE.test(start_date))
-    return invalid([
-      { field: 'start_date', code: 'INVALID_FORMAT', message: 'Дата в формате YYYY-MM-DD' },
-    ])
-  n.start_date = start_date
+  const b = req.body
+  if ('start_date' in b) {
+    const start_date = str(b.start_date)
+    if (!DATE_RE.test(start_date))
+      return invalid([
+        { field: 'start_date', code: 'INVALID_FORMAT', message: 'Дата в формате YYYY-MM-DD' },
+      ])
+    n.start_date = start_date
+  }
+  if ('tz' in b) {
+    if (b.tz !== null && (typeof b.tz !== 'string' || !isValidTz(b.tz)))
+      return invalid([{ field: 'tz', code: 'INVALID_FORMAT', message: 'Неизвестный пояс' }])
+    n.tz = b.tz
+  }
+  if ('recruiter_id' in b) {
+    const me = currentUser()
+    if (me && me.role !== 'hr_lead') return forbidden()
+    const id = b.recruiter_id
+    if (id !== null && (typeof id !== 'string' || !users.has(id)))
+      return invalid([{ field: 'recruiter_id', code: 'NOT_FOUND', message: 'Рекрутер не найден' }])
+    n.recruiter_id = id
+    n.recruiter_name = id ? (users.get(id)?.full_name ?? '') : ''
+  }
   const steps = scenarios.get(n.scenario_id)?.steps ?? []
   for (const e of timelines.get(n.id) ?? []) {
     if (e.status !== 'scheduled') continue
     const step = steps.find((s) => s.id === e.step_id)
-    if (step) e.fire_at = fireAt(start_date, step)
+    if (step) e.fire_at = fireAt(n.start_date, step, zoneOf(n))
   }
   return { status: 200, data: view(n) }
 }

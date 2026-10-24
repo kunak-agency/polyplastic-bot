@@ -1,0 +1,25 @@
+{
+  "label": "Часовой пояс",
+  "bySite": "По поясу площадки",
+  "bySiteWith": "По площадке: {zone}",
+  "option": "{city} ({offset})",
+  "launchHint": "Время шагов — местное время новичка",
+  "nextTitle": "Ближайший шаг «{title}»",
+  "nextLocal": "{date}, {time} по времени {site} ({offset})",
+  "nextMine": "у вас {time} ({offset})",
+  "nextPlain": "{date}, {time}",
+  "city": {
+    "kaliningrad": "Калининград",
+    "moscow": "Москва",
+    "samara": "Самара",
+    "yekaterinburg": "Екатеринбург",
+    "omsk": "Омск",
+    "novosibirsk": "Новосибирск",
+    "krasnoyarsk": "Красноярск",
+    "irkutsk": "Иркутск",
+    "yakutsk": "Якутск",
+    "vladivostok": "Владивосток",
+    "magadan": "Магадан",
+    "kamchatka": "Камчатка"
+  }
+}

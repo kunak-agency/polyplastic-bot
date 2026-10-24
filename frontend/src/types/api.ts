@@ -81,6 +81,12 @@ export interface Newcomer {
   risk: Risk
   risk_reason: string | null
   open_tickets: number
+  // api_contract_auth.md v5: the assigned recruiter (users.id) and the time
+  // zone. Optional: a backend without the auth/tz wave does not send them.
+  recruiter_id?: string | null
+  // IANA zone overriding the site's; null — the site's zone applies.
+  tz?: string | null
+  site_tz?: string
 }
 
 // POST /api/newcomers: the card without computed fields. The scenario version is
@@ -97,12 +103,17 @@ export interface NewcomerCreate {
   start_date: string
   shift: Shift | null
   scenario_id: string
+  recruiter_id?: string | null
+  tz?: string | null
 }
 
 // PATCH /api/newcomers/{id}: moves the start date; unsent events are re-planned
 // by the server without duplicates (api_contract.md, backend note).
+// v5: every field optional; recruiter_id is for hr_lead only (403 otherwise).
 export interface NewcomerPatch {
-  start_date: string
+  start_date?: string
+  tz?: string | null
+  recruiter_id?: string | null
 }
 
 // POST /api/dev/simulate-start, APP_ENV=development only (api_contract.md,
@@ -118,6 +129,10 @@ export interface NewcomerListQuery {
   site?: SiteCode | null
   q?: string
   risk?: Risk | null
+  // v5: only the current user's newcomers.
+  mine?: boolean
+  // v5, hr_lead: a recruiter's newcomers; 'none' — without a recruiter.
+  recruiter_id?: string | null
 }
 
 // held — a step shown "on the recruiter's go-ahead" (flag_required) waits for the
@@ -876,4 +891,149 @@ export interface MediaRenamed extends MediaItem {
 
 export interface MediaEnsureResponse extends ListResponse<MediaItem> {
   created: number
+}
+
+// ── Auth, roles, dashboards (api_contract_auth.md v5) ───────────────────────
+
+export type Role = 'hr_lead' | 'recruiter' | 'manager'
+
+export interface User {
+  id: string
+  login: string
+  full_name: string
+  role: Role
+  tz: string | null
+  manager_name?: string | null
+  active?: boolean
+}
+
+export interface LoginRequest {
+  login: string
+  password: string
+}
+
+// Role dashboards (research 2026-10-24-role-dashboards.md). Tiles come as a
+// map keyed by tile id; which ids exist and in what order is the cabinet's
+// config (lib/dashboard.ts), so the server may add a tile without breaking it.
+export interface DashTile {
+  value: number
+  // Second number of a pair tile ("expiring / overdue", "today / this week").
+  secondary?: number | null
+  // The server applies the thresholds; the cabinet only paints.
+  red: boolean
+  // Newcomers under the tile: the tile filters the list below by them.
+  ids?: string[]
+}
+
+export type Zone = 'red' | 'yellow'
+
+// Buttons of a "Today" row. recruiter: contact | remind | take | open;
+// hr_lead: assign | reassign | pin | owner (+ open).
+export type TodayActionId =
+  'contact' | 'remind' | 'take' | 'open' | 'assign' | 'reassign' | 'pin' | 'owner'
+
+export interface TodayRow {
+  id: string
+  // Row type, e.g. invite_not_opened, sla, f7_consent, silent, no_plan,
+  // ip_decision, catchup_behind (recruiter); unassigned_ticket, sla_overdue,
+  // no_recruiter, theme_no_owner (hr_lead).
+  kind: string
+  zone: Zone
+  // Reason in words, already composed by the server.
+  reason: string
+  newcomer_id: string | null
+  newcomer_name: string | null
+  ticket_id: string | null
+  recruiter_name?: string | null
+  theme?: string | null
+  due_at: string | null
+  day: number | null
+  actions: TodayActionId[]
+}
+
+// What the automation did by itself today ("the bot did: N reminders, M digests").
+export interface BotDid {
+  nudges: number
+  summaries: number
+}
+
+export interface PulseWeek {
+  sent: number
+  answered: number
+  low: number
+  // Tone of text answers; null — fewer than 5.
+  tone: { positive: number; neutral: number; negative: number; n: number } | null
+}
+
+// Facts per newcomer for the chips of the "mine" list.
+export interface DashboardItem {
+  newcomer_id: string
+  zone: Zone | null
+  silent_days: number | null
+  catchup: { done: number; total: number } | null
+  ip_decision_date: string | null
+  tickets_open: number
+  tickets_sla_overdue: number
+}
+
+export interface RecruiterDashboard {
+  today: TodayRow[]
+  tiles: Record<string, DashTile>
+  bot_did: BotDid
+  pulse_week: PulseWeek
+  items: DashboardItem[]
+  // The empty state: three facts.
+  next_event: { title: string; at: string; newcomer_name: string } | null
+  newcomers_led: number
+}
+
+export interface LoadRow {
+  user_id: string
+  full_name: string
+  newcomers: number
+  tickets_open: number
+  tickets_sla_overdue: number
+}
+
+export interface HrLeadDashboard {
+  today: TodayRow[]
+  tiles: Record<string, DashTile>
+  // Sorted by overdue SLA; no per-person response time, no ranking.
+  load: LoadRow[]
+  // Team median only.
+  median_first_response_min: number | null
+  // "Digest of the week" card: three lines composed by the server.
+  digest: { week: string; lines: string[] } | null
+  bot_did: BotDid
+}
+
+export interface TeamMember {
+  user_id: string
+  full_name: string
+  login: string
+  active: boolean
+  newcomers: number
+  tickets_open: number
+  tickets_sla_overdue: number
+}
+
+export interface TeamResponse {
+  items: TeamMember[]
+  unassigned: number
+}
+
+export interface UserCreate {
+  login: string
+  full_name: string
+  password: string
+  role: Role
+  tz?: string | null
+  manager_name?: string | null
+}
+
+export interface UserPatch {
+  active?: boolean
+  role?: Role
+  full_name?: string
+  password?: string
 }

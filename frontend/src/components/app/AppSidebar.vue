@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
@@ -8,6 +8,8 @@ import { NAV, NAV_FOOTER, type NavItem } from '@/router/nav'
 import AppLogo from '@/components/common/AppLogo.vue'
 import { useTicketsStore } from '@/stores/tickets'
 import { useSiteStore } from '@/stores/site'
+import { useAuthStore } from '@/stores/auth'
+import { canOpen, homeRoute } from '@/lib/roles'
 
 // By default the sidebar is a docked 220 px panel naming every section; the
 // page gets the rest of the width. The toggle folds it to a 56 px icon rail
@@ -34,6 +36,14 @@ watch(collapsed, (v) => {
 // Badge of open (not resolved) tickets, for the site picked in the topbar —
 // the same list the queue shows. Refreshed every minute and on site change;
 // ticket actions refresh it themselves.
+const auth = useAuthStore()
+const { viewer } = storeToRefs(auth)
+// The menu by role (lib/roles.ts): manager — only "My newcomers", recruiter —
+// all but "Team"; with auth off — as before, without the user-bound screens.
+const nav = computed(() => NAV.filter((it) => canOpen(viewer.value, it.routeName)))
+const navFooter = computed(() => NAV_FOOTER.filter((it) => canOpen(viewer.value, it.routeName)))
+const home = computed(() => homeRoute(viewer.value))
+
 const tickets = useTicketsStore()
 const { openCount, loaded: ticketsLoaded } = storeToRefs(tickets)
 const site = useSiteStore()
@@ -41,6 +51,8 @@ const { current: currentSite } = storeToRefs(site)
 const REFRESH_MS = 60_000
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 function refreshTickets(): void {
+  // The head of unit has no tickets (403): no badge to fetch.
+  if (!canOpen(viewer.value, 'tickets')) return
   void tickets.load(site.apiSite())
 }
 watch(currentSite, refreshTickets)
@@ -65,17 +77,13 @@ function isActive(item: NavItem): boolean {
        fixed, so it stays put while the page scrolls. -->
   <div :class="['sidebar-slot', { 'sidebar-slot--collapsed': collapsed }]">
     <aside :class="['sidebar', { 'sidebar--collapsed': collapsed }]">
-      <RouterLink
-        class="sidebar-brand"
-        :to="{ name: 'overview' }"
-        :aria-label="t('common.appName')"
-      >
+      <RouterLink class="sidebar-brand" :to="{ name: home }" :aria-label="t('common.appName')">
         <AppLogo :size="32" :wordmark="!collapsed" />
       </RouterLink>
 
       <nav class="sidebar-nav" :aria-label="t('common.nav.label')">
         <RouterLink
-          v-for="it in NAV"
+          v-for="it in nav"
           :key="it.id"
           :to="{ name: it.routeName }"
           :class="['nav-item', { active: isActive(it) }]"
@@ -98,7 +106,7 @@ function isActive(item: NavItem): boolean {
 
       <div class="sidebar-foot">
         <RouterLink
-          v-for="it in NAV_FOOTER"
+          v-for="it in navFooter"
           :key="it.id"
           :to="{ name: it.routeName }"
           :class="['nav-item', { active: isActive(it) }]"

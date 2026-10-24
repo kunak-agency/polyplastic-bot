@@ -9,7 +9,21 @@ export const http: AxiosInstance = axios.create({
   baseURL,
   timeout: 15_000,
   headers: { 'Content-Type': 'application/json' },
+  // The session cookie (api_contract_auth.md) rides along by itself on the
+  // same origin. A cross-origin dev API needs this AND AllowCredentials on the
+  // server — without the latter the browser rejects every response, so it is
+  // opt-in.
+  withCredentials: import.meta.env.VITE_API_WITH_CREDENTIALS === 'true',
 })
+
+// 401 from any call but the auth endpoints themselves: the session is gone.
+// The auth store registers the handler (no import from here to the store, so
+// the client stays free of the router and pinia).
+let unauthorizedHandler: (() => void) | null = null
+export function onUnauthorized(handler: () => void): void {
+  unauthorizedHandler = handler
+}
+const AUTH_PATH = /\/auth\/(login|me|logout)$/
 
 // Dev-only assertion: every request must target the configured API origin — the
 // only external origin the CSP allows. A stray absolute URL fails silently in the
@@ -88,5 +102,10 @@ function toApiError(error: AxiosError<ErrorBody>): ApiError {
 // see lib/apiError.ts for the matching type guard.
 http.interceptors.response.use(
   (response) => response,
-  (error: AxiosError<ErrorBody>) => Promise.reject(toApiError(error)),
+  (error: AxiosError<ErrorBody>) => {
+    if (error.response?.status === 401 && !AUTH_PATH.test(error.config?.url ?? '')) {
+      unauthorizedHandler?.()
+    }
+    return Promise.reject(toApiError(error))
+  },
 )

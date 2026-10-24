@@ -97,7 +97,7 @@ export const newcomerSeeds: NewcomerSeed[] = [
     position: 'Лаборант',
     manager_name: 'Фёдоров В.',
     mentor_name: 'Зайцева Л.',
-    recruiter_name: 'Мария Л.',
+    recruiter_name: 'Анна К.',
     day: 3,
     shift: '2',
     scenario_id: SCENARIO_GTP_ID,
@@ -217,7 +217,8 @@ export const newcomerSeeds: NewcomerSeed[] = [
     position: 'Системный администратор',
     manager_name: 'Егорова Н.',
     mentor_name: 'Павлова О.',
-    recruiter_name: 'Мария Л.',
+    // No recruiter yet: the "Without a recruiter" tile of the Team page.
+    recruiter_name: '',
     day: 25,
     shift: null,
     scenario_id: SCENARIO_OFFICE_ID,

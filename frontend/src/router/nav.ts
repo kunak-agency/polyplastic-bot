@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Route,
   Settings,
+  Gauge,
   UserCheck,
   Users,
 } from 'lucide-vue-next'
@@ -24,7 +25,16 @@ export interface NavItem {
 // Sitemap of the HR cabinet (ux-spec v1 §3.0), in its order. Every section is a
 // route, not local state — a reload or a pasted link has to land on the same
 // screen as the person who sent it.
+// Visibility by role is not here but in lib/roles.ts (canOpen), keyed by
+// routeName, so the guard and the menu read one table.
 export const NAV: NavItem[] = [
+  // "Today" of the recruiter / HR lead (api_contract_auth.md); needs a user.
+  {
+    id: 'dashboard',
+    routeName: 'dashboard',
+    labelKey: 'common.nav.items.dashboard',
+    icon: Gauge,
+  },
   {
     id: 'overview',
     routeName: 'overview',

@@ -45,14 +45,15 @@
   },
   "nav": {
     "items": {
-      "overview": "Обзор",
+      "overview": "Обзор площадок",
       "newcomers": "Новички",
       "tickets": "Обращения",
       "scenarios": "Сценарии",
       "knowledge": "База знаний",
       "analytics": "Аналитика",
       "settings": "Настройки",
-      "manager": "Мои новички"
+      "manager": "Мои новички",
+      "dashboard": "Сегодня"
     },
     "breadcrumbs": "Навигация по разделам",
     "label": "Разделы",
@@ -60,7 +61,7 @@
     "expand": "Развернуть меню"
   },
   "routes": {
-    "overview": "Обзор",
+    "overview": "Обзор площадок",
     "newcomers": "Новички",
     "tickets": "Обращения",
     "scenarios": "Сценарии",

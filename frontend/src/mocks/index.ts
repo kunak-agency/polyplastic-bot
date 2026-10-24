@@ -8,6 +8,9 @@ import { overviewRoutes } from './handlers/overview'
 import { knowledgeRoutes } from './handlers/knowledge'
 import { mediaRoutes } from './handlers/media'
 import { digestRoutes } from './handlers/digest'
+import { authGate, authRoutes } from './handlers/auth'
+import { teamRoutes } from './handlers/team'
+import { managerRoutes } from './handlers/manager'
 
 export const MOCKS_ENABLED = import.meta.env.VITE_USE_MOCKS === 'true'
 
@@ -19,8 +22,13 @@ export function installMocks(instance: AxiosInstance): void {
   // One file per domain under ./handlers, its fixtures under ./fixtures, both
   // registered here; a path without a handler answers 404 in the contract's
   // error shape. Fixtures are synthetic only — no real personal data.
-  const routes: MockRoute[] = [
+  // Order matters: a route matches the tail of the path, so the more specific
+  // ones (/manager/newcomers, /newcomers/reassign) go before /newcomers.
+  const plain: MockRoute[] = [
     ...healthRoutes,
+    ...authRoutes,
+    ...teamRoutes,
+    ...managerRoutes,
     ...newcomerRoutes,
     ...scenarioRoutes,
     ...ticketRoutes,
@@ -29,6 +37,11 @@ export function installMocks(instance: AxiosInstance): void {
     ...mediaRoutes,
     ...digestRoutes,
   ]
+  // 401 without a session while mock auth is on (api_contract_auth.md).
+  const routes: MockRoute[] = plain.map((r) => ({
+    ...r,
+    handler: (req) => authGate(req) ?? r.handler(req),
+  }))
   instance.defaults.adapter = createMockAdapter(routes)
   console.info(`[mocks] axios adapter installed — ${routes.length} route(s) served locally`)
 }

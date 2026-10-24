@@ -1,4 +1,5 @@
 import type {
+  User,
   Newcomer,
   ScenarioDetail,
   ScenarioStep,
@@ -11,11 +12,59 @@ import { uuidV4 } from '@/lib/ids'
 import { scenarioFixtures } from './fixtures/scenarios'
 import { newcomerSeeds } from './fixtures/newcomers'
 import { ticketSeeds } from './fixtures/tickets'
+import { offsetLabel, utcOffsetMinutes } from '@/lib/tz'
 
 // In-memory "backend" shared by the newcomers and scenarios handlers: created
 // newcomers, time travel and published versions live until the page reloads.
 
-const SITE_ZONE = '+03:00'
+// Site zones of the mock (api_contract_auth.md, "Пояс"): GTP in UTC+5 shows the
+// "10:00 GTP time" line of the demo; the real table is backend/domain/site.go.
+export const SITE_TZ: Record<string, string> = {
+  GrPP: 'Europe/Moscow',
+  Luzhniki: 'Europe/Moscow',
+  GTP: 'Asia/Yekaterinburg',
+}
+
+// ±HH:MM of a zone, for the ISO strings of fire_at.
+function isoOffset(tz: string, at: Date): string {
+  const label = offsetLabel(utcOffsetMinutes(tz, at)).slice(3)
+  const sign = label.startsWith('-') ? '-' : '+'
+  const [h, m = '00'] = label.slice(1).split(':')
+  return `${sign}${h.padStart(2, '0')}:${m}`
+}
+
+// Cabinet users of the mock; password "demo" for all (handlers/auth.ts).
+export const users = new Map<string, User & { password: string }>()
+export const USER_IDS = {
+  hr: 'a0000000-0000-4000-8000-000000000001',
+  anna: 'a0000000-0000-4000-8000-000000000002',
+  maria: 'a0000000-0000-4000-8000-000000000003',
+  smirnov: 'a0000000-0000-4000-8000-000000000004',
+} as const
+
+function seedUsers(): void {
+  const seeds: User[] = [
+    { id: USER_IDS.hr, login: 'hr', full_name: 'Ольга Р.', role: 'hr_lead', tz: null },
+    { id: USER_IDS.anna, login: 'anna', full_name: 'Анна К.', role: 'recruiter', tz: null },
+    { id: USER_IDS.maria, login: 'maria', full_name: 'Мария Л.', role: 'recruiter', tz: null },
+    {
+      id: USER_IDS.smirnov,
+      login: 'smirnov',
+      full_name: 'Смирнов А.',
+      role: 'manager',
+      tz: null,
+      manager_name: 'Смирнов А.',
+    },
+  ]
+  for (const u of seeds)
+    users.set(u.id, { manager_name: null, active: true, password: 'demo', ...u })
+}
+
+export function publicUser(u: User & { password: string }): User {
+  const { password: _password, ...rest } = u
+  void _password
+  return rest
+}
 const BOT_LINK = 'https://max.ru/korsik_demo_bot?start=inv_'
 
 export function today(): string {
@@ -60,7 +109,19 @@ function openTicketsOf(newcomerId: string, fallback: number): number {
 
 export function view(n: StoredNewcomer): Newcomer {
   const day = daysBetween(n.start_date, today())
-  return { ...n, day, stage: stageForDay(day), open_tickets: openTicketsOf(n.id, n.open_tickets) }
+  const recruiter = n.recruiter_id ? users.get(n.recruiter_id) : undefined
+  return {
+    ...n,
+    day,
+    stage: stageForDay(day),
+    open_tickets: openTicketsOf(n.id, n.open_tickets),
+    recruiter_name: recruiter?.full_name ?? n.recruiter_name,
+    site_tz: SITE_TZ[n.site] ?? 'Europe/Moscow',
+  }
+}
+
+export function zoneOf(n: Pick<StoredNewcomer, 'tz' | 'site'>): string {
+  return n.tz || SITE_TZ[n.site] || 'Europe/Moscow'
 }
 
 export function activeCount(scenarioId: string): number {
@@ -92,9 +153,10 @@ interface HistoryHints {
 // Events of one newcomer from the scenario version at launch, as the planner
 // would schedule them. For seeded people the past is filled in plausibly.
 // The server's fire time of a step for a start date, ISO with the site zone.
-export function fireAt(startDate: string, step: ScenarioStep): string {
+export function fireAt(startDate: string, step: ScenarioStep, tz = 'Europe/Moscow'): string {
   const fire = resolveFireDate(startDate, step.day_offset, step.time, step.work_hours_only)
-  return `${fire.date}T${step.time}:00${SITE_ZONE}`
+  const offset = isoOffset(tz, new Date(`${fire.date}T12:00:00Z`))
+  return `${fire.date}T${step.time}:00${offset}`
 }
 
 export function buildTimeline(
@@ -127,7 +189,7 @@ export function buildTimeline(
         day_offset: s.day_offset,
         title: s.title,
         kind: s.kind,
-        fire_at: fireAt(n.start_date, s),
+        fire_at: fireAt(n.start_date, s, zoneOf(n)),
         status,
         answer,
         text: null,
@@ -142,6 +204,8 @@ let seeded = false
 export function ensureSeeded(): void {
   if (seeded) return
   seeded = true
+  seedUsers()
+  const recruiterByName = new Map([...users.values()].map((u) => [u.full_name, u.id]))
   for (const s of scenarioFixtures(new Date().toISOString())) scenarios.set(s.id, s)
   const now = today()
   for (const s of newcomerSeeds) {
@@ -161,6 +225,8 @@ export function ensureSeeded(): void {
       manager_name: s.manager_name,
       mentor_name: s.mentor_name,
       recruiter_name: s.recruiter_name,
+      recruiter_id: recruiterByName.get(s.recruiter_name) ?? null,
+      tz: null,
       start_date: addDays(now, -s.day),
       shift: s.shift,
       scenario_id: s.scenario_id,

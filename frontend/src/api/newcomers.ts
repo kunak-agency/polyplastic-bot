@@ -19,6 +19,8 @@ export async function apiListNewcomers(
       site: query.site || undefined,
       q: query.q?.trim() || undefined,
       risk: query.risk || undefined,
+      mine: query.mine ? 1 : undefined,
+      recruiter_id: query.recruiter_id || undefined,
     },
   })
   return r.data
@@ -73,5 +75,30 @@ export async function apiSetNewcomerFlag(
     `/newcomers/${encodeURIComponent(id)}/flags`,
     { flag, value },
   )
+  return r.data
+}
+
+export interface NewcomerFile {
+  name: string
+  filename: string
+  mime: string
+  size: number
+  updated_at: string
+}
+
+// POST /api/newcomers/{id}/files (api_contract.md v4, "personal files"): the
+// newcomer's own adaptation plan, sent by the step with
+// media: [{personal: "adaptation_plan"}]. The same name replaces the file.
+export async function apiUploadNewcomerFile(
+  id: string,
+  file: File,
+  name = 'adaptation_plan',
+): Promise<NewcomerFile> {
+  const f = new FormData()
+  f.append('file', file)
+  f.append('name', name)
+  const r = await http.post<NewcomerFile>(`/newcomers/${encodeURIComponent(id)}/files`, f, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
   return r.data
 }

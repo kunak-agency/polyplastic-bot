@@ -4,7 +4,7 @@ import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
-import { Search, Users, SearchX } from 'lucide-vue-next'
+import { Search, Users, SearchX, X } from 'lucide-vue-next'
 import PageContainer from '@/components/common/PageContainer.vue'
 import PageHead from '@/components/common/PageHead.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
@@ -14,9 +14,11 @@ import LoadingState from '@/components/common/LoadingState.vue'
 import RiskMark from '@/components/newcomers/RiskMark.vue'
 import ConnectionBadge from '@/components/newcomers/ConnectionBadge.vue'
 import LaunchDialog from '@/components/newcomers/LaunchDialog.vue'
+import ReassignDialog from '@/components/team/ReassignDialog.vue'
 import { Button } from '@/components/ui/button'
 import { useNewcomersStore } from '@/stores/newcomers'
 import { useSiteStore } from '@/stores/site'
+import { useAuthStore } from '@/stores/auth'
 import { errorMessage } from '@/lib/apiError'
 import { formatDayOffset, isoToLocalDate } from '@/lib/calendar'
 import {
@@ -49,6 +51,37 @@ const sortBy = ref<NewcomerSort>('new')
 const q = ref('')
 const launchOpen = ref(false)
 
+// hr_lead: tick newcomers → "Reassign" (api_contract_auth.md, reassign).
+const auth = useAuthStore()
+const canReassign = computed(() => auth.viewer === 'hr_lead')
+const selected = ref<Set<string>>(new Set())
+const reassignOpen = ref(false)
+function toggleSelected(id: string): void {
+  const next = new Set(selected.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selected.value = next
+}
+const allSelected = computed(
+  () => rows.value.length > 0 && rows.value.every((n) => selected.value.has(n.id)),
+)
+function toggleAll(): void {
+  selected.value = allSelected.value ? new Set() : new Set(rows.value.map((n) => n.id))
+}
+function onReassigned(): void {
+  selected.value = new Set()
+  reload()
+}
+
+// ?recruiter=<user id>|none — from the Team page: one recruiter's newcomers or
+// those without one.
+const recruiterFilter = computed(() =>
+  typeof route.query.recruiter === 'string' ? route.query.recruiter : '',
+)
+function clearRecruiter(): void {
+  void router.replace({ query: { ...route.query, recruiter: undefined } })
+}
+
 function toggleChip(c: NewcomerChip): void {
   chips.value = chips.value.includes(c) ? chips.value.filter((x) => x !== c) : [...chips.value, c]
   void router.replace({ query: { ...route.query, chips: chips.value.join(',') || undefined } })
@@ -62,11 +95,16 @@ function resetFilters(): void {
 }
 
 function reload(): void {
-  void store.load({ site: site.apiSite(), q: q.value })
+  void store.load({
+    site: site.apiSite(),
+    q: q.value,
+    recruiter_id: recruiterFilter.value || undefined,
+  })
 }
 const reloadDebounced = useDebounceFn(reload, 300)
 
 watch(currentSite, reload)
+watch(recruiterFilter, reload)
 watch(q, () => void reloadDebounced())
 onMounted(reload)
 
@@ -153,6 +191,28 @@ function openRow(e: MouseEvent, id: string): void {
       </label>
     </div>
 
+    <div v-if="recruiterFilter" class="sel-bar">
+      <span class="txt-sm">
+        {{
+          recruiterFilter === 'none'
+            ? t('team.filter.none')
+            : t('team.filter.one', { name: rows[0]?.recruiter_name ?? '' })
+        }}
+      </span>
+      <button type="button" class="btn btn-ghost btn-sm" @click="clearRecruiter">
+        <X :size="14" aria-hidden="true" />{{ t('team.filter.reset') }}
+      </button>
+    </div>
+    <div v-if="canReassign && selected.size > 0" class="sel-bar sel-bar--on">
+      <span class="txt-sm fw-medium">{{ t('team.selected', { n: selected.size }) }}</span>
+      <Button size="sm" variant="primary" @click="reassignOpen = true">
+        {{ t('team.reassign.button') }}
+      </Button>
+      <button type="button" class="btn btn-ghost btn-sm" @click="selected = new Set()">
+        {{ t('team.clearSelection') }}
+      </button>
+    </div>
+
     <SectionCard body-padding="none">
       <LoadingState v-if="loading && !loaded" variant="table" :rows="5" />
       <ErrorState
@@ -189,9 +249,18 @@ function openRow(e: MouseEvent, id: string): void {
         <table class="tbl">
           <thead>
             <tr>
+              <th v-if="canReassign" class="td-check">
+                <input
+                  type="checkbox"
+                  :checked="allSelected"
+                  :aria-label="t('team.selectAll')"
+                  @change="toggleAll"
+                />
+              </th>
               <th>{{ t('newcomers.columns.name') }}</th>
               <th>{{ t('newcomers.columns.site') }}</th>
               <th>{{ t('newcomers.columns.department') }}</th>
+              <th>{{ t('newcomers.columns.recruiter') }}</th>
               <th>{{ t('newcomers.columns.startDate') }}</th>
               <th>{{ t('newcomers.columns.stage') }}</th>
               <th>{{ t('newcomers.columns.activity') }}</th>
@@ -203,6 +272,14 @@ function openRow(e: MouseEvent, id: string): void {
           </thead>
           <tbody>
             <tr v-for="n in rows" :key="n.id" class="row-link" @click="openRow($event, n.id)">
+              <td v-if="canReassign" class="td-check">
+                <input
+                  type="checkbox"
+                  :checked="selected.has(n.id)"
+                  :aria-label="t('team.selectOne', { name: n.full_name })"
+                  @change="toggleSelected(n.id)"
+                />
+              </td>
               <td>
                 <RouterLink class="cell-link" :to="{ name: 'newcomer', params: { id: n.id } }">
                   {{ n.full_name }}
@@ -213,6 +290,9 @@ function openRow(e: MouseEvent, id: string): void {
               <td>
                 {{ n.department }}
                 <div class="cell-sub">{{ n.manager_name }} · {{ n.mentor_name }}</div>
+              </td>
+              <td class="cell-sub-strong">
+                {{ n.recruiter_name || t('team.noRecruiter') }}
               </td>
               <td class="tabular">{{ d(isoToLocalDate(n.start_date), 'short') }}</td>
               <td class="cell-stage">
@@ -249,10 +329,31 @@ function openRow(e: MouseEvent, id: string): void {
     </SectionCard>
 
     <LaunchDialog v-model:open="launchOpen" @launched="onLaunched" />
+    <ReassignDialog
+      v-model:open="reassignOpen"
+      :newcomer-ids="[...selected]"
+      @done="onReassigned"
+    />
   </PageContainer>
 </template>
 
 <style scoped>
+.sel-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+}
+.sel-bar--on {
+  border-color: var(--fg);
+}
+.td-check {
+  width: 32px;
+}
 .toolbar {
   display: flex;
   flex-wrap: wrap;

@@ -1,4 +1,6 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { START_LOCATION, createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import { canOpen, homeRoute } from '@/lib/roles'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -8,15 +10,35 @@ declare module 'vue-router' {
     title?: string
     // `to` is the route a crumb walks back to; the last crumb never links.
     crumbs?: { key: string; to?: string }[]
+    // Open without a session and without the cabinet shell (the login screen).
+    public?: boolean
   }
 }
 
-// No auth yet: there is no guard, no requiresAuth/publicOnly meta and no second
-// layout. Roles (HR / head of unit / security) come with their own PRD.
+// Auth (api_contract_auth.md): the guard below asks /auth/me once. 404 there
+// means FEATURE_AUTH=false — every screen opens as before, no login. Otherwise
+// no session → /login, and the role matrix of lib/roles.ts decides the rest.
 // Detail screens sit under their section's plural path (/newcomers/:id,
 // /scenarios/:id, /tickets/:id) rather than ux-spec's singular /newcomer/{id}:
 // the sidebar item then stays highlighted on them.
 const routes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/pages/auth/LoginPage.vue'),
+    meta: { title: 'auth.login.title', public: true },
+  },
+  {
+    path: '/dashboard',
+    name: 'dashboard',
+    component: () => import('@/pages/dashboard/DashboardPage.vue'),
+    meta: {
+      title: 'dashboard.title',
+      crumbs: [{ key: 'common.nav.items.dashboard' }],
+    },
+  },
+  // The team moved to Settings (users) and the HR lead's dashboard (load).
+  { path: '/team', redirect: { name: 'settings' } },
   {
     path: '/',
     name: 'overview',
@@ -153,4 +175,30 @@ const routes: RouteRecordRaw[] = [
 export const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+router.beforeEach(async (to, from) => {
+  const auth = useAuthStore()
+  await auth.ensure()
+  const name = String(to.name ?? '')
+
+  if (auth.status === 'disabled') {
+    // No auth on the server: the login screen has nothing to do.
+    if (name === 'login') return { name: 'overview' }
+    return canOpen(null, name) || name === 'not-found' ? true : { name: 'overview' }
+  }
+
+  if (auth.status !== 'authed') {
+    if (to.meta.public) return true
+    return { name: 'login', query: { next: to.fullPath !== '/' ? to.fullPath : undefined } }
+  }
+
+  const viewer = auth.viewer
+  if (name === 'login') return { name: homeRoute(viewer) }
+  // The day starts on the role's "Today": a fresh load of "/" lands there.
+  if (name === 'overview' && from === START_LOCATION && homeRoute(viewer) !== 'overview') {
+    return { name: homeRoute(viewer) }
+  }
+  if (name !== 'not-found' && !canOpen(viewer, name)) return { name: homeRoute(viewer) }
+  return true
 })

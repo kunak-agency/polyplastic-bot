@@ -10,19 +10,30 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import ErrorState from '@/components/common/ErrorState.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import { Button } from '@/components/ui/button'
-import { apiGetManagers, apiGetManagerView } from '@/api/manager'
+import { apiGetManagers, apiGetManagerView, apiManagerTask } from '@/api/manager'
+import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/lib/apiError'
 import { dayLabel } from '@/lib/overview'
 import { pulseLevel } from '@/lib/digest'
 import { isoToLocalDate } from '@/lib/calendar'
 import type { ManagerSummary, ManagerView } from '@/types/api'
+import { useAuthStore } from '@/stores/auth'
 
 // "My newcomers" of ux-spec 3.1 for the head of unit (case role 03): D+N,
 // stage, last pulse, open "1:1 meeting" tasks — no tickets, no answer texts,
 // no signal categories. No roles yet: /manager?name=<manager_name>.
 const { t, d } = useI18n()
 const route = useRoute()
-const name = computed(() => (typeof route.query.name === 'string' ? route.query.name : ''))
+// Signed in as a head of unit: only his own people, no picker. The server
+// takes the name from the session (api_contract_auth.md); it is sent anyway so
+// a server without the auth wave answers the same.
+const auth = useAuthStore()
+const self = computed(() =>
+  auth.viewer === 'manager' ? auth.user?.manager_name || auth.user?.full_name || '' : '',
+)
+const name = computed(
+  () => self.value || (typeof route.query.name === 'string' ? route.query.name : ''),
+)
 
 const managers = ref<ManagerSummary[] | null>(null)
 const view = ref<ManagerView | null>(null)
@@ -48,6 +59,25 @@ async function load(): Promise<void> {
 onMounted(load)
 watch(name, load)
 
+// Pulse as a level only (research role-dashboards §3): no number.
+const PULSE_FACE = { good: '🙂', mid: '😐', low: '☹', none: '·' } as const
+
+// "Met" / "Planned" on a 1:1 task — the same as the buttons in MAX.
+const toast = useToast()
+const taskBusy = ref<string | null>(null)
+async function setTask(taskId: string, status: 'done' | 'planned'): Promise<void> {
+  taskBusy.value = taskId
+  try {
+    await apiManagerTask(taskId, status)
+    toast.success(t(status === 'done' ? 'manager.card.metDone' : 'manager.card.plannedDone'))
+    await load()
+  } catch (e) {
+    toast.error(errorMessage(e, 'manager.card.taskFailed'))
+  } finally {
+    taskBusy.value = null
+  }
+}
+
 function date(iso: string): string {
   return d(isoToLocalDate(iso), 'short')
 }
@@ -57,7 +87,7 @@ function date(iso: string): string {
   <PageContainer width="wide">
     <PageHead :title="name ? name : t('manager.title')">
       <template #subtitle>{{ t('manager.subtitle') }}</template>
-      <template v-if="name" #actions>
+      <template v-if="name && !self" #actions>
         <Button as-child variant="outline" size="sm">
           <RouterLink :to="{ name: 'manager' }">{{ t('manager.back') }}</RouterLink>
         </Button>
@@ -103,7 +133,7 @@ function date(iso: string): string {
           <div class="mcard__row txt-sm">
             <span class="muted">{{ t('manager.card.pulse') }}:</span>
             <span :class="['pulse', `pulse--${pulseLevel(c.last_pulse)}`]">
-              <template v-if="c.last_pulse !== null">{{ c.last_pulse }} · </template>
+              <span aria-hidden="true">{{ PULSE_FACE[pulseLevel(c.last_pulse)] }}</span>
               {{ t(`manager.card.pulseLevel.${pulseLevel(c.last_pulse)}`) }}
             </span>
           </div>
@@ -124,9 +154,36 @@ function date(iso: string): string {
                 <span :class="['badge', m.status === 'planned' ? 'solid-info' : 'solid-warning']">
                   {{ t(`manager.card.meetingStatus.${m.status}`) }}
                 </span>
+                <span class="mcard__btns">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    :disabled="taskBusy === m.id"
+                    @click="setTask(m.id, 'done')"
+                  >
+                    {{ t('manager.card.met') }}
+                  </Button>
+                  <Button
+                    v-if="m.status !== 'planned'"
+                    size="sm"
+                    :disabled="taskBusy === m.id"
+                    @click="setTask(m.id, 'planned')"
+                  >
+                    {{ t('manager.card.planned') }}
+                  </Button>
+                </span>
               </li>
             </ul>
             <p v-else class="txt-sm muted">{{ t('manager.card.noMeetings') }}</p>
+          </div>
+          <!-- Placeholders: the backend for these comes later. -->
+          <div class="mcard__later">
+            <Button size="sm" variant="outline" disabled :title="t('manager.card.soon')">
+              {{ t('manager.card.attachPlan') }}
+            </Button>
+            <Button size="sm" variant="outline" disabled :title="t('manager.card.soon')">
+              {{ t('manager.card.ipDecision') }}
+            </Button>
           </div>
         </article>
       </div>
@@ -218,6 +275,18 @@ function date(iso: string): string {
 }
 .mcard__block li + li {
   margin-top: 4px;
+}
+.mcard__btns {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.mcard__later {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-subtle);
 }
 .pulse--good {
   color: var(--success);
