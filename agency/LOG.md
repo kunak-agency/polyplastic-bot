@@ -1083,3 +1083,9 @@
 - Проверка на поде: отпуск кусками → п. 6.7.11, рабочий день → п. 6.6.1, ДМС → отказ; голос `voice_ru.wav` распознан за 0,96 с.
 - Живой API :8081 пересобран из HEAD и смотрит в rag на поде, ответ через `/api/documents/ask` совпадает с локальным. Локальный rag :8093 оставлен как запасной: откат — перезапустить API без `RAG_BASE_URL` на под.
 - После рестарта пода: `bash /workspace/restore.sh` (ставит apt, Python 3.13, зависимости и запускает rag; ~5 мин).
+
+### 24.10 ~09:35 — бэкенд и кабинет на ВМ Timeweb (Terraform)
+- `deploy/terraform/`: null/random/local, bootstrap (docker, swap 1 ГБ, ufw 22/80/443), сборка на Mac (Go linux/amd64 + кабинет), `.env` для ВМ из локальных (вне state), rsync в `/opt/korsik`, compose: Postgres 16, API (distroless + бинарник), Caddy 2.10 с HTTPS и basic auth `jury` (пароль — `terraform output -raw basic_auth_password`).
+- Домены: `lk.plexet.ru` (кабинет + `/api`), `api-mosprom.plexet.ru` (API), запасной `72-56-247-146.sslip.io`. APP_ENV=development за basic auth: иначе демо-чат и база знаний закрыты (причины в README).
+- Cutover: локальный API остановлен → `db-transfer.sh` (4 сценария, 4 версии, 155 сотрудников совпали) → apply с API. Бот MAX теперь работает с ВМ, RAG — на поде `polyplastic-rag`.
+- Проверено: без пароля 401, с паролем 200; `/api/documents/ask` через ВМ → пункт 6.7.11. Сертификат api-mosprom получен; lk ждал обновления отрицательного кэша DNS у Let's Encrypt.

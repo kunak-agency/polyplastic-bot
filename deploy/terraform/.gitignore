@@ -1,0 +1,9 @@
+# Сборка и сгенерированный .env для ВМ (секреты) — не в git
+.build/
+# Состояние Terraform: в нём пароли basic auth и Postgres
+*.tfstate
+*.tfstate.*
+.terraform/
+crash.log
+*.tfvars
+!example.tfvars

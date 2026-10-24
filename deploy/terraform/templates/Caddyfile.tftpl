@@ -1,0 +1,55 @@
+# Сгенерировано Terraform (deploy/terraform/templates/Caddyfile.tftpl). Руками не править.
+%{ if acme_email != "" ~}
+{
+	email ${acme_email}
+}
+%{ endif ~}
+
+# Весь сайт за basic auth: кабинет без своего логина, в базе конфиденциальный сценарий.
+# Кабинет ходит в API тем же источником (/api), поэтому XHR идут с уже введёнными учётными данными.
+(protected) {
+	basic_auth {
+		${user} ${hash}
+	}
+	encode zstd gzip
+	header {
+		X-Frame-Options DENY
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+}
+
+(api) {
+	reverse_proxy api:8081 {
+		# Загрузка и разбор документов базы знаний идут минутами (KB_UPLOAD_TIMEOUT 3 мин).
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+}
+
+# Кабинет: SPA с фолбэком на index.html, /api/* → API.
+${join(", ", web_domains)} {
+	import protected
+
+	handle /api/* {
+		import api
+	}
+
+	handle {
+		root * /srv/site
+		try_files {path} /index.html
+		file_server
+	}
+}
+%{ if api_domain != "" ~}
+
+# Отдельный домен API: всё → API, тот же basic auth.
+${api_domain} {
+	import protected
+	import api
+}
+%{ endif ~}

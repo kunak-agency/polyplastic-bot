@@ -1,0 +1,69 @@
+# Стенд «Корсика» на ВМ (/opt/korsik). Выкладывается Terraform (deploy/terraform), руками не править.
+#
+#   postgres — база, том pgdata, наружу не открыта (портов нет);
+#   api      — Go-бинарник с Mac (bin/api), API + бот MAX (long polling) + планировщик;
+#   caddy    — HTTPS (Let's Encrypt), basic auth на весь сайт, статика кабинета, /api → api.
+#
+# .env рядом — секреты (600): из него compose берёт POSTGRES_PASSWORD, api — всё окружение.
+name: korsik
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: polyplastic
+      POSTGRES_DB: polyplastic
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD в .env не задан}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polyplastic -d polyplastic"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  api:
+    # distroless/static: CA-сертификаты есть, tzdata вшит в бинарник (time/tzdata), оболочки нет.
+    image: gcr.io/distroless/static-debian12:nonroot
+    working_dir: /app
+    entrypoint: ["/app/bin/api"]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Каталоги, а не файлы: rsync заменяет файл новым inode, и смонтированный файл остался бы старым.
+    volumes:
+      - ./bin:/app/bin:ro
+      - ./data:/app/data:ro
+      - ./certs:/app/certs:ro
+    restart: unless-stopped
+    stop_grace_period: 10s
+    logging: *logging
+
+  caddy:
+    image: caddy:2.10-alpine
+    # depends_on на api нет намеренно: `up caddy` при api_enabled=false не должен поднимать бота.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - ./site:/srv/site:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
