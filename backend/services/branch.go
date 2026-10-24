@@ -31,7 +31,6 @@ const (
 const (
 	textFreeTextAsk   = "Напишите одним сообщением — я передам."
 	textFreeTextAskTy = "Напиши одним сообщением — я передам."
-	textFileMissing   = "Файл пока не загружен — HR пришлёт его отдельно."
 	textPlanMissing   = "Плана ещё нет — я напомнил HR, он пришлёт его сюда."
 )
 
@@ -497,7 +496,7 @@ func (b *BotService) branchMessage(ctx context.Context, e *domain.Employee, ev *
 		btns = append(btns, btn)
 	}
 	rows := packRows(btns)
-	if len(m.Buttons) > 0 {
+	if len(m.Buttons) > 0 && !handsOffToHuman(m.Buttons) {
 		id := ev.ID
 		rows = append(rows, humanRow(&id))
 	}
@@ -508,6 +507,22 @@ func (b *BotService) branchMessage(ctx context.Context, e *domain.Employee, ev *
 		msg.Text = strings.TrimSuffix(msg.Text, " ") + byForm(e, textMaterialSoonTy, textMaterialSoonVy)
 	}
 	return msg
+}
+
+// handsOffToHuman — среди кнопок реплики уже есть «к человеку» (ветка с handoff или escalate):
+// второй ряд «Спросить человека» был бы дублем.
+func handsOffToHuman(btns []domain.StepButton) bool {
+	for _, tb := range btns {
+		if tb.Branch == nil {
+			continue
+		}
+		for _, a := range tb.Branch.Actions {
+			if a.Type == domain.ActionHandoff || a.Type == domain.ActionEscalate {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Запасной текст реплики, у которой нет ни текста, ни найденного вложения (заготовка ветки
@@ -646,8 +661,9 @@ func (b *BotService) sendFile(ctx context.Context, e *domain.Employee, a domain.
 		return
 	}
 	if len(att) == 0 {
-		logger.Warn("бот: send_file «%s» новичку %s — файла нет", a.Media, e.ID)
-		b.send(ctx, recipientOf(e).msg(textFileMissing, "", nil))
+		// Файла нет в медиатеке: текст ветки уже объяснил, что материал готовит HR, отдельное
+		// «пришлём позже» было бы вторым обещанием. Только лог — HR видит пропуск в медиатеке.
+		logger.Warn("бот: send_file «%s» новичку %s — файла нет, сообщение не отправлено", a.Media, e.ID)
 		return
 	}
 	m := recipientOf(e).msg("📎 "+a.Media, "", nil)
