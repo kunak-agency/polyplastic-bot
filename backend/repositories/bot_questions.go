@@ -24,6 +24,12 @@ func (r *QuestionRepo) Save(ctx context.Context, q *domain.BotQuestion) error {
 	return r.db.WithContext(ctx).Save(q).Error
 }
 
+// SetSentiment — тональность вопроса (разметка /flags приходит позже записи). false — записи нет.
+func (r *QuestionRepo) SetSentiment(ctx context.Context, id uuid.UUID, s string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&domain.BotQuestion{}).Where("id = ?", id).Update("sentiment", s)
+	return res.RowsAffected > 0, res.Error
+}
+
 func (r *QuestionRepo) ByID(ctx context.Context, id uuid.UUID) (*domain.BotQuestion, error) {
 	var q domain.BotQuestion
 	return ignoreNotFound(&q, r.db.WithContext(ctx).First(&q, "id = ?", id).Error)
