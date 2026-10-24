@@ -1,6 +1,9 @@
 package handlers
 
-import "github.com/gofiber/fiber/v2"
+import (
+	"github.com/gofiber/contrib/websocket"
+	"github.com/gofiber/fiber/v2"
+)
 
 // RegisterRoutes — таблица маршрутов. ЕДИНСТВЕННОЕ место, где путь связывается с хендлером:
 // маршрут, объявленный где-то ещё, обойдёт мидлвары группы.
@@ -12,6 +15,10 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 
 	// Плоскость приложения. Фронт ходит сюда: VITE_API_BASE_URL указывает на /api.
 	api := app.Group("/api")
+
+	// Звонок Корсику в браузере (FEATURE_CALL; api_contract.md, «Звонок /api/call»). Без сессии
+	// кабинета (publicPath): снаружи домен звонка закрыт basic auth Caddy, здесь — Origin.
+	api.Get("/call", h.CallUpgrade, websocket.New(h.Call))
 
 	// Готовность: база и rag (agency/system/api_contract.md).
 	api.Get("/health", h.Health)

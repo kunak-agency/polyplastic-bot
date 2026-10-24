@@ -16,6 +16,7 @@ type Client struct {
 	baseURL    string
 	http       *http.Client
 	askTimeout time.Duration
+	apiKey     string // для WS /stream: заголовок ставится при дозвоне, транспорт HTTP тут ни при чём
 }
 
 // DefaultAskTimeout — срок POST /ask, если RAG_ASK_TIMEOUT не задан.
@@ -44,7 +45,7 @@ func New(baseURL string, askTimeout time.Duration, opts ...Option) *Client {
 		// Ключ ставит транспорт, а не каждый метод: новый запрос к rag не уйдёт без него.
 		hc.Transport = &bearerTransport{key: o.apiKey, next: http.DefaultTransport}
 	}
-	return &Client{baseURL: baseURL, http: hc, askTimeout: askTimeout}
+	return &Client{baseURL: baseURL, http: hc, askTimeout: askTimeout, apiKey: o.apiKey}
 }
 
 // bearerTransport — RoundTripper, дописывающий «Authorization: Bearer <ключ>» к запросу.

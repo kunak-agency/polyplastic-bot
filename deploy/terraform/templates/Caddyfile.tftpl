@@ -55,3 +55,36 @@ ${api_domain} {
 	import api
 }
 %{ endif ~}
+%{ if call_domain != "" ~}
+
+# «Позвонить Корсику»: страница call.html и WebSocket звонка, всегда за своим basic auth.
+# Наружу из API отдаётся только /api/call; WS идёт без таймаутов чтения (звонок до 5 минут).
+${call_domain} {
+	basic_auth {
+		${call_user} ${call_hash}
+	}
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+
+	handle /api/call {
+		reverse_proxy api:8081 {
+			stream_close_delay 5s
+		}
+	}
+
+	handle /api/* {
+		respond 404
+	}
+
+	handle {
+		encode zstd gzip
+		root * /srv/site
+		try_files {path} /call.html
+		file_server
+	}
+}
+%{ endif ~}

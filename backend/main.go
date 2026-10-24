@@ -73,8 +73,11 @@ func main() {
 		Media:      services.MediaOptions{MaxUploadMB: cfg.Docs.MediaMaxMB},
 		Docs:       services.DocsOptions{MaxUploadMB: cfg.Docs.MaxUploadMB, UploadTimeout: cfg.Docs.UploadTimeout, OperatorToken: cfg.Docs.OperatorToken},
 		Features:   cfg.Features,
+		Call:       cfg.Call,
 	})
 	h := handlers.NewHandlerManager(svc)
+	allow := origins(cfg.Origins)
+	h.SetOrigins(allow) // WebSocket звонка: Origin из ORIGINS или тот же хост
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -127,7 +130,6 @@ func main() {
 	// AllowCredentials — cookie сессии кабинета (FEATURE_AUTH) с другого origin в dev
 	// (api_contract_auth.md, «Сессия»). Только с явным списком: при «*» fiber падает, а браузер
 	// cookie не отдаёт.
-	allow := origins(cfg.Origins)
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     strings.Join(allow, ","),
 		AllowCredentials: !slices.Contains(allow, "*"),

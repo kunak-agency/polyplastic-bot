@@ -20,3 +20,9 @@ output "basic_auth_password" {
   value       = random_password.basic_auth.result
   sensitive   = true
 }
+
+output "call_auth_password" {
+  description = "Basic auth страницы звонка (логин korsik): terraform output -raw call_auth_password"
+  value       = random_password.call_auth.result
+  sensitive   = true
+}

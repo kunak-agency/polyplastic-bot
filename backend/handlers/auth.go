@@ -121,7 +121,7 @@ func (h *Handler) Me(c *fiber.Ctx) error {
 func publicPath(c *fiber.Ctx) bool {
 	p := c.Path()
 	switch p {
-	case "/api/health", "/api/auth/login", "/api/auth/logout":
+	case "/api/health", "/api/auth/login", "/api/auth/logout", "/api/call":
 		return true
 	}
 	return false
