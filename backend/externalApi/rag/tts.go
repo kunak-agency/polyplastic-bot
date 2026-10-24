@@ -14,6 +14,9 @@ import (
 // предложениям, пока синтез идёт.
 const TTSFormat = "audio/L16;rate=24000"
 
+// ttsEngineDefault — движок, если CALL_TTS_ENGINE не задан: пусто — решает под (Google при ключе).
+const ttsEngineDefault = ""
+
 // Synthesize — POST /tts {text}: поток звука. Срок задаёт ctx вызывающего (на синтез, а не на
 // длину фразы); тело закрывает вызывающий.
 func (c *Client) Synthesize(ctx context.Context, text string) (io.ReadCloser, error) {
@@ -24,6 +27,12 @@ func (c *Client) Synthesize(ctx context.Context, text string) (io.ReadCloser, er
 	// Голос звонка: CALL_TTS_SPEAKER (aidar | eugene у Silero v5_5_ru); пусто — голос пода по умолчанию.
 	if sp := os.Getenv("CALL_TTS_SPEAKER"); sp != "" {
 		req["speaker"] = sp
+	}
+	// Движок синтеза: CALL_TTS_ENGINE (google | silero); пусто — ttsEngineDefault.
+	if en := os.Getenv("CALL_TTS_ENGINE"); en != "" {
+		req["engine"] = en
+	} else if ttsEngineDefault != "" {
+		req["engine"] = ttsEngineDefault
 	}
 	body, _ := json.Marshal(req)
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/tts", bytes.NewReader(body))

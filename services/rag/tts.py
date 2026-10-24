@@ -165,6 +165,7 @@ class TTSRequest(BaseModel):
     text: str = Field(max_length=MAX_TEXT_CHARS)
     speaker: str | None = Field(default=None, max_length=32)
     sample_rate: int = SAMPLE_RATE
+    engine: str | None = Field(default=None, pattern="^(google|silero)$")  # None — Google, если есть ключ
 
 
 @router.post("/tts")
@@ -186,7 +187,10 @@ def tts(req: TTSRequest):
     if not chunks:
         raise HTTPException(status_code=400, detail="text has nothing to pronounce")
     # Google: все предложения сразу, параллельно; ждём по порядку.
-    futures = [google.pool.submit(google.synth, c, rate) for c in chunks] if google.enabled else None
+    use_google = google.enabled and req.engine != "silero"
+    if not use_google and not engine.ready:
+        raise HTTPException(status_code=503, detail="silero model is not ready")
+    futures = [google.pool.submit(google.synth, c, rate) for c in chunks] if use_google else None
 
     def one(i: int, chunk: str) -> bytes:
         if futures is not None:
