@@ -43,11 +43,11 @@ func (b *BotService) voiceText(ctx context.Context, u max.Update, emp *domain.Em
 	text, why := b.recognize(ctx, u, to)
 	if text == "" {
 		logger.Info("бот: голосовое новичка %s не разобрано: %s", emp.ID, why)
-		b.send(ctx, to.msg(byForm(emp, textVoiceTy, textVoiceVy), "", nil))
+		b.replyOn(ctx, to.msg(byForm(emp, textVoiceTy, textVoiceVy), "", nil), u.MessageID)
 		return "", false
 	}
 	logger.Info("бот: голосовое новичка %s распознано (%s), %d символов", emp.ID, why, utf8.RuneCountInString(text))
-	b.send(ctx, to.msg(voicePrefix+capitalize(text), "", nil))
+	b.replyOn(ctx, to.msg(voicePrefix+capitalize(text), "", nil), u.MessageID) // реплаем на голосовое
 	return text, true
 }
 

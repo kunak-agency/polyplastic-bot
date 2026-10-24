@@ -48,7 +48,7 @@ func (b *BotService) question(ctx context.Context, u max.Update, emp *domain.Emp
 	}
 	if text == "" {
 		if len(u.Audio) > 0 {
-			b.send(ctx, to.msg(byForm(emp, textVoiceTy, textVoiceVy), "", nil))
+			b.replyOn(ctx, to.msg(byForm(emp, textVoiceTy, textVoiceVy), "", nil), u.MessageID)
 		}
 		return nil
 	}
@@ -56,22 +56,35 @@ func (b *BotService) question(ctx context.Context, u max.Update, emp *domain.Emp
 		EmployeeID: emp.ID, TraceID: newTraceID(), Flags: domain.StringList{}, Sources: domain.SourceList{}, IsTest: emp.IsTest,
 	}
 	q.CreatedAt = b.now() // окно правки 24 ч и лестница ошибок считаются по часам бота
+	// ответ — реплаем на вопрос (FEATURE_REPLIES), ответ HR по обращению из него — тоже
+	q.SourceMID = midOf(u.MessageID)
 	if emp.Consent != nil && *emp.Consent == domain.ConsentGiven {
 		q.Question = text
 	}
 
 	if codes := flags.Codes(text); codes != nil {
+		// regex F5/F7/F9 — модель не вызывается, тональность ставим кодом: текст с «уволюсь»,
+		// «ударил», «взятка» честно негативный (без отдельного вызова /flags ради тона).
+		q.Sentiment = strPtr(domain.SentimentNeg)
 		return b.flagSignal(ctx, to, emp, q, codes, flagViaRegex)
 	}
 	if err := b.touch(ctx, emp.ID, nil); err != nil {
 		return err
 	}
 	// regex не сработал — LLM-разметка (bot_flags.go) в фоне, параллельно с rag: ответ не ждёт её.
-	b.classifyAsync(ctx, emp, flagInput{text: text, context: rag.FlagsContextFreeText, where: "в сообщении новичка"})
+	// id записи — заранее: тональность из /flags пишется в неё, когда ask её создаст (ready).
+	if id, err := uuid.NewV7(); err == nil {
+		q.ID = id
+	}
+	ready := make(chan struct{})
+	qid := q.ID
+	b.classifyAsync(ctx, emp, flagInput{text: text, context: rag.FlagsContextFreeText, where: "в сообщении новичка", mid: u.MessageID,
+		questionID: &qid, questionReady: ready})
 	// rag отвечает до RAG_ASK_TIMEOUT: ждём в фоне, чтобы не держать чтение апдейтов остальных.
 	b.wg.Add(1)
 	go func() {
 		defer b.wg.Done()
+		defer close(ready)
 		if err := b.ask(context.WithoutCancel(ctx), to, emp, q, text); err != nil {
 			logger.Warn("бот: вопрос %s (trace %s) не обработан: %v", q.ID, q.TraceID, err)
 		}
@@ -379,7 +392,8 @@ func (b *BotService) sendQuestion(ctx context.Context, to recipient, emp *domain
 	if noRecipient(msg, "ответ на вопрос "+q.ID.String()) {
 		return
 	}
-	mid, err := b.max.Send(ctx, msg)
+	msg.ReplyTo = derefMID(q.SourceMID) // ответ rag, «не нашёл», сигнал — реплаем на вопрос
+	mid, err := sendReply(ctx, b.max, b.replies, msg)
 	if err != nil {
 		logger.Warn("бот: ответ на вопрос %s не ушёл: %v", q.ID, err)
 		return
@@ -473,7 +487,7 @@ func (b *BotService) flagDetails(ctx context.Context, u max.Update, emp *domain.
 			}
 		}
 		q.TicketID, q.TicketNumber = &t.ID, t.Number
-		res = handoffResult{ticket: t, created: created, lead: textFlagDetails}
+		res = handoffResult{ticket: t, created: created, lead: textFlagDetails, replyTo: u.MessageID}
 		return tx.Questions.Save(ctx, q)
 	})
 	if err != nil || done == nil {
@@ -481,7 +495,7 @@ func (b *BotService) flagDetails(ctx context.Context, u max.Update, emp *domain.
 	}
 	logger.Info("бот: детали к сигналу %s от новичка %s записаны", done.ID, emp.ID)
 	if attached != nil {
-		b.send(ctx, recipientOf(emp).msg(fmt.Sprintf(textAttached, attached.Number), "", nil))
+		b.replyOn(ctx, recipientOf(emp).msg(fmt.Sprintf(textAttached, attached.Number), "", nil), u.MessageID)
 		return true, nil
 	}
 	b.afterHandoff(ctx, emp, &res)
@@ -618,7 +632,7 @@ func (b *BotService) questionCallback(ctx context.Context, u max.Update, emp *do
 				}
 			}
 			q.TicketID, q.TicketNumber = &t.ID, t.Number
-			out.handoff = &handoffResult{ticket: t, created: created}
+			out.handoff = &handoffResult{ticket: t, created: created, replyTo: derefMID(q.SourceMID)}
 			out.notification = "Передаю"
 			if onMain && q.Kind == domain.QuestionAnswer {
 				m := to.msg(line, "", nil) // ответ по документам не затираем

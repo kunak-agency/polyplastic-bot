@@ -25,6 +25,9 @@ type handoffResult struct {
 	ticket  *domain.Ticket
 	created bool
 	lead    string // строка перед OPEN
+	// replyTo — сообщение новичка, из которого выросло обращение: «Передал…» и «уже передано» —
+	// реплаем на него (FEATURE_REPLIES). Пусто — нажатие кнопки, отвечать не на что.
+	replyTo string
 }
 
 // afterHandoff — после транзакции: карточка людям и OPEN новичку; повтор — «уже передано».
@@ -33,11 +36,11 @@ func (b *BotService) afterHandoff(ctx context.Context, emp *domain.Employee, r *
 		return
 	}
 	if !r.created {
-		b.send(ctx, recipientOf(emp).msg(fmt.Sprintf(textTicketExists, r.ticket.Number), "", nil))
+		b.replyOn(ctx, recipientOf(emp).msg(fmt.Sprintf(textTicketExists, r.ticket.Number), "", nil), r.replyTo)
 		return
 	}
 	b.tickets.notify(ctx, r.ticket, emp)
-	b.tickets.sendOpen(ctx, emp, r.ticket, r.lead)
+	b.tickets.sendOpen(ctx, emp, r.ticket, r.lead, r.replyTo)
 }
 
 // human — «Спросить человека» (кнопка под шагом, опросом, приветствием) и /human: запрос
@@ -46,8 +49,10 @@ func (b *BotService) human(ctx context.Context, u max.Update, emp *domain.Employ
 	h := domain.HumanRequest{EmployeeID: emp.ID, Source: domain.HumanFromButton, Flags: domain.StringList{}, Target: domain.TargetHR}
 	what := "Новичок нажал «Спросить человека»."
 	source := domain.TicketFromButton
+	replyTo := ""
 	if u.CallbackID == "" {
 		what, source = "Новичок попросил человека командой /human.", domain.TicketFromCmd
+		replyTo = u.MessageID // /human — реплаем на команду
 	}
 	var res handoffResult
 	err := b.repos.Transaction(ctx, func(tx *repositories.Repos) error {
@@ -66,7 +71,7 @@ func (b *BotService) human(ctx context.Context, u max.Update, emp *domain.Employ
 			cat: taxonomy.Question(taxonomy.RouteHR), source: source, what: what,
 			humanRequestID: &h.ID, eventID: h.EventID, withContext: true,
 		})
-		res = handoffResult{ticket: t, created: created}
+		res = handoffResult{ticket: t, created: created, replyTo: replyTo}
 		return err
 	})
 	if err != nil {
@@ -327,7 +332,7 @@ func (b *BotService) ticketConversation(ctx context.Context, u max.Update, emp *
 	}
 	logger.Info("бот: текст новичка %s → обращение #%d (%s), в rag не отправлено", emp.ID, t.Number, t.Status)
 	if reply != "" {
-		b.send(ctx, recipientOf(emp).msg(reply, "", nil))
+		b.replyOn(ctx, recipientOf(emp).msg(reply, "", nil), u.MessageID) // «Добавил к обращению…»
 	}
 	return true, nil
 }

@@ -170,11 +170,11 @@ func (h *Handler) SimulateMessage(c *fiber.Ctx) error {
 			return errs.NewConflictError("Голосовое в dev — только на подделке MAX (без MAX_BOT_TOKEN)")
 		}
 		u.Audio = []max.Audio{{URL: fake.PutFile(audio)}}
-		h.devIncoming(chat, *e.MaxUserID, max.JournalKindVoice, "🎙 Голосовое")
+		u.MessageID = h.devIncoming(chat, *e.MaxUserID, max.JournalKindVoice, "🎙 Голосовое")
 	} else if input.Payload != "" {
 		u = max.Update{Type: max.UpdateMessageCallback, UserID: *e.MaxUserID, ChatID: chat, Payload: input.Payload, CallbackID: h.devCallbackID(chat, *e.MaxUserID, input.Payload)}
 	} else {
-		h.devIncoming(chat, *e.MaxUserID, max.JournalKindText, input.Text)
+		u.MessageID = h.devIncoming(chat, *e.MaxUserID, max.JournalKindText, input.Text)
 	}
 	bot.Handle(ctx, u)
 	bot.Wait()

@@ -53,10 +53,12 @@ type JournalEntry struct {
 	Attachments []JournalAttachment
 	Notify      bool
 	Payload     string // нажатая кнопка
-	ReplyTo     string // mid сообщения, на кнопку которого нажали
-	Edited      bool
-	At          time.Time
-	EditedAt    *time.Time
+	// ReplyTo — нажатие и всплывающее: mid сообщения, на кнопку которого нажали; сообщение
+	// бота: mid сообщения, на которое оно ответ (реплай, OutMessage.ReplyTo).
+	ReplyTo  string
+	Edited   bool
+	At       time.Time
+	EditedAt *time.Time
 }
 
 // JournalButton — кнопка в журнале: тип MAX и payload или ссылка.
@@ -129,6 +131,7 @@ func (f *Fake) journalSent(mid string, m OutMessage) {
 	f.journalAdd(JournalEntry{
 		ID: mid, ChatID: m.ChatID, UserID: m.UserID, From: JournalFromBot, Text: m.Text, Format: m.Format,
 		Buttons: journalButtons(m.Buttons), Attachments: journalAttachments(m.Attachments), Notify: !m.Silent,
+		ReplyTo: m.ReplyTo,
 	})
 	if f.typingUntil != nil {
 		delete(f.typingUntil, journalChat(m.ChatID, m.UserID))
@@ -187,13 +190,16 @@ func (f *Fake) journalTyping(chat int64) {
 	f.typingUntil[chat] = time.Now().Add(typingFor)
 }
 
-// JournalIncoming — входящее от новичка (текст или «Начать»), как его увидел бы MAX.
-func (f *Fake) JournalIncoming(chat, user int64, kind, text string) {
+// JournalIncoming — входящее от новичка (текст или «Начать»), как его увидел бы MAX. Возвращает
+// id записи — mid входящего для Update.MessageID: на него бот отвечает реплаем.
+func (f *Fake) JournalIncoming(chat, user int64, kind, text string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	id := fmt.Sprintf("in.%d", f.seq+1)
 	f.journalAdd(JournalEntry{
-		ID: fmt.Sprintf("in.%d", f.seq+1), ChatID: chat, UserID: user, From: JournalFromNewcomer, Kind: kind, Text: text,
+		ID: id, ChatID: chat, UserID: user, From: JournalFromNewcomer, Kind: kind, Text: text,
 	})
+	return id
 }
 
 // JournalPress — новичок нажал кнопку payload на сообщении mid. mid пуст — последнее

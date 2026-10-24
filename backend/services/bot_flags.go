@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"main/domain"
 	"main/externalApi/rag"
@@ -52,6 +53,61 @@ type flagInput struct {
 	via            string     // откуда сигнал; пусто — LLM-разметка
 	// quiet — обращение без сообщения новичку (с ним говорит ветка варианта): только карточка людям.
 	quiet bool
+	// mid — сообщение новичка с этим текстом: на него реплаем «Передал…» (пусто — без реплая).
+	mid string
+	// questionID — свободный вопрос (BotQuestion) с этим текстом: в него пишется тональность.
+	// Запись создаёт ask в фоне; questionReady закрывается, когда она создана (или не будет).
+	questionID    *uuid.UUID
+	questionReady <-chan struct{}
+	// sentiment — тональность из /flags (domain.Sentiment*): в запись сигнала F5/F7/F9 по LLM.
+	sentiment string
+}
+
+// sentimentWait — сколько разметка ждёт запись вопроса (ask до RAG_ASK_TIMEOUT и позднего окна).
+var sentimentWait = 2 * time.Minute
+
+// normSentiment — тон /flags в domain.Sentiment*. Неизвестное — neu (rag делает так же).
+func normSentiment(s string) string {
+	switch s {
+	case domain.SentimentPos, domain.SentimentNeg:
+		return s
+	}
+	return domain.SentimentNeu
+}
+
+// saveSentiment — тональность текста в его запись: ответ опроса (eventID) или свободный вопрос
+// (questionID). Разметка /flags — единственный источник тона, кроме regex (там neg кодом).
+func (b *BotService) saveSentiment(ctx context.Context, in flagInput, s string) error {
+	if in.eventID != nil {
+		return b.repos.Transaction(ctx, func(tx *repositories.Repos) error {
+			a, err := tx.Events.Answer(ctx, *in.eventID, in.questionNo)
+			if err != nil || a == nil || strings.TrimSpace(a.Text) != strings.TrimSpace(in.text) {
+				return err // текст уже переписан — его разметит следующий вызов
+			}
+			a.Sentiment = &s
+			return tx.Events.UpsertAnswer(ctx, a)
+		})
+	}
+	if in.questionID == nil {
+		return nil // «свой вариант» ветки: текст живёт в обращении, своей записи нет
+	}
+	id := *in.questionID
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		if in.questionReady != nil {
+			select {
+			case <-in.questionReady:
+			case <-time.After(sentimentWait):
+			}
+		}
+		if ok, err := b.repos.Questions.SetSentiment(ctx, id, s); err != nil {
+			logger.Warn("бот: тональность вопроса %s не сохранена: %v", id, err)
+		} else if !ok {
+			logger.Info("бот: тональность вопроса %s — записи нет, не сохранена", id)
+		}
+	}()
+	return nil
 }
 
 // Что код делает с LLM-флагом.
@@ -156,6 +212,10 @@ func (b *BotService) llmFlags(ctx context.Context, f RAGFlagger, empID uuid.UUID
 		logger.Warn("бот: rag /flags без LLM (degraded), новичок %s: разметки нет, только regex", empID)
 		return nil
 	}
+	in.sentiment = normSentiment(resp.Sentiment)
+	if err := b.saveSentiment(ctx, in, in.sentiment); err != nil {
+		logger.Warn("бот: тональность новичка %s не сохранена: %v", empID, err)
+	}
 	var prev domain.StringList
 	if in.eventID != nil {
 		if prev, err = b.prevPulseCodes(ctx, empID, *in.eventID); err != nil {
@@ -243,6 +303,10 @@ func (b *BotService) applyFlagDecisions(ctx context.Context, empID uuid.UUID, in
 	}
 	q := &domain.BotQuestion{EmployeeID: emp.ID, TraceID: newTraceID(), Flags: domain.StringList{}, Sources: domain.SourceList{}, IsTest: emp.IsTest}
 	q.CreatedAt = b.now()
+	q.SourceMID = midOf(in.mid)
+	if in.sentiment != "" {
+		q.Sentiment = strPtr(in.sentiment)
+	}
 	if consented(emp) {
 		q.Question = strings.TrimSpace(in.text)
 	}
@@ -301,7 +365,7 @@ func (b *BotService) flagTicket(ctx context.Context, emp *domain.Employee, in fl
 		if err != nil {
 			return err
 		}
-		res = handoffResult{ticket: t, created: created, lead: flagLead(e, d.code)}
+		res = handoffResult{ticket: t, created: created, lead: flagLead(e, d.code), replyTo: in.mid}
 		return nil
 	})
 	if err != nil || e == nil {

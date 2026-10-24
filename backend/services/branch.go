@@ -542,7 +542,7 @@ func (b *BotService) runPlan(ctx context.Context, p *pressPlan) {
 			if _, ok := hasAction(p.acts, domain.ActionOpenFreeText); ok {
 				continue // обращение — когда придёт текст
 			}
-			b.escalate(ctx, e, ev, p.step, a, p.label, "", p.sig)
+			b.escalate(ctx, e, ev, p.step, a, p.label, "", "", p.sig)
 		case domain.ActionHandoff:
 			b.handoff(ctx, e, ev, p.step, a, p.label, p.sig)
 		case domain.ActionOpenFreeText:
@@ -657,7 +657,9 @@ func (b *BotService) sendFile(ctx context.Context, e *domain.Employee, a domain.
 
 // escalate — обращение v2: категория и маршрут из ветки, notify_manager. quote — текст новичка
 // (open_free_text).
-func (b *BotService) escalate(ctx context.Context, emp *domain.Employee, ev *domain.ScheduledEvent, step domain.ScenarioStep, a domain.Action, label, quote string, sig *domain.OptionFlag) {
+//
+// replyTo — сообщение новичка с этим текстом: «Передал…» реплаем на него; пусто — без реплая.
+func (b *BotService) escalate(ctx context.Context, emp *domain.Employee, ev *domain.ScheduledEvent, step domain.ScenarioStep, a domain.Action, label, quote, replyTo string, sig *domain.OptionFlag) {
 	if b.tickets == nil {
 		return
 	}
@@ -689,7 +691,7 @@ func (b *BotService) escalate(ctx context.Context, emp *domain.Employee, ev *dom
 		}
 		what += signalNote(sig, code)
 		t, created, err := b.tickets.open(ctx, tx, e, ticketDraft{cat: cat, source: domain.TicketFromAnswer, what: what, quote: quote, eventID: evID})
-		res = handoffResult{ticket: t, created: created}
+		res = handoffResult{ticket: t, created: created, replyTo: replyTo}
 		return err
 	})
 	if err != nil || e == nil || res.ticket == nil {
@@ -792,7 +794,7 @@ func (b *BotService) handoff(ctx context.Context, emp *domain.Employee, ev *doma
 
 // freeText — текст новичка после «Другое» / open_free_text: regex-флаги → обращение escalate
 // (категория флага, иначе из ветки), /flags в фоне; затем then ветки. В RAG не уходит.
-func (b *BotService) freeText(ctx context.Context, emp *domain.Employee, text string) error {
+func (b *BotService) freeText(ctx context.Context, emp *domain.Employee, text, mid string) error {
 	var w *domain.FreeTextWait
 	var e *domain.Employee
 	var ev *domain.ScheduledEvent
@@ -844,9 +846,9 @@ func (b *BotService) freeText(ctx context.Context, emp *domain.Employee, text st
 	if w.Severity != "" && w.Category != "" {
 		sig = &domain.OptionFlag{Code: w.Category, Severity: w.Severity}
 	}
-	b.escalate(ctx, e, ev, step, a, w.Label, text, sig)
+	b.escalate(ctx, e, ev, step, a, w.Label, text, mid, sig)
 	if codes == nil {
-		b.classifyAsync(ctx, e, flagInput{text: text, where: "в ответе «свой вариант» на «" + step.Title + "»"})
+		b.classifyAsync(ctx, e, flagInput{text: text, where: "в ответе «свой вариант» на «" + step.Title + "»", mid: mid})
 	}
 	if isSurvey(step) {
 		b.resumeSurvey(ctx, e.ID, w.EventID) // ветка варианта опроса ждала этот текст

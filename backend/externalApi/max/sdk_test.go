@@ -46,6 +46,7 @@ type stubAPI struct {
 	posts    int
 	srv      *httptest.Server
 	editBody string
+	sendBody string // тело последнего принятого POST /messages
 }
 
 func newStubAPI(t *testing.T) *stubAPI {
@@ -70,6 +71,7 @@ func newStubAPI(t *testing.T) *stubAPI {
 				Text string `json:"text"`
 			}
 			_ = json.Unmarshal(body, &m)
+			s.sendBody = string(body)
 			s.sends = append(s.sends, m.Text)
 			s.sendAt = append(s.sendAt, time.Now())
 			_, _ = io.WriteString(w, `{"message":{"body":{"mid":"mid.sent"}}}`)
@@ -246,5 +248,32 @@ func TestContactButton(t *testing.T) {
 	}
 	if !strings.Contains(s.editBody, `"request_contact"`) {
 		t.Fatalf("тело правки: %s", s.editBody)
+	}
+}
+
+// Реплай: ReplyTo уходит в link {type: reply, mid}; в правке link нет — правка не меняет, на что
+// сообщение отвечает.
+func TestSendReplyLink(t *testing.T) {
+	s := newStubAPI(t)
+	c := newTestClient(t, s, time.Millisecond)
+	if _, err := c.Send(context.Background(), OutMessage{ChatID: 103, Text: "Ответ", ReplyTo: "mid.q"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"link":{`, `"type":"reply"`, `"mid":"mid.q"`, `"text":"Ответ"`} {
+		if !strings.Contains(s.sendBody, want) {
+			t.Errorf("тело отправки без %s: %s", want, s.sendBody)
+		}
+	}
+	if _, err := c.Send(context.Background(), OutMessage{ChatID: 103, Text: "Без реплая"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s.sendBody, `"reply"`) {
+		t.Fatalf("link без ReplyTo: %s", s.sendBody)
+	}
+	if err := c.Edit(context.Background(), "mid.c", OutMessage{ChatID: 103, Text: "x", ReplyTo: "mid.q"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s.editBody, `"reply"`) {
+		t.Fatalf("link в правке: %s", s.editBody)
 	}
 }

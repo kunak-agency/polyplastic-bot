@@ -90,6 +90,9 @@ type OutMessage struct {
 	Attachments []AttachmentRef
 	// Silent — без уведомления (notify=false), для напоминаний в тихие часы.
 	Silent bool
+	// ReplyTo — mid сообщения, на которое это ответ (link type=reply в MAX). Только для Send:
+	// в Edit и AnswerCallback не уходит. Пусто — обычное сообщение.
+	ReplyTo string
 }
 
 // Button — кнопка inline-клавиатуры: callback (Payload), ссылка (URL) или запрос контакта

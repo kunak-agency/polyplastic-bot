@@ -2,6 +2,7 @@ package max
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -34,6 +35,11 @@ type Fake struct {
 
 	batches chan fakeBatch
 	marker  int64
+
+	// replyFails — столько следующих Send с ReplyTo вернут ошибку, как MAX на реплай к
+	// удалённому сообщению (FailReplies).
+	replyFails  int
+	replyFailed []OutMessage
 
 	// Verbose — писать в лог факт отправки (адресат и длина, без текста): режим «бот на
 	// подделке» в development, чтобы машина времени была видна без MAX.
@@ -72,6 +78,11 @@ func (f *Fake) Send(_ context.Context, m OutMessage) (string, error) {
 	if m.ChatID == 0 && m.UserID == 0 {
 		f.refused = append(f.refused, m)
 		return "", errNoRecipient
+	}
+	if m.ReplyTo != "" && f.replyFails > 0 {
+		f.replyFails--
+		f.replyFailed = append(f.replyFailed, m)
+		return "", errFakeReply
 	}
 	f.nextMid++
 	f.sent = append(f.sent, m)
@@ -130,11 +141,28 @@ func (f *Fake) GetUpdates(ctx context.Context, _ int64) ([]Update, int64, error)
 	}
 }
 
+// errFakeReply — отказ подделки на реплай (FailReplies).
+var errFakeReply = errors.New("подделка MAX: сообщение для link не найдено")
+
+// FailReplies — следующие n отправок с ReplyTo вернут ошибку (реплай на удалённое сообщение).
+func (f *Fake) FailReplies(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.replyFails = n
+}
+
+// ReplyFailed — копия отправок с ReplyTo, которые подделка отклонила (FailReplies).
+func (f *Fake) ReplyFailed() []OutMessage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]OutMessage(nil), f.replyFailed...)
+}
+
 // Reset — забыть записанные отправки, правки и ответы (между шагами теста).
 func (f *Fake) Reset() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sent, f.refused, f.edits, f.answers, f.typing = nil, nil, nil, nil, nil
+	f.sent, f.refused, f.edits, f.answers, f.typing, f.replyFailed = nil, nil, nil, nil, nil, nil
 }
 
 // Refused — копия сообщений, которые не ушли: не указан ни ChatID, ни UserID.

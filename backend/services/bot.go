@@ -38,6 +38,9 @@ type BotService struct {
 	media     MediaAttacher // nil — вложения веток не уходят (branch_media.go)
 	asr       Transcriber   // nil — голосовые не распознаются (bot_voice.go)
 	now       func() time.Time
+	// replies — FEATURE_REPLIES: ответ на сообщение новичка уходит реплаем (OutMessage.ReplyTo);
+	// выключен — ReplyTo стирается перед отправкой (sendReply).
+	replies bool
 
 	wg sync.WaitGroup // фоновые отправки пакета после согласия
 }
@@ -102,9 +105,48 @@ func (b *BotService) send(ctx context.Context, m max.OutMessage) {
 	if noRecipient(m, "сообщение") {
 		return
 	}
-	if _, err := b.max.Send(ctx, m); err != nil {
+	if _, err := sendReply(ctx, b.max, b.replies, m); err != nil {
 		logger.Warn("бот: сообщение user=%d chat=%d не ушло: %v", m.UserID, m.ChatID, err)
 	}
+}
+
+// replyOn — то же, что send, но реплаем на сообщение новичка mid (пусто — обычное сообщение).
+func (b *BotService) replyOn(ctx context.Context, m max.OutMessage, mid string) {
+	m.ReplyTo = mid
+	b.send(ctx, m)
+}
+
+// sendReply — Send с реплаем (FEATURE_REPLIES). replies=false — ReplyTo стирается: поведение как
+// без флага. Отправка с link не прошла (сообщение новичка удалено, старое — как MAX ведёт себя
+// тут, не задокументировано) — тот же текст уходит без link, в лог reply_failed; новичок ошибки
+// не видит.
+func sendReply(ctx context.Context, c max.Client, replies bool, m max.OutMessage) (string, error) {
+	if !replies {
+		m.ReplyTo = ""
+	}
+	mid, err := c.Send(ctx, m)
+	if err == nil || m.ReplyTo == "" {
+		return mid, err
+	}
+	logger.Warn("бот: reply_failed user=%d chat=%d link=%s: %v — повтор без link", m.UserID, m.ChatID, m.ReplyTo, err)
+	m.ReplyTo = ""
+	return c.Send(ctx, m)
+}
+
+// midOf — mid сообщения новичка как поле записи (nil — неизвестен).
+func midOf(mid string) *string {
+	if mid == "" {
+		return nil
+	}
+	return &mid
+}
+
+// derefMID — mid из записи; nil — пусто.
+func derefMID(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // noRecipient — у сообщения нет адресата: в MAX его не шлём, а пишем в лог, кто его собрал
@@ -676,8 +718,12 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 			}
 			answer.Text = act.text
 			codes := flags.Codes(act.text)
+			answer.Sentiment = nil // новый текст — тональность разметит /flags (bot_flags.go)
 			if codes != nil {
 				answer.Flags = codes
+				// regex F5/F7/F9 — модель не вызывается; текст с «уволюсь», «ударил», «взятка» честно
+				// негативный, тональность ставим кодом без LLM.
+				answer.Sentiment = strPtr(domain.SentimentNeg)
 				markRisk(e, domain.RiskRed, "сигнал "+strings.Join(codes, ", ")+" в ответе на опрос")
 			} else {
 				evID := ev.ID
@@ -866,7 +912,7 @@ func (b *BotService) message(ctx context.Context, u max.Update) error {
 		return b.inputAnswer(ctx, emp, u)
 	}
 	if emp.AwaitFreeText != nil && strings.TrimSpace(u.Text) != "" {
-		return b.freeText(ctx, emp, u.Text)
+		return b.freeText(ctx, emp, u.Text, u.MessageID)
 	}
 	if emp.AwaitEventID != nil && strings.TrimSpace(u.Text) != "" {
 		out, err := b.applySurvey(ctx, emp.ID, *emp.AwaitEventID, surveyAction{kind: "text", q: emp.AwaitQuestion, text: u.Text})

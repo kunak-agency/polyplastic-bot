@@ -30,6 +30,8 @@ type TicketService struct {
 	now    func() time.Time
 	hrChat int64
 	sbChat int64
+	// replies — FEATURE_REPLIES: подтверждение обращения и ответ HR — реплаем на сообщение новичка.
+	replies bool
 }
 
 // TicketView — обращение для кабинета: с именем и площадкой новичка, переписка — в карточке.
@@ -218,7 +220,8 @@ func (s *TicketService) notify(ctx context.Context, t *domain.Ticket, e *domain.
 }
 
 // sendOpen — OPEN новичку новым сообщением; его mid — для правки в ASSIGNED.
-func (s *TicketService) sendOpen(ctx context.Context, e *domain.Employee, t *domain.Ticket, lead string) {
+// replyTo — сообщение новичка, на которое OPEN уходит реплаем (FEATURE_REPLIES); пусто — без.
+func (s *TicketService) sendOpen(ctx context.Context, e *domain.Employee, t *domain.Ticket, lead, replyTo string) {
 	if s.max == nil {
 		return
 	}
@@ -228,6 +231,7 @@ func (s *TicketService) sendOpen(ctx context.Context, e *domain.Employee, t *dom
 	}
 	off := !InWorkHours(s.now(), domain.SiteOf(e.Site))
 	m := recipientOf(e).msg(ticketOpenText(e, t, cat, off, lead), formatMarkdown, ticketOpenButtons(t))
+	m.ReplyTo = replyTo
 	s.sendStatus(ctx, e, t, m, false)
 }
 
@@ -244,7 +248,7 @@ func (s *TicketService) sendStatus(ctx context.Context, e *domain.Employee, t *d
 		}
 		return
 	}
-	mid, err := s.max.Send(ctx, m)
+	mid, err := sendReply(ctx, s.max, s.replies, m)
 	if err != nil {
 		logger.Warn("обращение #%d: статус новичку не ушёл: %v", t.Number, err)
 		return
@@ -410,8 +414,11 @@ func (s *TicketService) Reply(ctx context.Context, id uuid.UUID, text string, re
 		return nil, errs.NewConflictError(msgTicketNoChat)
 	}
 	cat := s.category(t.Category, t.Route)
-	// Отправка — до записи: «отправлено» в кабинете должно значить «ушло в MAX».
-	if _, err := s.max.Send(ctx, staffReplyMessage(to, t, cat, text)); err != nil {
+	// Отправка — до записи: «отправлено» в кабинете должно значить «ушло в MAX». Реплаем — на
+	// сообщение новичка, из которого выросло обращение (FEATURE_REPLIES).
+	m := staffReplyMessage(to, t, cat, text)
+	m.ReplyTo = s.sourceMID(ctx, t)
+	if _, err := sendReply(ctx, s.max, s.replies, m); err != nil {
 		logger.Warn("обращение #%d: ответ HR не ушёл в MAX: %v", t.Number, err)
 		return nil, errs.NewBadGatewayError(msgTicketSendFailed).WithCause(err)
 	}
@@ -449,6 +456,22 @@ func (s *TicketService) Reply(ctx context.Context, id uuid.UUID, text string, re
 		return s.Get(ctx, id) // с записью «Вопрос закрыт» в переписке
 	}
 	return view, nil
+}
+
+// sourceMID — mid сообщения новичка, из которого выросло обращение: вопрос боту (текст или
+// голосовое), на который передали. Пусто — флаг выключен, обращение из кнопки или старая запись.
+func (s *TicketService) sourceMID(ctx context.Context, t *domain.Ticket) string {
+	if !s.replies || t.QuestionID == nil {
+		return ""
+	}
+	q, err := s.repos.Questions.ByID(ctx, *t.QuestionID)
+	if err != nil || q == nil {
+		if err != nil {
+			logger.Warn("обращение #%d: вопрос для реплая не прочитан: %v", t.Number, err)
+		}
+		return ""
+	}
+	return derefMID(q.SourceMID)
 }
 
 // SetNotifyManager — PATCH {"notify_manager"}: для категорий, скрытых от руководителя, — 422.

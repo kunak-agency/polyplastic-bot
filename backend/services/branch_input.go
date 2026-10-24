@@ -284,7 +284,7 @@ func (b *BotService) inputAnswer(ctx context.Context, emp *domain.Employee, u ma
 			b.tickets.notify(ctx, res.ticket, e)
 		}
 	}
-	b.send(ctx, recipientOf(e).msg(textInputThanks, "", nil))
+	b.replyOn(ctx, recipientOf(e).msg(textInputThanks, "", nil), u.MessageID)
 	if release {
 		b.applyThen(ctx, e.ID, w.EventID, nil)
 	}

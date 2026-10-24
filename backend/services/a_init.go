@@ -52,6 +52,8 @@ type Options struct {
 	Media MediaOptions
 	// Digest — дайджест и руководитель: получатели в MAX, адрес кабинета, LLM.
 	Digest DigestOptions
+	// Features — фича-флаги FEATURE_* (config.Features). Replies — ответы бота реплаем.
+	Features config.Features
 }
 
 // NewServices — репозитории могут быть выключены (nil): каркас поднимается без базы.
@@ -70,7 +72,7 @@ func NewServices(r *repositories.Repos, ext *externalApi.ExternalAPI, o Options)
 		}
 		tax = t
 	}
-	tickets := &TicketService{repos: r, max: ext.Max, tax: tax, now: now, hrChat: o.HRChatID, sbChat: o.SBChatID}
+	tickets := &TicketService{repos: r, max: ext.Max, tax: tax, now: now, hrChat: o.HRChatID, sbChat: o.SBChatID, replies: o.Features.Replies}
 	s := &Services{
 		repos:     r,
 		ext:       ext,
@@ -96,6 +98,7 @@ func NewServices(r *repositories.Repos, ext *externalApi.ExternalAPI, o Options)
 	if ext.Max != nil {
 		s.Bot = NewBotService(ext.Max, r, sch, now)
 		s.Bot.tickets = tickets
+		s.Bot.replies = o.Features.Replies
 		if ext.RAG != nil { // nil-указатель в интерфейсе выглядел бы подключённым клиентом
 			s.Bot.rag = ext.RAG
 			s.Bot.asr = ext.RAG // голосовые: POST /transcribe того же сервиса

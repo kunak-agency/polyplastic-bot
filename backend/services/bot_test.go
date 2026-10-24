@@ -52,6 +52,12 @@ func newEnv(t *testing.T, now time.Time) *env {
 		Bot: config.Bot{Username: "korsik_test_bot", InviteLinkFormat: config.DefaultInviteLinkFormat},
 		Now: func() time.Time { return clock },
 	})
+	t.Cleanup(func() {
+		if svc.Bot != nil {
+			svc.Bot.Wait() // фоновые ответы ещё пишут в базу
+		}
+		_ = repos.Close()
+	})
 	return &env{svc: svc, repos: repos, fake: fake, clock: &clock}
 }
 

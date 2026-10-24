@@ -91,9 +91,11 @@ func (h *Handler) devCallbackID(chat, user int64, payload string) string {
 	return "dev-" + payload
 }
 
-// devIncoming — входящее новичка в ленту демо-чата (только на подделке).
-func (h *Handler) devIncoming(chat, user int64, kind, text string) {
+// devIncoming — входящее новичка в ленту демо-чата (только на подделке). Возвращает его mid в
+// ленте (для Update.MessageID: бот отвечает на него реплаем); не подделка — пусто.
+func (h *Handler) devIncoming(chat, user int64, kind, text string) string {
 	if fake := h.services.FakeMax(); fake != nil {
-		fake.JournalIncoming(chat, user, kind, text)
+		return fake.JournalIncoming(chat, user, kind, text)
 	}
+	return ""
 }

@@ -71,6 +71,7 @@ func main() {
 		Digest:     services.DigestOptions{UserIDs: cfg.Digest.UserIDs, CabinetURL: cfg.Digest.CabinetURL, LLM: cfg.LLM},
 		Media:      services.MediaOptions{MaxUploadMB: cfg.Docs.MediaMaxMB},
 		Docs:       services.DocsOptions{MaxUploadMB: cfg.Docs.MaxUploadMB, UploadTimeout: cfg.Docs.UploadTimeout, OperatorToken: cfg.Docs.OperatorToken},
+		Features:   cfg.Features,
 	})
 	h := handlers.NewHandlerManager(svc)
 

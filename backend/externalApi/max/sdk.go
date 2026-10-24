@@ -73,6 +73,7 @@ func (c *SDKClient) Send(ctx context.Context, m OutMessage) (string, error) {
 }
 
 func (c *SDKClient) Edit(ctx context.Context, messageID string, m OutMessage) error {
+	m.ReplyTo = "" // правка не меняет, на что сообщение отвечает
 	body := buildMessage(m).MessageBody()
 	return c.pacer.Do(ctx, chatKey(m.ChatID, m.UserID), func() error {
 		ctx, cancel := context.WithTimeout(ctx, callTimeout)
@@ -93,7 +94,9 @@ func (c *SDKClient) AnswerCallback(ctx context.Context, callbackID string, a Ans
 		ans.Notification = &n
 	}
 	if a.Message != nil {
-		body := buildMessage(*a.Message).MessageBody()
+		em := *a.Message
+		em.ReplyTo = ""
+		body := buildMessage(em).MessageBody()
 		ans.Message = &body
 	}
 	_, err := c.api.Messages.AnswerOnCallback(ctx, callbackID, ans)
@@ -167,6 +170,9 @@ func buildMessage(m OutMessage) *maxbot.Message {
 	}
 	if m.Silent {
 		msg.WithoutNotify()
+	}
+	if m.ReplyTo != "" {
+		msg.SetReply(m.Text, m.ReplyTo) // link {type: reply, mid}
 	}
 	for _, a := range m.Attachments {
 		msg.AddAttachByToken(a.Token, model.AttachmentType(a.Kind))
