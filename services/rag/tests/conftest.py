@@ -10,8 +10,6 @@ CORPUS = ROOT / "testdata" / "corpus"
 for var in ("LLM_BASE_URL", "LLM_API_KEY", "RAG_GATE_THRESHOLD", "RAG_RETRIEVER", "RAG_RERANKER", "RAG_API_KEY"):
     os.environ.pop(var, None)
 os.environ["RAG_CORPUS_DIR"] = str(CORPUS)
-# Голос звонка (Silero TTS, VAD) в тестах не грузим: tts/stream проверяются с фейковыми моделями.
-os.environ["RAG_VOICE_WARMUP"] = "0"
 
 
 @pytest.fixture(scope="session")

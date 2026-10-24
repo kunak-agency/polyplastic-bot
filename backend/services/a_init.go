@@ -27,7 +27,6 @@ type Services struct {
 	Media     *MediaService     // медиатека и вложения для бота (media.go, media_max.go)
 	Auth      *AuthService      // вход в кабинет, сессии (auth.go; FEATURE_AUTH)
 	Users     *UserService      // пользователи, команда, дашборды ролей (users.go, *_dashboard.go)
-	Call      *CallService      // звонок Корсику в браузере (call.go; FEATURE_CALL)
 	// Bot — обработка событий MAX (bot.go); nil, если бот выключен (нет токена и не подделка).
 	Bot *BotService
 	// digestOpts — получатели дайджеста, ссылка на кабинет, LLM (digest.go, manager.go).
@@ -68,8 +67,6 @@ type Options struct {
 	Digest DigestOptions
 	// Features — фича-флаги FEATURE_* (config.Features). Replies — ответы бота реплаем.
 	Features config.Features
-	// Call — лимиты звонка в браузере (CALL_*).
-	Call config.Call
 }
 
 // NewServices — репозитории могут быть выключены (nil): каркас поднимается без базы.
@@ -125,11 +122,6 @@ func NewServices(r *repositories.Repos, ext *externalApi.ExternalAPI, o Options)
 			s.Bot.asr = ext.RAG // голосовые: POST /transcribe того же сервиса
 		}
 	}
-	var callRAG CallRAG
-	if ext.RAG != nil { // nil-указатель в интерфейсе выглядел бы подключённым клиентом
-		callRAG = ext.RAG
-	}
-	s.Call = NewCallService(callRAG, o.Call, o.Features.Call)
 	s.SetMedia(s.Media) // вложения шагов и веток (branch_media.go)
 	return s
 }

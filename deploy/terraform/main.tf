@@ -17,7 +17,7 @@ locals {
 
   # Кабинет (статика + /api) обслуживается на домене кабинета (и на fallback_domain, если задан); api_domain — только API.
   web_domains = compact([var.web_domain, var.fallback_domain])
-  origins     = join(",", [for d in compact(concat(local.web_domains, [var.call_domain])) : "https://${d}"])
+  origins     = join(",", [for d in local.web_domains : "https://${d}"])
   cabinet_url = var.cabinet_url != "" ? trimsuffix(var.cabinet_url, "/") : "https://${var.web_domain}"
 
   backend_hash = sha1(join("", [
@@ -38,11 +38,6 @@ locals {
 
 resource "random_password" "basic_auth" {
   length  = 20
-  special = false
-}
-
-resource "random_password" "call_auth" {
-  length  = 16
   special = false
 }
 
@@ -127,9 +122,6 @@ resource "local_file" "caddyfile" {
     user               = "jury"
     hash               = random_password.basic_auth.bcrypt_hash
     basic_auth_enabled = var.basic_auth_enabled
-    call_domain        = var.call_domain
-    call_user          = "korsik"
-    call_hash          = random_password.call_auth.bcrypt_hash
   })
   file_permission      = "0644"
   directory_permission = "0755"

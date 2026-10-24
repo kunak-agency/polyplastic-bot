@@ -6,11 +6,8 @@ POST /flags  {"text", "context", "survey_question"?} -> флаги F0–F10, т�
 POST /documents (multipart: file, doc?) -> {doc_id, chunks, clauses, low_confidence_pages}
 GET  /documents -> {"items": [...], "total": N}
 POST /transcribe (multipart: audio) -> {text, lang, duration_s, confidence} (asr.py, README «Голос»)
-POST /tts    {"text", "speaker"?} -> audio/L16;rate=8000, поток по предложениям (tts.py, звонок Корсику)
-WS   /stream PCM16LE 8 кГц -> speech_start/partial/speech_end/final (stream.py, звонок Корсику)
 
-RAG_API_KEY задан — всё, кроме GET /health, требует «Authorization: Bearer <ключ>», иначе 401
-(WS /stream проверяет ключ сам и закрывает соединение кодом 1008: HTTP-middleware на WS не действует).
+RAG_API_KEY задан — всё, кроме GET /health, требует «Authorization: Bearer <ключ>», иначе 401.
 
 Контракт /ask и /flags: agency/system/api_contract.md. /documents описан в README сервиса.
 """
@@ -30,8 +27,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
 import asr
-import stream
-import tts
 from chunker import load_corpus
 from documents import DocRecord, DocumentStore, make_doc_id
 from parsers import CorruptDocument, UnsupportedDocument, parse_document
@@ -70,17 +65,8 @@ def build_pipeline() -> tuple[Pipeline, list]:
     return pipeline, chunks
 
 
-def _voice_warmup() -> None:
-    tts.warmup()
-    stream.warmup()
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Голос звонка (Silero TTS, VAD + T-one для /stream) грузится в фоне, параллельно индексу:
-    # без моделей сервис работает, /tts отвечает 503, /stream закрывается 1011.
-    if os.getenv("RAG_VOICE_WARMUP", "1") != "0":
-        threading.Thread(target=_voice_warmup, name="voice-warmup", daemon=True).start()
     state.pipeline, chunks = build_pipeline()
     state.store = DocumentStore(chunks)
     # Прогрев до yield: uvicorn открывает порт только после старта lifespan, так что /health
@@ -101,8 +87,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="rag", lifespan=lifespan)
-app.include_router(tts.router)
-app.include_router(stream.router)
 
 
 # --- общий ключ ---

@@ -22,12 +22,6 @@ variable "api_domain" {
   default     = "api-mosprom.plexet.ru"
 }
 
-variable "call_domain" {
-  description = "Домен страницы «Позвонить Корсику» (call.html + WS /api/call), всегда за своим basic auth. Пусто — не обслуживать."
-  type        = string
-  default     = "call.plexet.ru"
-}
-
 variable "fallback_domain" {
   description = "Запасной домен без настройки DNS (например, <ip-через-дефисы>.sslip.io): кабинет + /api. Пусто — не обслуживать."
   type        = string

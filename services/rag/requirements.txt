@@ -26,7 +26,3 @@ safetensors==0.8.0
 # звук декодирует ffmpeg (в Dockerfile — apt)
 sherpa-onnx==2.0.0
 sherpa-onnx-core==2.0.0
-# звонок Корсику: WS /stream (uvicorn без websockets не принимает WebSocket — «Unsupported upgrade
-# request») и POST /tts (Silero v5_5_ru на torch, нормализация чисел — num2words; tts_normalize.py)
-websockets==16.1.1
-num2words==0.5.14

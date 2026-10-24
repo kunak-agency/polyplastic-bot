@@ -38,7 +38,6 @@ type Config struct {
 	Docs      Docs
 	Digest    Digest
 	Features  Features
-	Call      Call
 }
 
 // Features — фича-флаги итерации 24.10 (FEATURE_*). Все выключены по умолчанию: выкатываются
@@ -56,8 +55,6 @@ type Features struct {
 	// Clarify — FEATURE_CLARIFY: уточняющий вопрос по шаблону категории после тревожного ответа
 	// опроса (низкая оценка + причина без текста, короткий негативный текст), не чаще раза в сутки.
 	Clarify bool
-	// Call — FEATURE_CALL: звонок Корсику в браузере (WS /api/call); выключен — маршрут 404.
-	Call bool
 }
 
 // On — имена включённых флагов для сводки старта.
@@ -74,23 +71,12 @@ func (f Features) On() []string {
 		{"FEATURE_CATCHUP", f.Catchup},
 		{"FEATURE_RISK_V2", f.RiskV2},
 		{"FEATURE_CLARIFY", f.Clarify},
-		{"FEATURE_CALL", f.Call},
 	} {
 		if x.on {
 			on = append(on, x.name)
 		}
 	}
 	return on
-}
-
-// Call — звонок Корсику в браузере (handlers/call.go). Речь и синтез — на rag-поде (RAG_*).
-type Call struct {
-	// MaxConcurrent — одновременных звонков (CALL_MAX_CONCURRENT, 2): ВМ с 1 vCPU и один под.
-	MaxConcurrent int
-	// MaxDuration — предел длины звонка (CALL_MAX_SECONDS, 300 с).
-	MaxDuration time.Duration
-	// BargeIn — перебивание бота голосом (CALL_BARGE_IN, по умолчанию 1).
-	BargeIn bool
 }
 
 // Digest — еженедельный дайджест руководителю подбора и ссылки из MAX в кабинет
@@ -254,18 +240,6 @@ func Load() (Config, error) {
 		Catchup:       flag("FEATURE_CATCHUP"),
 		RiskV2:        flag("FEATURE_RISK_V2"),
 		Clarify:       flag("FEATURE_CLARIFY"),
-		Call:          flag("FEATURE_CALL"),
-	}
-	c.Call = Call{
-		MaxConcurrent: int(integer("CALL_MAX_CONCURRENT")),
-		MaxDuration:   time.Duration(integer("CALL_MAX_SECONDS")) * time.Second,
-		BargeIn:       flagDefault("CALL_BARGE_IN", true),
-	}
-	if c.Call.MaxConcurrent <= 0 {
-		c.Call.MaxConcurrent = 2
-	}
-	if c.Call.MaxDuration <= 0 {
-		c.Call.MaxDuration = 5 * time.Minute
 	}
 	c.Digest = Digest{UserIDs: ids(os.Getenv("MAX_DIGEST_USER_IDS")), CabinetURL: strings.TrimRight(env("CABINET_URL", DefaultCabinetURL), "/")}
 	c.Bot.Fake = c.AppEnv == EnvDevelopment && !c.Max.Enabled()
@@ -322,7 +296,6 @@ func (c Config) Summary() []string {
 			c.LLM.Model, orNone(c.LLM.BaseURL), set(c.LLM.APIKey), c.LLM.Temperature, c.LLM.PresencePenalty),
 		fmt.Sprintf("дайджест: получателей в MAX %d, кабинет %s", len(c.Digest.UserIDs), c.Digest.CabinetURL),
 		fmt.Sprintf("фича-флаги: %s", features(c.Features.On())),
-		fmt.Sprintf("звонок: до %d одновременно, до %v, перебивание %v", c.Call.MaxConcurrent, c.Call.MaxDuration, c.Call.BargeIn),
 	}
 }
 
@@ -394,15 +367,6 @@ func duration(key string, def time.Duration) time.Duration {
 func flag(key string) bool {
 	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(key)))
 	return err == nil && v
-}
-
-// flagDefault — булева переменная со значением по умолчанию: пусто или мусор — def.
-func flagDefault(key string, def bool) bool {
-	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(key)))
-	if err != nil {
-		return def
-	}
-	return v
 }
 
 // integer — id чата; пусто или мусор — 0 («не задан», видно в Summary).
