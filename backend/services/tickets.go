@@ -42,6 +42,11 @@ type TicketView struct {
 	Messages     []domain.TicketMessage
 	// CategoryName — заголовок категории из data/taxonomy.yaml («Нет доступов, техники…»).
 	CategoryName string
+	// Tone — тон исходного текста новичка (pos | neu | neg), только в карточке; nil — не размечен.
+	Tone *string
+	// SummaryModel — однострочная сводка модели (/flags v2, агент H) — заголовок карточки; nil —
+	// модели нет или она промолчала, тогда заголовок — категория.
+	SummaryModel *string
 }
 
 // TicketFilter — GET /api/tickets.
@@ -316,7 +321,42 @@ func (s *TicketService) view(ctx context.Context, r *repositories.Repos, t *doma
 	if v.Messages, err = r.Tickets.Messages(ctx, t.ID); err != nil {
 		return nil, err
 	}
+	v.Tone = s.tone(ctx, r, t)
+	v.SummaryModel = modelSummary(t)
 	return v, nil
+}
+
+// modelSummary — сводка модели для заголовка карточки. Поле у обращения добавляет агент H
+// (волна 4, #24); пока его нет — nil, и кабинет показывает категорию.
+func modelSummary(t *domain.Ticket) *string {
+	return t.SummaryModel
+}
+
+// tone — тон текста, из которого выросло обращение (подсказка в карточке, #26): свободный вопрос
+// (QuestionID) или ответы опроса (EventID, самый напряжённый из размеченных). nil — не размечен.
+// Тон в маршруте и приоритете не участвует.
+func (s *TicketService) tone(ctx context.Context, r *repositories.Repos, t *domain.Ticket) *string {
+	if t.QuestionID != nil {
+		if q, err := r.Questions.ByID(ctx, *t.QuestionID); err == nil && q != nil && q.Sentiment != nil {
+			return q.Sentiment
+		}
+	}
+	if t.EventID == nil {
+		return nil
+	}
+	answers, err := r.Events.Answers(ctx, *t.EventID)
+	if err != nil {
+		return nil
+	}
+	rank := map[string]int{domain.SentimentPos: 1, domain.SentimentNeu: 2, domain.SentimentNeg: 3}
+	var best *string
+	for _, a := range answers {
+		if a.Sentiment != nil && rank[*a.Sentiment] > 0 && (best == nil || rank[*a.Sentiment] > rank[*best]) {
+			v := *a.Sentiment
+			best = &v
+		}
+	}
+	return best
 }
 
 // locked — обращение и новичок под блокировкой; закрытое — 409.
@@ -533,8 +573,10 @@ func (s *TicketService) Note(ctx context.Context, id uuid.UUID, text string) (*T
 	return view, err
 }
 
-// Resolve — «Решить» / «Вернуть боту»: resolved, новичку «✅ Вопрос закрыт…».
-func (s *TicketService) Resolve(ctx context.Context, id uuid.UUID) (*TicketView, error) {
+// Resolve — «Решить» / «Вернуть боту»: resolved, новичку «✅ Вопрос закрыт…». doneNote — «что
+// сделано» (необязательно, одна строка): заметкой с DoneNotePrefix в переписку, адресному новичку
+// (не анонимно, не F5/F9/F10) — «По вашему сигналу: …» перед «Вопрос закрыт».
+func (s *TicketService) Resolve(ctx context.Context, id uuid.UUID, doneNote string) (*TicketView, error) {
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
@@ -550,6 +592,15 @@ func (s *TicketService) Resolve(ctx context.Context, id uuid.UUID) (*TicketView,
 		if err := tx.Tickets.Save(ctx, t); err != nil {
 			return err
 		}
+		if doneNote = normDoneNote(doneNote); doneNote != "" {
+			author := "HR"
+			if t.AssigneeName != nil {
+				author = *t.AssigneeName
+			}
+			if err := tx.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: t.ID, From: domain.TicketMsgStaff, Author: &author, Text: DoneNotePrefix + doneNote, Internal: true}); err != nil {
+				return err
+			}
+		}
 		view, err = s.view(ctx, tx, t)
 		return err
 	})
@@ -557,6 +608,7 @@ func (s *TicketService) Resolve(ctx context.Context, id uuid.UUID) (*TicketView,
 		return nil, err
 	}
 	logger.Info("обращение #%d закрыто из кабинета", t.Number)
+	s.sendDoneNote(ctx, e, t, doneNote)
 	s.sendResolved(ctx, e, t)
 	if s.max == nil {
 		return view, nil

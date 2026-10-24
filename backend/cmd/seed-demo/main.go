@@ -12,6 +12,8 @@
 // Всё синтетическое: ФИО из personas.yaml и добора помечены «(синтетика)», телефоны +7 000 100-…,
 // аккаунты MAX — несуществующие id 910000xxx. Текстов ответов нет: только оценки, кнопки
 // причин и коды сигналов (как после разметки), так что и в обзор текст попасть не может.
+// Тональность (агрегат «тон за неделю») — детерминированно на первом вопросе каждого опроса,
+// без LLM и без случайности (SyntheticTone, tone.go): это заглушка вместо текста комментария.
 // Значения шкал — по кривым траекторий из data/generator-spec.yaml (seed 20261023).
 package main
 
@@ -523,6 +525,9 @@ func (g *gen) answer(ctx context.Context, e *domain.Employee, ev *domain.Schedul
 		}
 		if sv.Scale == domain.Scale10 || sv.Scale == domain.Scale5 {
 			e.LastPulse = &v
+		}
+		if q == 0 {
+			a.Sentiment = SyntheticTone(a) // тон — на первом вопросе опроса, как у одного «комментария»
 		}
 		st.Results = append(st.Results, r)
 		if err := g.repos.Events.UpsertAnswer(ctx, &a); err != nil {

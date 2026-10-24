@@ -87,6 +87,15 @@ export interface Newcomer {
   // IANA zone overriding the site's; null — the site's zone applies.
   tz?: string | null
   site_tz?: string
+  // GET /api/newcomers/{id} only: tone of the last 5 labelled texts, newest
+  // first, without the texts. Absent in the list and for the manager role.
+  recent_tone?: NewcomerTone[]
+}
+
+export interface NewcomerTone {
+  at: string // ISO 8601 with zone
+  kind: 'survey' | 'question'
+  sentiment: Sentiment
 }
 
 // POST /api/newcomers: the card without computed fields. The scenario version is
@@ -520,8 +529,24 @@ export interface TicketMessage {
   hidden: boolean
 }
 
+// Tone of a newcomer's text (pos | neu | neg): a hint, never a score.
+export type Sentiment = 'pos' | 'neu' | 'neg'
+
 export interface TicketDetail extends Ticket {
   messages: TicketMessage[]
+  // Wave 4 (#26), card only. Optional: an older backend does not send them.
+  // Tone of the text the ticket grew from; null — not labelled.
+  tone?: Sentiment | null
+  // One-line summary by the model — the card title; null — the category is.
+  summary_model?: string | null
+  // Whether "what was done" reaches the newcomer on resolve: false for
+  // anonymous tickets and F5/F9/F10.
+  done_note_reaches?: boolean
+}
+
+// POST /api/tickets/{id}/resolve (wave 4, #31): one line, optional.
+export interface TicketResolveRequest {
+  done_note?: string
 }
 
 export interface TicketListQuery {

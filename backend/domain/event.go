@@ -92,6 +92,12 @@ type SurveyResult struct {
 	Reason  string `json:"reason,omitempty"` // подпись кнопки причины (наш текст)
 	Wrote   bool   `json:"wrote,omitempty"`  // причина написана своими словами
 	Multi   []int  `json:"multi,omitempty"`  // multi: отмеченные варианты (с единицы)
+	// Уточняющий вопрос после тревожного ответа (FEATURE_CLARIFY, services/clarify.go): код
+	// категории шаблона, когда задан, и ответил ли новичок (выбор или «Не хочу отвечать»). Живёт
+	// в jsonb события — схема таблиц не меняется.
+	Clarify     string     `json:"clarify,omitempty"`
+	ClarifyAt   *time.Time `json:"clarify_at,omitempty"`
+	ClarifyDone bool       `json:"clarify_done,omitempty"`
 }
 
 func (s *SurveyState) Value() (driver.Value, error) {
@@ -121,4 +127,11 @@ type SurveyAnswer struct {
 	// Sentiment — тональность Text (domain.Sentiment*): pos | neu | neg; nil — не размечен или
 	// текста нет.
 	Sentiment *string
+	// Разметка /flags v2 (все nil — не размечено или старая запись). ToneConfidence — уверенность
+	// модели в тоне 0–1; Quote — дословный фрагмент Text в подтверждение самого серьёзного флага
+	// (rag уже проверил: подстрока, без ПДн, при F10 пусто); Summary — строка для HR ≤ 120
+	// символов, в третьем лице, без ПДн (при F10 пусто).
+	ToneConfidence *float64
+	Quote          *string
+	Summary        *string
 }

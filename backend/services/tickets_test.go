@@ -191,7 +191,7 @@ func TestTicketLifecycle(t *testing.T) {
 	for _, call := range []func() error{
 		func() error { _, err := e.svc.Tickets.Reply(ctx, tk.ID, "ещё", false); return err },
 		func() error { _, err := e.svc.Tickets.Assign(ctx, tk.ID, "Анна", "x"); return err },
-		func() error { _, err := e.svc.Tickets.Resolve(ctx, tk.ID); return err },
+		func() error { _, err := e.svc.Tickets.Resolve(ctx, tk.ID, ""); return err },
 	} {
 		if typ, _ := appCode(call()); typ != errs.ErrTypeConflict {
 			t.Fatal("действие над закрытым — не 409")

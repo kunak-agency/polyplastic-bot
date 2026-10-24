@@ -26,15 +26,17 @@ const dateLayout = "2006-01-02"
 
 // Newcomer — сотрудник (новичок) по контракту v1.
 type Newcomer struct {
-	ID              string  `json:"id"`
-	FullName        string  `json:"full_name"`
-	Phone           string  `json:"phone"`
-	Site            string  `json:"site"`
-	Department      string  `json:"department"`
-	Position        string  `json:"position"`
-	ManagerName     string  `json:"manager_name"`
-	MentorName      string  `json:"mentor_name"`
-	RecruiterName   string  `json:"recruiter_name"`
+	ID            string `json:"id"`
+	FullName      string `json:"full_name"`
+	Phone         string `json:"phone"`
+	Site          string `json:"site"`
+	Department    string `json:"department"`
+	Position      string `json:"position"`
+	ManagerName   string `json:"manager_name"`
+	MentorName    string `json:"mentor_name"`
+	RecruiterName string `json:"recruiter_name"`
+	// RecruiterID — закреплённый рекрутер (employees.recruiter_id); null — без рекрутера.
+	RecruiterID     *string `json:"recruiter_id"`
 	StartDate       string  `json:"start_date"`
 	Shift           *string `json:"shift"`
 	ScenarioID      string  `json:"scenario_id"`
@@ -52,6 +54,23 @@ type Newcomer struct {
 	OpenTickets     int     `json:"open_tickets"`
 	// Flags — флаги новичка (recruiter_enabled — «отмашка рекрутера», set_flag веток).
 	Flags map[string]bool `json:"flags"`
+	// IPDecision — решение по ИС: keep | extend | part | null; когда и кто записал.
+	IPDecision   *string `json:"ip_decision"`
+	IPDecisionAt *string `json:"ip_decision_at"`
+	IPDecisionBy *string `json:"ip_decision_by"`
+	// Расписание (итерация 24.10, out/nudge.go): пояс новичка и площадки, «не отвечает»,
+	// догоняющая очередь позднего входа.
+	NewcomerScheduleOut
+	// RecentTone — тон последних 5 текстовых ответов (только GET /api/newcomers/{id}; в реестре
+	// поля нет). Без текста.
+	RecentTone *[]NewcomerTone `json:"recent_tone,omitempty"`
+}
+
+// NewcomerTone — тон одного текстового ответа: at — время в зоне площадки, kind — survey | question.
+type NewcomerTone struct {
+	At        string `json:"at"`
+	Kind      string `json:"kind"`
+	Sentiment string `json:"sentiment"`
 }
 
 // zoned — момент в ISO 8601 с зоной площадки.
@@ -75,12 +94,29 @@ func NewcomerFrom(c services.NewcomerCard) Newcomer {
 	for k, v := range e.Flags {
 		n.Flags[k] = v
 	}
+	if e.RecruiterID != nil {
+		id := e.RecruiterID.String()
+		n.RecruiterID = &id
+	}
+	if c.RecentTone != nil {
+		tones := make([]NewcomerTone, 0, len(c.RecentTone))
+		for _, t := range c.RecentTone {
+			tones = append(tones, NewcomerTone{At: zoned(t.CreatedAt, e.Site), Kind: t.Kind, Sentiment: t.Sentiment})
+		}
+		n.RecentTone = &tones
+	}
+	n.NewcomerScheduleOut = scheduleOut(c)
 	if n.Risk == "" {
 		n.Risk = domain.RiskGreen
 	}
 	if e.LastActivityAt != nil {
 		s := zoned(*e.LastActivityAt, e.Site)
 		n.LastActivityAt = &s
+	}
+	n.IPDecision, n.IPDecisionBy = e.IPDecision, e.IPDecisionBy
+	if e.IPDecisionAt != nil {
+		s := zoned(*e.IPDecisionAt, e.Site)
+		n.IPDecisionAt = &s
 	}
 	return n
 }

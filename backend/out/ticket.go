@@ -34,7 +34,14 @@ type Ticket struct {
 // TicketCard — карточка и ответы действий: обращение и переписка (messages — всегда массив).
 type TicketCard struct {
 	Ticket
-	Messages []TicketMessage `json:"messages"`
+	// Tone — тон исходного текста новичка (pos | neu | neg | null): подсказка, в решении не
+	// участвует (волна 4, #26). Роль manager к обращениям доступа не имеет.
+	Tone *string `json:"tone"`
+	// SummaryModel — сводка модели одной строкой (заголовок карточки); null — заголовок категория.
+	SummaryModel *string `json:"summary_model"`
+	// DoneNoteReaches — уйдёт ли «что сделано» при resolve новичку: false у анонимных и F5/F9/F10.
+	DoneNoteReaches bool            `json:"done_note_reaches"`
+	Messages        []TicketMessage `json:"messages"`
 }
 
 // TicketMessage — сообщение переписки. У закрытых обращений текст новичка скрыт: text=null,
@@ -72,7 +79,10 @@ func TicketFrom(v services.TicketView) Ticket {
 
 // TicketCardFrom — карточка с перепиской.
 func TicketCardFrom(v services.TicketView) TicketCard {
-	c := TicketCard{Ticket: TicketFrom(v), Messages: make([]TicketMessage, 0, len(v.Messages))}
+	c := TicketCard{
+		Ticket: TicketFrom(v), Tone: v.Tone, SummaryModel: v.SummaryModel, DoneNoteReaches: services.DoneNoteReachesNewcomer(&v.Ticket),
+		Messages: make([]TicketMessage, 0, len(v.Messages)),
+	}
 	for _, m := range v.Messages {
 		text := m.Text
 		msg := TicketMessage{From: m.From, Author: m.Author, Text: &text, At: ticketTime(m.CreatedAt, v.Site), Internal: m.Internal}

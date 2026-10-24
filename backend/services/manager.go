@@ -28,6 +28,9 @@ import (
 const (
 	payMgrMet  = "mg:met:"
 	payMgrPlan = "mg:plan:"
+	// payMgrIP — решение по ИС под push D+87 (FEATURE_RISK_V2): mg:ip:<keep|extend|hr>:<nudge id>.
+	payMgrIP    = "mg:ip:"
+	ipDiscussHR = "hr"
 )
 
 // ManagerInviteTTL — сколько живёт ссылка руководителя.
@@ -48,12 +51,13 @@ type ManagerService struct {
 	bot   config.Bot
 	cab   string
 	now   func() time.Time
+	v2    bool // FEATURE_RISK_V2: поводы v2 и лимиты (manager_rules.go)
 }
 
 // Manager — сервис руководителя (по образцу Overview: без поля в Services).
 func (s *Services) Manager() *ManagerService {
 	o := s.Overview()
-	m := &ManagerService{repos: s.repos, tax: o.tax, now: o.now, bot: s.botCfg, cab: cabinetBase(s.digestOpts.CabinetURL)}
+	m := &ManagerService{repos: s.repos, tax: o.tax, now: o.now, bot: s.botCfg, cab: cabinetBase(s.digestOpts.CabinetURL), v2: s.features.RiskV2}
 	if s.ext != nil {
 		m.max = s.ext.Max
 	}
@@ -66,6 +70,11 @@ func cabinetBase(u string) string {
 		return config.DefaultCabinetURL
 	}
 	return u
+}
+
+// NewcomerPageURL — карточка новичка в кабинете.
+func NewcomerPageURL(base string, id uuid.UUID) string {
+	return cabinetBase(base) + "/newcomers/" + id.String()
 }
 
 // ManagerPageURL — «Мои новички» руководителя в кабинете.
@@ -148,8 +157,11 @@ type ManagerCard struct {
 	Connection    string
 	LastPulse     *int
 	ProbationDate time.Time
-	Attention     []string // поводы правил (manager_rules.go), без категорий
-	Meetings      []ManagerTask
+	// IPDecision — решение по ИС: keep | extend | part | nil; IPDecisionAt — когда записано.
+	IPDecision   *string
+	IPDecisionAt *time.Time
+	Attention    []string // поводы правил (manager_rules.go), без категорий
+	Meetings     []ManagerTask
 }
 
 // ManagerTask — незакрытая задача «Встреча 1:1» (push без «Встретился»).
@@ -180,8 +192,30 @@ func (s *ManagerService) View(ctx context.Context, name string) (*ManagerView, e
 	if err != nil {
 		return nil, err
 	}
-	v := BuildManagerView(mine, nudges, name, now, s.tax)
+	opt, err := s.nudgeOptions(ctx, mine)
+	if err != nil {
+		return nil, err
+	}
+	v := BuildManagerView(mine, nudges, name, now, s.tax, opt)
 	return &v, nil
+}
+
+// nudgeOptions — режим правил: v2 и у кого приложен адаптационный план.
+func (s *ManagerService) nudgeOptions(ctx context.Context, rows *repositories.OverviewRows) (NudgeOptions, error) {
+	opt := NudgeOptions{V2: s.v2}
+	if !s.v2 {
+		return opt, nil
+	}
+	ids := make([]uuid.UUID, 0, len(rows.Employees))
+	for _, e := range rows.Employees {
+		ids = append(ids, e.ID)
+	}
+	plan, err := s.repos.Employees.WithFile(ctx, ids, domain.PersonalAdaptationPlan)
+	if err != nil {
+		return opt, err
+	}
+	opt.WithPlan = plan
+	return opt, nil
 }
 
 // filterManagerRows — только новички с этим manager_name.
@@ -208,16 +242,16 @@ func filterManagerRows(rows *repositories.OverviewRows, name string) *repositori
 }
 
 // BuildManagerView — карточки «Мои новички». Чистая функция (тесты видимости без базы).
-func BuildManagerView(rows *repositories.OverviewRows, nudges []domain.ManagerNudge, name string, now time.Time, tax *taxonomy.Taxonomy) ManagerView {
+func BuildManagerView(rows *repositories.OverviewRows, nudges []domain.ManagerNudge, name string, now time.Time, tax *taxonomy.Taxonomy, opts ...NudgeOptions) ManagerView {
 	v := ManagerView{ManagerName: name, Items: []ManagerCard{}}
 	attention := map[uuid.UUID][]string{}
-	for _, c := range ManagerNudgeCandidates(rows, now, tax) {
+	for _, c := range ManagerNudgeCandidates(rows, now, tax, opts...) {
 		attention[c.Employee.ID] = append(attention[c.Employee.ID], c.Reason)
 	}
 	tasks := map[uuid.UUID][]ManagerTask{}
 	for _, n := range nudges {
-		if n.Status == domain.NudgeMet {
-			continue
+		if n.Status == domain.NudgeMet || n.Kind == domain.NudgeIPDiscuss {
+			continue // «Обсудить с HR» — задача HR, не руководителя
 		}
 		tasks[n.EmployeeID] = append(tasks[n.EmployeeID], ManagerTask{ID: n.ID, Kind: n.Kind, Status: n.Status, Text: n.Text, CreatedAt: n.CreatedAt})
 	}
@@ -235,7 +269,8 @@ func BuildManagerView(rows *repositories.OverviewRows, nudges []domain.ManagerNu
 			NewcomerID: e.ID, FullName: e.FullName, Site: e.Site, Department: e.Department, Position: e.Position,
 			StartDate: e.StartDate, Day: day, Stage: stage, Connection: e.Connection, LastPulse: e.LastPulse,
 			ProbationDate: civilDate(e.StartDate, site.Loc).AddDate(0, 0, 90),
-			Attention:     attention[e.ID], Meetings: tasks[e.ID],
+			IPDecision:    e.IPDecision, IPDecisionAt: e.IPDecisionAt,
+			Attention: attention[e.ID], Meetings: tasks[e.ID],
 		}
 		if card.Attention == nil {
 			card.Attention = []string{}
@@ -281,15 +316,31 @@ func (s *ManagerService) Tick(ctx context.Context, force bool) ([]SentNudge, err
 	if err != nil {
 		return nil, err
 	}
+	opt, err := s.nudgeOptions(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	cands := ManagerNudgeCandidates(rows, now, s.tax, opt)
+	var lim *nudgeLimiter
+	if s.v2 {
+		sort.SliceStable(cands, func(i, j int) bool { return nudgeRank[cands[i].Kind] < nudgeRank[cands[j].Kind] })
+		if lim, err = s.limiter(ctx, rows, now); err != nil {
+			return nil, err
+		}
+	}
 	var out []SentNudge
-	for _, c := range ManagerNudgeCandidates(rows, now, s.tax) {
+	for _, c := range cands {
 		if sent[c.Key] || strings.TrimSpace(c.Employee.ManagerName) == "" {
 			continue
 		}
 		if !force && !InWorkHours(now, domain.SiteOf(c.Employee.Site)) {
 			continue
 		}
+		if lim != nil && !lim.allow(c) {
+			continue // лимит: повод не записан и уйдёт в другой день, если ещё в окне
+		}
 		n := &domain.ManagerNudge{EmployeeID: c.Employee.ID, Kind: c.Kind, Key: c.Key, Text: c.Text, Status: domain.NudgeOpen}
+		n.CreatedAt = now // часы сервиса: по ним считаются лимиты v2
 		if c.Employee.ManagerUserID != nil {
 			n.ManagerUserID = *c.Employee.ManagerUserID
 		}
@@ -300,9 +351,16 @@ func (s *ManagerService) Tick(ctx context.Context, force bool) ([]SentNudge, err
 		if !created {
 			continue
 		}
+		if lim != nil {
+			lim.take(c)
+		}
 		res := SentNudge{NudgeID: n.ID, NewcomerID: c.Employee.ID, Manager: c.Employee.ManagerName, Kind: c.Kind, Text: c.Text}
 		if n.ManagerUserID != 0 && s.max != nil {
-			mid, err := s.max.Send(ctx, managerNudgeMessage(n, c.Employee.ManagerName, s.cab))
+			msg := managerNudgeMessage(n, c.Employee.ManagerName, s.cab)
+			if s.v2 {
+				msg = managerNudgeMessageV2(n, c.Employee.ManagerName, s.cab)
+			}
+			mid, err := s.max.Send(ctx, msg)
 			if err != nil {
 				logger.Warn("руководитель: push %s новичку %s не ушёл: %v", c.Kind, c.Employee.ID, err)
 			} else {
@@ -349,5 +407,76 @@ func managerNudgeMessage(n *domain.ManagerNudge, managerName, cab string) max.Ou
 			{{Text: "Встретился", Payload: payMgrMet + n.ID.String()}, {Text: "Запланирую", Payload: payMgrPlan + n.ID.String()}},
 			{{Text: "Подробнее", URL: ManagerPageURL(cab, managerName)}},
 		},
+	}
+}
+
+// managerNudgeMessageV2 — push v2: D+87 — кнопки решения по ИС, D+1 — ссылка на карточку для
+// плана, остальное — как раньше («Встретился» / «Запланирую» / «Подробнее»).
+func managerNudgeMessageV2(n *domain.ManagerNudge, managerName, cab string) max.OutMessage {
+	id := n.ID.String()
+	switch n.Kind {
+	case domain.NudgeProbation:
+		return max.OutMessage{UserID: n.ManagerUserID, Text: n.Text, Buttons: [][]max.Button{
+			{{Text: "Оставить", Payload: payMgrIP + domain.IPKeep + ":" + id}, {Text: "Продлить", Payload: payMgrIP + domain.IPExtend + ":" + id}},
+			{{Text: "Обсудить с HR", Payload: payMgrIP + ipDiscussHR + ":" + id}},
+		}}
+	case domain.NudgePlanNeeded:
+		return max.OutMessage{UserID: n.ManagerUserID, Text: n.Text, Buttons: [][]max.Button{
+			{{Text: "Приложить план", URL: NewcomerPageURL(cab, n.EmployeeID)}},
+		}}
+	}
+	return managerNudgeMessage(n, managerName, cab)
+}
+
+// nudgeLimiter — лимиты push на руководителя (v2): не больше nudgeLimitDay в день и
+// nudgeLimitWeek поводов для 1:1 за 7 дней. Руководитель — по manager_name карточки.
+type nudgeLimiter struct {
+	day, week map[string]int
+}
+
+// limiter — счётчики по уже записанным push за 7 дней.
+func (s *ManagerService) limiter(ctx context.Context, rows *repositories.OverviewRows, now time.Time) (*nudgeLimiter, error) {
+	lim := &nudgeLimiter{day: map[string]int{}, week: map[string]int{}}
+	mgr := map[uuid.UUID]string{}
+	ids := make([]uuid.UUID, 0, len(rows.Employees))
+	for _, e := range rows.Employees {
+		mgr[e.ID] = strings.TrimSpace(e.ManagerName)
+		ids = append(ids, e.ID)
+	}
+	list, err := s.repos.Manager().NudgesOf(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	loc := domain.SiteOf("").Loc
+	today := civilDate(now.In(loc), loc)
+	weekFrom := now.AddDate(0, 0, -nudgeLimitWindowDays)
+	for _, n := range list {
+		name := mgr[n.EmployeeID]
+		if name == "" || n.Kind == domain.NudgeIPDiscuss || n.CreatedAt.Before(weekFrom) {
+			continue
+		}
+		if !civilDate(n.CreatedAt.In(loc), loc).Before(today) {
+			lim.day[name]++
+		}
+		if nudgeMeeting(n.Kind) {
+			lim.week[name]++
+		}
+	}
+	return lim, nil
+}
+
+func (l *nudgeLimiter) allow(c NudgeCandidate) bool {
+	name := strings.TrimSpace(c.Employee.ManagerName)
+	if l.day[name] >= nudgeLimitDay {
+		return false
+	}
+	return !nudgeMeeting(c.Kind) || l.week[name] < nudgeLimitWeek
+}
+
+func (l *nudgeLimiter) take(c NudgeCandidate) {
+	name := strings.TrimSpace(c.Employee.ManagerName)
+	l.day[name]++
+	if nudgeMeeting(c.Kind) {
+		l.week[name]++
 	}
 }

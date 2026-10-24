@@ -90,7 +90,25 @@ type Employee struct {
 	// (EventRepo.CatchupProgress). CatchupDoneAt — очередь пуста, чип «Догнал ✓».
 	CatchupStartedAt *time.Time
 	CatchupDoneAt    *time.Time
+
+	// IPDecision — решение по испытательному сроку: keep | extend | part | nil — не задано.
+	// Ставит рекрутер или руководитель HR в кабинете (POST /api/newcomers/{id}/ip-decision) или
+	// руководитель подразделения кнопкой push D+87. IPDecisionBy — кто: ФИО пользователя кабинета
+	// или «руководитель <имя> (MAX)».
+	IPDecision   *string
+	IPDecisionAt *time.Time
+	IPDecisionBy *string
 }
+
+// Решение по испытательному сроку (Employee.IPDecision).
+const (
+	IPKeep   = "keep"   // оставить
+	IPExtend = "extend" // продлить
+	IPPart   = "part"   // расстаться
+)
+
+// IPDecisions — допустимые значения IPDecision.
+var IPDecisions = []string{IPKeep, IPExtend, IPPart}
 
 // InviteToken — приглашение: случайная строка (≤ 128 символов, без ПДн) для deep link.
 type InviteToken struct {

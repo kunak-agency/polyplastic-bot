@@ -35,6 +35,9 @@ type User struct {
 	// ManagerName — для роли manager: имя, как в Employee.ManagerName; по нему руководитель
 	// видит своих подчинённых. nil — у пользователя нет подчинённых.
 	ManagerName *string
+	// MaxUserID — MAX user_id пользователя для push кабинета (утренняя сводка рекрутеру,
+	// FEATURE_RISK_V2); nil — в MAX не пишем.
+	MaxUserID *int64
 }
 
 // SessionTTL — срок жизни сессии кабинета (cookie HttpOnly; Secure; SameSite=Lax).

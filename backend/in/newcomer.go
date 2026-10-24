@@ -90,6 +90,7 @@ type NewcomerCreate struct {
 	StartDate     string          `json:"start_date"`
 	Shift         json.RawMessage `json:"shift"` // "1" | 1 | null
 	ScenarioID    string          `json:"scenario_id"`
+	TZ            json.RawMessage `json:"tz"` // IANA-пояс новичка; null/нет — пояс площадки
 }
 
 // Validate — карточка в вход сервиса.
@@ -111,6 +112,9 @@ func (n NewcomerCreate) Validate() (services.NewcomerInput, error) {
 		f.add("phone", errs.CodeInvalidFormat, "Телефон: +7 и 10 цифр")
 	}
 	out.Shift = parseShift(&f, n.Shift)
+	if tz := parseTZ(&f, n.TZ); tz != nil && *tz != "" {
+		out.TZ = tz
+	}
 	return out, f.err()
 }
 
@@ -127,15 +131,55 @@ func parseShift(f *fields, raw json.RawMessage) *string {
 	return nil
 }
 
-// NewcomerPatch — тело PATCH /api/newcomers/{id}: перенос даты выхода.
+// NewcomerPatch — тело PATCH /api/newcomers/{id}: перенос даты выхода и/или пояс новичка
+// (api_contract_auth.md, «Пояс»). tz — IANA-имя («Asia/Yekaterinburg»); null или "" — снять,
+// вернуть пояс площадки; поля нет — не менять.
 type NewcomerPatch struct {
-	StartDate string `json:"start_date"`
+	StartDate string          `json:"start_date"`
+	TZ        json.RawMessage `json:"tz"`
 }
 
 func (p NewcomerPatch) Validate() (time.Time, error) {
 	var f fields
 	d := f.date("start_date", p.StartDate)
 	return d, f.err()
+}
+
+// ValidateChange — что меняем: дата (nil — не меняем) и пояс (nil — не меняем). Нужно хотя бы одно.
+func (p NewcomerPatch) ValidateChange() (*time.Time, *string, error) {
+	var f fields
+	tz := parseTZ(&f, p.TZ)
+	var start *time.Time
+	if strings.TrimSpace(p.StartDate) != "" || tz == nil {
+		d := f.date("start_date", p.StartDate)
+		start = &d
+	}
+	return start, tz, f.err()
+}
+
+// parseTZ — поле tz: нет поля — nil (не менять); null или "" — "" (пояс площадки); иначе
+// IANA-имя зоны с «/» (Asia/Yekaterinburg). Неизвестная зона — ошибка поля.
+func parseTZ(f *fields, raw json.RawMessage) *string {
+	if len(raw) == 0 {
+		return nil
+	}
+	empty := ""
+	if strings.TrimSpace(string(raw)) == "null" {
+		return &empty
+	}
+	var v string
+	if err := json.Unmarshal(raw, &v); err != nil {
+		f.add("tz", errs.CodeInvalidFormat, "Пояс IANA строкой, например Asia/Yekaterinburg")
+		return nil
+	}
+	if v = strings.TrimSpace(v); v == "" {
+		return &empty
+	}
+	if _, err := time.LoadLocation(v); err != nil || !strings.Contains(v, "/") {
+		f.add("tz", errs.CodeInvalidFormat, "Неизвестный пояс: нужно IANA-имя, например Asia/Yekaterinburg")
+		return nil
+	}
+	return &v
 }
 
 // TimeTravel — тело POST /api/newcomers/{id}/time-travel.
@@ -184,4 +228,26 @@ func (q NewcomerQuery) Validate() (repositories.EmployeeFilter, error) {
 		f.add("q", errs.CodeOutOfRange, fmt.Sprintf("Не длиннее %d символов", maxField))
 	}
 	return out, f.err()
+}
+
+// IPDecision — POST /api/newcomers/{id}/ip-decision {"decision": "keep"|"extend"|"part"|null}.
+// Поле обязательно: null сбрасывает решение в «не задано».
+type IPDecision struct {
+	Decision *string `json:"decision"`
+}
+
+// Validate — допустимое значение или null.
+func (b IPDecision) Validate() (*string, error) {
+	if b.Decision == nil {
+		return nil, nil
+	}
+	v := strings.TrimSpace(*b.Decision)
+	for _, d := range domain.IPDecisions {
+		if v == d {
+			return &v, nil
+		}
+	}
+	var f fields
+	f.add("decision", errs.CodeOutOfRange, "Решение: keep, extend, part или null")
+	return nil, f.err()
 }

@@ -4,6 +4,7 @@
 //
 //	cd backend && go run ./cmd/seed     (или make seed)
 //	cd backend && go run ./cmd/seed -reset   (или make seed-reset) — чистая пересборка
+//	cd backend && go run ./cmd/seed -users   — демо-аккаунты кабинета (users.go)
 //
 // -reset — только APP_ENV=development: удаляет всех новичков (вместе со смоук-данными агентов),
 // сценарии со «Смоук-шагом» и правками, события, вопросы и обращения, затем заливает сид заново.
@@ -39,6 +40,7 @@ import (
 func main() {
 	reset := flag.Bool("reset", false, "очистить демо-данные и залить сид заново (только APP_ENV=development)")
 	yes := flag.Bool("yes", false, "не спрашивать подтверждение для -reset")
+	users := flag.Bool("users", false, "только демо-аккаунты кабинета (hr, recruiter1, recruiter2, manager) и закрепление новичков за рекрутерами")
 	flag.Parse()
 	_ = godotenv.Load()
 	cfg, err := config.Load()
@@ -65,6 +67,10 @@ func main() {
 	}
 	svc := services.NewServices(repos, &externalApi.ExternalAPI{}, services.Options{Bot: cfg.Bot, Taxonomy: tax})
 	ctx := context.Background()
+	if *users {
+		seedUsers(ctx, repos, svc)
+		return
+	}
 
 	gtp := scenario(ctx, repos, svc, "Завод GTP", domain.SiteGTP)
 	grpp := scenario(ctx, repos, svc, "Офис GrPP", domain.SiteGrPP)

@@ -16,6 +16,25 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 	// Готовность: база и rag (agency/system/api_contract.md).
 	api.Get("/health", h.Health)
 
+	// Итерация 24.10 — вход и роли (api_contract_auth.md). Только при FEATURE_AUTH: без флага ни
+	// мидлвара, ни маршрутов нет (GET /api/auth/me → 404 — так кабинет узнаёт, что входа нет).
+	// AuthRequired: сессия обязательна для всего /api, кроме health, login/logout и dev в
+	// development; дальше матрица ролей (policy). Бот ходит не через HTTP — его это не касается.
+	if h.authOn() {
+		api.Use(h.AuthRequired)
+		api.Post("/auth/login", h.Login)
+		api.Post("/auth/logout", h.Logout)
+		api.Get("/auth/me", h.Me)
+		api.Get("/recruiter/dashboard", h.RecruiterDashboard)
+		api.Get("/hrlead/dashboard", h.HRLeadDashboard)
+		api.Get("/team", h.Team)
+		api.Get("/users", h.ListUsers)
+		api.Post("/users", h.CreateUser)
+		api.Patch("/users/:id", h.PatchUser)
+		api.Post("/newcomers/reassign", h.Reassign) // до /newcomers/:id
+		api.Post("/newcomers/:id/contacted", h.MarkContacted)
+	}
+
 	// v1 — новички, сценарии, машина времени (api_contract.md, «v1 — итерация 1»).
 	api.Get("/newcomers", h.ListNewcomers)
 	api.Post("/newcomers", h.CreateNewcomer)
@@ -26,6 +45,13 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 	// v4 — флаги «по отмашке» и личные файлы новичка (branch.go).
 	api.Post("/newcomers/:id/flags", h.SetNewcomerFlag)
 	api.Post("/newcomers/:id/files", h.UploadNewcomerFile)
+	// Решение по ИС (FEATURE_RISK_V2, api_contract.md «Решение по ИС»): рекрутер, hr_lead.
+	api.Post("/newcomers/:id/ip-decision", h.SetIPDecision)
+	// Итерация 24.10 — наджи: «Напомнить» и история (nudges.go).
+	api.Post("/newcomers/:id/nudge", h.NudgeNewcomer)
+	api.Get("/newcomers/:id/nudges", h.NewcomerNudges)
+	api.Post("/newcomers/:id/remind", h.NudgeNewcomer) // алиас /nudge: кнопка «Напомнить» дашборда (api_contract_auth.md)
+	api.Get("/newcomers/:id/files", h.NewcomerFiles)   // личные файлы новичка без содержимого (users.go)
 
 	api.Get("/scenarios", h.ListScenarios)
 	api.Post("/scenarios", h.CreateScenario)
@@ -60,6 +86,7 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 	api.Post("/newcomers/:id/manager-invite", h.ManagerInvite)
 	api.Get("/manager/managers", h.Managers)
 	api.Get("/manager/newcomers", h.ManagerNewcomers)
+	api.Post("/manager/tasks/:id", h.ManagerTask) // «Встретился» / «Запланировал» из кабинета (users.go)
 
 	// v3 — база знаний (api_contract.md, «v3 — база знаний»). Права HR — hrOnly: ролей нет,
 	// пускаем в development или с X-Operator-Token. Мидлвар на каждом маршруте, а не группой без

@@ -37,6 +37,10 @@ type NewcomerInput struct {
 	StartDate     time.Time
 	Shift         *string
 	ScenarioID    uuid.UUID
+	// TZ — IANA-пояс новичка (переопределяет пояс площадки); nil — пояс площадки.
+	TZ *string
+	// RecruiterID — закреплённый рекрутер (FEATURE_AUTH: роль recruiter — он сам); nil — нет.
+	RecruiterID *uuid.UUID
 }
 
 // NewcomerCard — сотрудник с вычисляемыми полями контракта.
@@ -46,7 +50,15 @@ type NewcomerCard struct {
 	Stage       string
 	InviteLink  string
 	OpenTickets int // незакрытые обращения
+	// Пояс, «не отвечает», догоняющая очередь (newcomers_tz.go).
+	NewcomerSchedule
+	// RecentTone — тон последних RecentToneN текстовых ответов (только в карточке, Get): дата,
+	// тип, тон, без текста. Подсказка, не оценка сотрудника. nil — список реестра.
+	RecentTone []repositories.ToneMark
 }
+
+// RecentToneN — сколько последних текстовых ответов показывать тоном в карточке.
+const RecentToneN = 5
 
 // TimelineItem — событие таймлайна для кабинета.
 type TimelineItem = domain.ScheduledEvent
@@ -94,8 +106,8 @@ func (s *NewcomerService) ready() error {
 // card — вычисляемые поля: день адаптации, этап, ссылка. Машина времени день не меняет
 // (контракт, «Уточнения v1»): она только досрочно отправляет события.
 func (s *NewcomerService) card(e domain.Employee, inv *domain.InviteToken) NewcomerCard {
-	day := DayNumber(e.StartDate, s.now(), domain.SiteOf(e.Site))
-	c := NewcomerCard{Employee: e, Day: day, Stage: domain.StageForDay(day)}
+	day := DayNumber(e.StartDate, s.now(), s.scheduler.SiteFor(&e))
+	c := NewcomerCard{Employee: e, Day: day, Stage: domain.StageForDay(day), NewcomerSchedule: s.schedule(&e)}
 	if inv != nil {
 		c.InviteLink = InviteLink(s.bot, inv.Token)
 	}
@@ -132,6 +144,9 @@ func (s *NewcomerService) List(ctx context.Context, f repositories.EmployeeFilte
 			out[i] = s.card(e, nil)
 		}
 		out[i].OpenTickets = open[e.ID]
+		if out[i].Catchup, err = s.scheduler.Catchup(ctx, &list[i]); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -162,6 +177,15 @@ func (s *NewcomerService) Get(ctx context.Context, id uuid.UUID) (*NewcomerCard,
 		return nil, err
 	}
 	c.OpenTickets = open[id]
+	if c.Catchup, err = s.scheduler.Catchup(ctx, e); err != nil {
+		return nil, err
+	}
+	if c.RecentTone, err = s.repos.Overview().RecentTone(ctx, id, RecentToneN); err != nil {
+		return nil, err
+	}
+	if c.RecentTone == nil {
+		c.RecentTone = []repositories.ToneMark{}
+	}
 	return &c, nil
 }
 
@@ -201,8 +225,8 @@ func (s *NewcomerService) Create(ctx context.Context, in NewcomerInput) (*Newcom
 		e = domain.Employee{
 			FullName: in.FullName, Phone: in.Phone, Site: in.Site, Department: in.Department,
 			Position: in.Position, ManagerName: in.ManagerName, MentorName: in.MentorName,
-			RecruiterName: in.RecruiterName, StartDate: in.StartDate, Shift: in.Shift,
-			ScenarioID: sc.ID, ScenarioVersion: sc.Version,
+			RecruiterName: in.RecruiterName, RecruiterID: in.RecruiterID, StartDate: in.StartDate, Shift: in.Shift,
+			ScenarioID: sc.ID, ScenarioVersion: sc.Version, TZ: in.TZ,
 			Connection: domain.ConnInvited, Risk: domain.RiskGreen,
 		}
 		if err := tx.Employees.Create(ctx, &e); err != nil {

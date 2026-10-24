@@ -155,6 +155,15 @@ func ClusterThemes(rows []repositories.DigestText, tax *taxonomy.Taxonomy) Theme
 				critical[r.EmployeeID] = true
 			}
 		}
+		// Уточнение к причине («Люди и общение → Наставник», clarify.go): своя тема-причина,
+		// основа — как обычная кнопка причины.
+		reason, clar := splitClarify(r.Reason)
+		if clar != "" && !noText {
+			a := get(themeReasonPrefix+r.Reason, "")
+			a.people[r.EmployeeID] = true
+			a.sites[r.Site] = true
+			a.mentions++
+		}
 		var tt *themeText
 		if !noText && strings.TrimSpace(r.Text) != "" {
 			text := anonymize(r.Text, r.FullName)
@@ -179,8 +188,8 @@ func ClusterThemes(rows []repositories.DigestText, tax *taxonomy.Taxonomy) Theme
 					a.texts = append(a.texts, *tt)
 				}
 			}
-		case r.Reason != "" && reasonLabels[r.Reason] != "" && (r.Reason != "Другое" || tt == nil):
-			a := get(themeReasonPrefix+r.Reason, "")
+		case reason != "" && reasonLabels[reason] != "" && (reason != "Другое" || tt == nil):
+			a := get(themeReasonPrefix+reason, "")
 			a.people[r.EmployeeID] = true
 			a.sites[r.Site] = true
 			a.mentions++
@@ -252,7 +261,15 @@ func themeLabel(key string, a *themeAcc) string {
 		}
 		return a.category
 	case strings.HasPrefix(key, themeReasonPrefix):
-		return reasonLabels[strings.TrimPrefix(key, themeReasonPrefix)]
+		base, clar := splitClarify(strings.TrimPrefix(key, themeReasonPrefix))
+		l := reasonLabels[base]
+		if l == "" {
+			l = "причина: " + strings.ToLower(base)
+		}
+		if clar != "" {
+			l += " — " + strings.ToLower(clar)
+		}
+		return l
 	}
 	kw := groupKeywordsAll(a.texts, 3)
 	if len(kw) == 0 {

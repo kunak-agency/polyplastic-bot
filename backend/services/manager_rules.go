@@ -18,6 +18,12 @@ import (
 // нельзя (F0/F4/F5/F9/F10, taxonomy.yaml manager_visibility=none и never_to_manager), повод
 // не отправляется вовсе: иначе push сам указал бы на сигнал (например, на жалобу на самого
 // руководителя). Такими случаями занимаются HR-партнёр и СБ.
+//
+// FEATURE_RISK_V2 (ресерч 2026-10-24-role-dashboards.md, разделы 3 и 5): плановые поводы уходят
+// всем — D+14 «плановая встреча», D+30, D+87 с решением по ИС (кнопки «Оставить / Продлить /
+// Обсудить с HR»); при скрытой категории в низком пульсе через сутки уходит тот же нейтральный
+// «плановая встреча», что и на D+14 — по тексту их не различить; D+1 — «приложите план
+// адаптации», если личного файла adaptation_plan нет. Лимиты — в Tick (manager.go).
 
 // Пороги правил.
 const (
@@ -30,7 +36,44 @@ const (
 	nudgeMonthWindow = 3
 	// nudgeLowPulseFresh — низкие пульсы старше двух недель повода не дают.
 	nudgeLowPulseFresh = 14 * 24 * time.Hour
+
+	// v2: D+14 — плановая встреча в окне D+14…D+17; нейтральный повод — через сутки после
+	// низкого пульса со скрытой категорией; D+1 «план» — в окне D+1…D+3 (старт в пятницу — понедельник).
+	NudgeRegularDay      = 14
+	nudgeRegularWindow   = 3
+	nudgeNeutralDelay    = 24 * time.Hour
+	NudgePlanDay         = 1
+	nudgePlanWindow      = 2
+	NudgeIPDecisionDays  = 3
+	nudgeLimitWeek       = 2 // поводов для 1:1 на руководителя за 7 дней
+	nudgeLimitDay        = 1 // push на руководителя за день
+	nudgeLimitWindowDays = 7
 )
+
+// NudgeOptions — режим правил. V2 — FEATURE_RISK_V2; WithPlan — у кого есть личный файл
+// adaptation_plan (нужно для D+1 «план»).
+type NudgeOptions struct {
+	V2       bool
+	WithPlan map[uuid.UUID]bool
+}
+
+// nudgeRank — порядок поводов при лимите: сначала задачи с датой (D+87, D+1), потом сигналы, потом
+// плановые встречи.
+var nudgeRank = map[string]int{
+	domain.NudgeProbation: 0, domain.NudgePlanNeeded: 1, domain.NudgeLowPulseTwice: 2,
+	domain.NudgeSilent: 3, domain.NudgeMonth: 4, domain.NudgeRegular: 5,
+}
+
+// nudgeMeeting — повод для встречи 1:1: на него действует недельный лимит. D+87 и D+1 — задачи
+// с датой, их ограничивает только дневной лимит.
+func nudgeMeeting(kind string) bool {
+	return kind != domain.NudgeProbation && kind != domain.NudgePlanNeeded
+}
+
+// regularText — нейтральный плановый повод: одинаковый для D+14 и замены скрытого сигнала.
+func regularText(name string, day int) string {
+	return fmt.Sprintf("%s (%s): плановая встреча 1:1. Узнайте, как идут дела и что мешает.", name, dayRu(day))
+}
 
 // managerHiddenFallback — коды, которые руководителю не видны, если таксономии нет под рукой.
 var managerHiddenFallback = map[string]bool{"F0": true, "F4": true, "F5": true, "F9": true, "F10": true}
@@ -64,9 +107,13 @@ type surveyPulse struct {
 
 // ManagerNudgeCandidates — поводы по всем новичкам в адаптации. Чистая функция: её проверяют
 // тесты без базы.
-func ManagerNudgeCandidates(rows *repositories.OverviewRows, now time.Time, tax *taxonomy.Taxonomy) []NudgeCandidate {
+func ManagerNudgeCandidates(rows *repositories.OverviewRows, now time.Time, tax *taxonomy.Taxonomy, opts ...NudgeOptions) []NudgeCandidate {
 	if rows == nil {
 		return nil
+	}
+	var opt NudgeOptions
+	if len(opts) > 0 {
+		opt = opts[0]
 	}
 	// Пульс по опросам (как в обзоре): среднее ответов одного события, по времени.
 	type acc struct {
@@ -127,9 +174,14 @@ func ManagerNudgeCandidates(rows *repositories.OverviewRows, now time.Time, tax 
 		if ps := pulses[e.ID]; len(ps) >= 2 {
 			sort.SliceStable(ps, func(i, j int) bool { return ps[i].at.Before(ps[j].at) })
 			a, b := ps[len(ps)-2], ps[len(ps)-1]
-			if a.avg <= LowPulse && b.avg <= LowPulse && now.Sub(b.at) <= nudgeLowPulseFresh && !anyHidden(tax, a.codes, b.codes) {
+			low := a.avg <= LowPulse && b.avg <= LowPulse && now.Sub(b.at) <= nudgeLowPulseFresh
+			switch hidden := anyHidden(tax, a.codes, b.codes); {
+			case low && !hidden:
 				add(domain.NudgeLowPulseTwice, b.event.String(), "второй низкий пульс подряд",
 					fmt.Sprintf("%s (%s): второй низкий пульс подряд. Рекомендую встретиться 1:1 на этой неделе.", name, dayRu(day)))
+			case low && opt.V2 && now.Sub(b.at) >= nudgeNeutralDelay:
+				// Скрытая категория: не молчим, а через сутки — тот же плановый повод, что D+14.
+				add(domain.NudgeRegular, "n"+b.event.String(), "плановая встреча 1:1", regularText(name, day))
 			}
 		}
 
@@ -152,7 +204,12 @@ func ManagerNudgeCandidates(rows *repositories.OverviewRows, now time.Time, tax 
 
 		// 3. Решение по испытательному сроку через 0–3 дня.
 		left := 90 - day
-		if left >= 0 && left <= NudgeProbationDays {
+		if opt.V2 && left >= 0 && left <= NudgeIPDecisionDays {
+			// v2: D+87 — вопрос с кнопками решения; решение уже записано — повода нет.
+			if e.IPDecision == nil {
+				add(domain.NudgeProbation, "d90", "решение по ИС "+ipWhen(left), ipDecisionText(name, left))
+			}
+		} else if !opt.V2 && left >= 0 && left <= NudgeProbationDays {
 			when := "сегодня"
 			if left > 0 {
 				when = "через " + daysRu(left)
@@ -166,8 +223,41 @@ func ManagerNudgeCandidates(rows *repositories.OverviewRows, now time.Time, tax 
 			add(domain.NudgeMonth, "d30", "месяц в компании — встреча 1:1",
 				fmt.Sprintf("%s: месяц в компании (%s). Самое время встретиться 1:1 — как идут задачи и что мешает.", name, dayRu(day)))
 		}
+
+		if !opt.V2 {
+			continue
+		}
+		// 5. D+14 — плановая встреча всем.
+		if day >= NudgeRegularDay && day <= NudgeRegularDay+nudgeRegularWindow {
+			add(domain.NudgeRegular, "d14", "плановая встреча 1:1", regularText(name, day))
+		}
+		// 6. D+1 — адаптационный план не приложен.
+		if day >= NudgePlanDay && day <= NudgePlanDay+nudgePlanWindow && !opt.WithPlan[e.ID] {
+			when := "вышел вчера"
+			if day > NudgePlanDay {
+				when = "вышел " + civilDate(e.StartDate, site.Loc).Format("02.01")
+			}
+			add(domain.NudgePlanNeeded, "d1", "приложить план адаптации",
+				fmt.Sprintf("%s %s. Приложите план адаптации — бот отправит его на 3-й день.", name, when))
+		}
 	}
 	return out
+}
+
+// ipWhen — «сегодня», «через 3 дня».
+func ipWhen(left int) string {
+	if left <= 0 {
+		return "сегодня"
+	}
+	return "через " + daysRu(left)
+}
+
+// ipDecisionText — D+87: вопрос руководителю о решении по ИС.
+func ipDecisionText(name string, left int) string {
+	if left <= 0 {
+		return fmt.Sprintf("Сегодня заканчивается ИС у %s. Какое решение?", name)
+	}
+	return fmt.Sprintf("Через %s заканчивается ИС у %s. Какое решение?", daysRu(left), name)
 }
 
 func anyHidden(tax *taxonomy.Taxonomy, lists ...[]string) bool {

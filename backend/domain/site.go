@@ -23,6 +23,9 @@ type Site struct {
 	// DayEnd 0 — выходной.
 	DayStart [7]int
 	DayEnd   [7]int
+	// Holidays — нерабочие праздничные даты («2006-01-02», календарь площадки); nil — праздников
+	// нет (правила без FEATURE_TZ). Заполняет планировщик (services/scheduler_tz.go).
+	Holidays map[string]bool
 }
 
 // TZMoscow — пояс всех трёх площадок на хакатоне.
@@ -82,6 +85,11 @@ func SiteOf(code string) Site {
 	return Sites[SiteGrPP]
 }
 
-// IsWorkday — рабочий ли день на площадке. Праздники РФ не учтены (TODO: производственный
-// календарь).
+// IsWorkday — рабочий ли день недели на площадке (без праздников; с ними — IsWorkDate).
 func (s Site) IsWorkday(d time.Weekday) bool { return s.DayEnd[d] > 0 }
+
+// IsWorkDate — рабочий ли календарный день date (его число в своей зоне): день недели рабочий
+// и не праздник. Без Holidays — то же, что IsWorkday.
+func (s Site) IsWorkDate(date time.Time) bool {
+	return s.IsWorkday(date.Weekday()) && !s.Holidays[date.Format(time.DateOnly)]
+}

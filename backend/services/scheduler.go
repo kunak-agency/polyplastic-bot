@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"main/config"
 	"main/domain"
 	"main/externalApi/max"
 	"main/pkg/logger"
@@ -26,8 +27,16 @@ type SchedulerService struct {
 	media   MediaAttacher  // nil — медиатеки нет: шаги уходят без вложений (branch_media.go)
 	tickets *TicketService // задача HR, если личного файла новичка нет (branch_input.go)
 
+	// features — FEATURE_TZ (SiteFor), FEATURE_NUDGES_DEFAULT (scheduler_nudges.go),
+	// FEATURE_CATCHUP (scheduler_catchup.go), FEATURE_REPLIES (надж реплаем на вопрос).
+	features config.Features
+	hol      holidayCache // праздники для SiteFor (scheduler_tz.go)
+
 	mu sync.Mutex // один такт отправки за раз в процессе; между процессами — SKIP LOCKED
 }
+
+// SetFeatures — фича-флаги итерации 24.10 (NewServices передаёт config.Features).
+func (s *SchedulerService) SetFeatures(f config.Features) { s.features = f }
 
 func NewSchedulerService(r *repositories.Repos, c max.Client, now func() time.Time, packGap time.Duration) *SchedulerService {
 	return &SchedulerService{repos: r, max: c, now: now, packGap: packGap, sleep: sleepCtx}
@@ -44,7 +53,7 @@ const (
 // BuildEvents — события версии v для новичка: шаги его площадки, fire_at по календарю. skip —
 // шаги, которые уже доставлены (пересборка под новую версию); их не повторяем.
 func (s *SchedulerService) BuildEvents(e *domain.Employee, v *domain.ScenarioVersion, skip map[uuid.UUID]bool) []domain.ScheduledEvent {
-	site := domain.SiteOf(e.Site)
+	site := s.SiteFor(e)
 	blocks := blockKeys(v.Steps)
 	var out []domain.ScheduledEvent
 	for _, st := range v.Steps {
@@ -68,8 +77,9 @@ func (s *SchedulerService) BuildEvents(e *domain.Employee, v *domain.ScenarioVer
 	return out
 }
 
-// Reschedule — дата выхода перенесена: пересчитать fire_at всех неотправленных событий.
-// Строки те же (event_id не меняется), поэтому дублей нет; отправленные не трогаем.
+// Reschedule — дата выхода или пояс новичка поменялись: пересчитать fire_at всех неотправленных
+// событий. Строки те же (event_id не меняется), поэтому дублей нет; отправленные не трогаем.
+// Догоняющая очередь (Catchup) живёт по своему расписанию — её не пересчитываем.
 func (s *SchedulerService) Reschedule(ctx context.Context, tx *repositories.Repos, e *domain.Employee) error {
 	v, err := tx.Scenarios.Version(ctx, e.ScenarioID, e.ScenarioVersion)
 	if err != nil || v == nil {
@@ -79,8 +89,11 @@ func (s *SchedulerService) Reschedule(ctx context.Context, tx *repositories.Repo
 	if err != nil {
 		return err
 	}
-	site := domain.SiteOf(e.Site)
+	site := s.SiteFor(e)
 	for i := range events {
+		if events[i].Catchup {
+			continue
+		}
 		st, ok := v.Step(events[i].StepID)
 		if !ok {
 			continue
@@ -117,6 +130,14 @@ func (s *SchedulerService) Run(ctx context.Context, interval time.Duration) {
 func (s *SchedulerService) Tick(ctx context.Context) (int, error) {
 	n, err := s.dispatch(ctx, repositories.DueFilter{Now: s.now()}, false)
 	if err != nil {
+		return n, err
+	}
+	// Отложенные ручные наджи; FEATURE_NUDGES_DEFAULT — все автонапоминания одним проходом с
+	// бюджетом диалога; FEATURE_CATCHUP — отметка «Догнал ✓» (scheduler_nudges.go,
+	// scheduler_catchup.go). Без флагов и без ручных наджей — ничего не отправляет.
+	it, err := s.tickIteration(ctx)
+	n += it
+	if err != nil || s.features.NudgesDefault {
 		return n, err
 	}
 	r, err := s.remindNoAnswer(ctx)
@@ -315,10 +336,13 @@ func (s *SchedulerService) sendEvent(ctx context.Context, tx *repositories.Repos
 // SkipMissed — новичок подключился (дал ответ на согласие) позже части шагов. Политика
 // пропущенных событий, упрощённая для итерации 1: до выхода созревшие шаги идут сразу (пакет
 // D−3 нужен и в D−1); после выхода — только шаги сегодняшнего дня, прошлые помечаются
-// пропущенными. TODO: «Что вы пропустили» одним сообщением с обязательными материалами.
+// пропущенными. С FEATURE_CATCHUP вместо пропуска — догоняющая очередь (scheduler_catchup.go).
 func (s *SchedulerService) SkipMissed(ctx context.Context, tx *repositories.Repos, e *domain.Employee) error {
+	if s.features.Catchup {
+		return s.BuildCatchup(ctx, tx, e)
+	}
 	now := s.now()
-	today := DayNumber(e.StartDate, now, domain.SiteOf(e.Site))
+	today := DayNumber(e.StartDate, now, s.SiteFor(e))
 	if today < 0 {
 		return nil
 	}

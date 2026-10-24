@@ -8,6 +8,7 @@ import type {
   TicketNoteRequest,
   TicketPatchRequest,
   TicketReplyRequest,
+  TicketResolveRequest,
 } from '@/types/api'
 
 // api_contract.md v2. The contract names what assign answers (the ticket) but
@@ -60,6 +61,9 @@ export async function apiNoteTicket(id: string, body: TicketNoteRequest): Promis
   await http.post(path(id, 'note'), body)
 }
 
-export async function apiResolveTicket(id: string): Promise<void> {
-  await http.post(path(id, 'resolve'), {})
+// done_note — "what was done", one line: an internal note in the thread and,
+// for an addressed ticket (not anonymous, not F5/F9/F10), a message to the
+// newcomer "On your signal: ...".
+export async function apiResolveTicket(id: string, body: TicketResolveRequest = {}): Promise<void> {
+  await http.post(path(id, 'resolve'), body)
 }

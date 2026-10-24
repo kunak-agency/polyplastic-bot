@@ -26,7 +26,8 @@ const HeaderOperatorToken = "X-Operator-Token"
 // hrOnly — права HR на базу знаний. Ролей нет: пускаем в development или с верным
 // X-Operator-Token. rag без авторизации, поэтому кабинет ходит в него только через этот прокси.
 func (h *Handler) hrOnly(c *fiber.Ctx) error {
-	if isDev() || h.services.Documents.OperatorAllowed(c.Get(HeaderOperatorToken)) {
+	// FEATURE_AUTH: вошедший пользователь уже прошёл матрицу ролей (policy в auth.go).
+	if isDev() || Viewer(c) != nil || h.services.Documents.OperatorAllowed(c.Get(HeaderOperatorToken)) {
 		return c.Next()
 	}
 	return errs.NewForbiddenError("База знаний доступна только HR: нужен вход оператора")

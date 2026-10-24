@@ -39,6 +39,7 @@ import { useBreadcrumbTail } from '@/composables/useBreadcrumbs'
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/lib/apiError'
 import { formatDayOffset, isoToLocalDate } from '@/lib/calendar'
+import { TONE_ICON, recentToneRow } from '@/lib/tone'
 import type { Newcomer, TimelineEvent } from '@/types/api'
 
 const { t, d } = useI18n()
@@ -48,6 +49,9 @@ const toast = useToast()
 const { setBreadcrumbTail } = useBreadcrumbTail()
 
 const id = computed(() => String(route.params.id))
+// Tone of the last texts (wave 4, #30): icons only, no numbers; nothing when
+// the server sends no data (the list, the manager role, an older backend).
+const toneRow = computed(() => recentToneRow(newcomer.value?.recent_tone))
 const newcomer = ref<Newcomer | null>(null)
 const error = ref<unknown>(null)
 const timeline = ref<TimelineEvent[] | null>(null)
@@ -273,6 +277,31 @@ function consent(n: Newcomer): string {
             <div class="head__risk">
               <RiskMark :risk="newcomer.risk" :reason="newcomer.risk_reason" detailed />
             </div>
+            <div v-if="toneRow.length > 0" class="head__tone">
+              <span class="head__tone-icons" role="list" :aria-label="t('newcomers.tone.label')">
+                <span
+                  v-for="(x, i) in toneRow"
+                  :key="i"
+                  role="listitem"
+                  class="head__tone-icon"
+                  :title="
+                    t('newcomers.tone.item', {
+                      date: d(new Date(x.at), 'dayMonth'),
+                      kind: t(`newcomers.tone.kind.${x.kind}`),
+                    })
+                  "
+                  :aria-label="
+                    t('newcomers.tone.itemAria', {
+                      tone: t(`newcomers.tone.value.${x.sentiment}`),
+                      date: d(new Date(x.at), 'dayMonth'),
+                      kind: t(`newcomers.tone.kind.${x.kind}`),
+                    })
+                  "
+                  >{{ TONE_ICON[x.sentiment] }}</span
+                >
+              </span>
+              <span class="muted txt-sm">{{ t('newcomers.tone.hint') }}</span>
+            </div>
           </div>
           <div class="head__actions">
             <Button as-child>
@@ -450,6 +479,22 @@ function consent(n: Newcomer): string {
 }
 .head__risk {
   margin-top: 6px;
+}
+.head__tone {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.head__tone-icons {
+  display: inline-flex;
+  gap: 2px;
+  font-size: 16px;
+  line-height: 1;
+}
+.head__tone-icon {
+  cursor: default;
 }
 .head__actions {
   display: flex;

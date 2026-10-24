@@ -22,6 +22,10 @@ type EmployeeFilter struct {
 	Site string
 	Q    string // подстрока ФИО, подразделения или должности
 	Risk string
+	// RecruiterID — только новички этого рекрутера (Employee.RecruiterID); NoRecruiter — только
+	// «без рекрутера». Роль recruiter ставит RecruiterID всегда (handlers, вход FEATURE_AUTH).
+	RecruiterID *uuid.UUID
+	NoRecruiter bool
 }
 
 func (r *EmployeeRepo) Create(ctx context.Context, e *domain.Employee) error {
@@ -60,6 +64,12 @@ func (r *EmployeeRepo) List(ctx context.Context, f EmployeeFilter) ([]domain.Emp
 	}
 	if f.Risk != "" {
 		q = q.Where("risk = ?", f.Risk)
+	}
+	if f.RecruiterID != nil {
+		q = q.Where("recruiter_id = ?", *f.RecruiterID)
+	}
+	if f.NoRecruiter {
+		q = q.Where("recruiter_id IS NULL")
 	}
 	if s := strings.TrimSpace(f.Q); s != "" {
 		like := "%" + likeEscape(s) + "%"

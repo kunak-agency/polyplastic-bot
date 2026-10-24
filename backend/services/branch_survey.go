@@ -291,6 +291,11 @@ func (b *BotService) afterSurvey(ctx context.Context, empID uuid.UUID, out surve
 		b.runPlan(ctx, &pressPlan{emp: out.emp, ev: *out.ev, step: out.step, src: branchSrcOutcome(k), branch: br,
 			messages: true, acts: o.Actions, flagged: flagged, freeText: free, label: "итог опроса"})
 	}
+	// уточняющий вопрос (FEATURE_CLARIFY, clarify.go): у варианта своя ветка или бот ждёт текст —
+	// говорит ветка, уточнения нет
+	if out.clarifyCode != "" && out.branch == nil && !out.freeText {
+		b.offerClarify(ctx, empID, out.eventID, out.clarifyQ, out.clarifyCode)
+	}
 	if out.release {
 		if err := b.scheduler.Release(ctx, empID, out.eventID); err != nil {
 			logger.Warn("бот: поток после опроса %s не продолжен: %v", out.eventID, err)

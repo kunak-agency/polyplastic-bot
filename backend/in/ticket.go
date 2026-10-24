@@ -97,6 +97,24 @@ func (b TicketNote) Validate() (string, error) {
 	return text, f.err()
 }
 
+// TicketResolve — POST /api/tickets/{id}/resolve {"done_note"?}: «что сделано», одна строка
+// (переводы строк — пробелы), необязательно.
+type TicketResolve struct {
+	DoneNote string `json:"done_note"`
+}
+
+// MaxDoneNote — потолок строки «что сделано».
+const MaxDoneNote = 300
+
+func (b TicketResolve) Validate() (string, error) {
+	var f fields
+	note := strings.Join(strings.Fields(b.DoneNote), " ")
+	if utf8.RuneCountInString(note) > MaxDoneNote {
+		f.add("done_note", errs.CodeOutOfRange, fmt.Sprintf("Не длиннее %d символов", MaxDoneNote))
+	}
+	return note, f.err()
+}
+
 // TicketPatch — PATCH /api/tickets/{id} {"notify_manager"}.
 type TicketPatch struct {
 	NotifyManager *bool `json:"notify_manager"`

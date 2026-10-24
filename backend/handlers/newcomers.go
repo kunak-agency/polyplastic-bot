@@ -5,6 +5,7 @@ import (
 
 	"main/in"
 	"main/out"
+	"main/services"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -19,10 +20,14 @@ func (h *Handler) ListNewcomers(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	if err := h.scopeNewcomers(c, &f); err != nil { // FEATURE_AUTH: «только свои» (users.go)
+		return err
+	}
 	list, err := h.services.Newcomers.List(c.UserContext(), f)
 	if err != nil {
 		return err
 	}
+	h.fillRecruiterNames(c, list)
 	return c.JSON(out.NewList(out.NewcomersFrom(list)))
 }
 
@@ -34,6 +39,9 @@ func (h *Handler) CreateNewcomer(c *fiber.Ctx) error {
 	}
 	input, err := body.Validate()
 	if err != nil {
+		return err
+	}
+	if input.RecruiterID, err = h.createRecruiter(c); err != nil { // recruiter_id (users.go)
 		return err
 	}
 	card, err := h.services.Newcomers.Create(c.UserContext(), input)
@@ -53,25 +61,31 @@ func (h *Handler) GetNewcomer(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(out.NewcomerFrom(*card))
+	cards := []services.NewcomerCard{*card}
+	h.fillRecruiterNames(c, cards)
+	return c.JSON(out.NewcomerFrom(cards[0]))
 }
 
-// PatchNewcomer — PATCH /api/newcomers/{id} {"start_date"}: перенос даты выхода. Расширение
-// контракта v1 (заметка backend в api_contract.md).
+// PatchNewcomer — PATCH /api/newcomers/{id} {"start_date"?, "tz"?}: перенос даты выхода и/или
+// пояс новичка. Расширение контракта v1 (api_contract.md, заметка backend и «Пояса»).
 func (h *Handler) PatchNewcomer(c *fiber.Ctx) error {
 	id, err := pathID(c)
 	if err != nil {
+		return err
+	}
+	// recruiter_id — закрепление рекрутера (users.go); только он в теле — ответ уже отправлен.
+	if done, err := h.patchRecruiter(c, id); done || err != nil {
 		return err
 	}
 	var body in.NewcomerPatch
 	if err := bindBody(c, &body); err != nil {
 		return err
 	}
-	start, err := body.Validate()
+	start, tz, err := body.ValidateChange()
 	if err != nil {
 		return err
 	}
-	card, err := h.services.Newcomers.Reschedule(c.UserContext(), id, start)
+	card, err := h.services.Newcomers.Patch(c.UserContext(), id, start, tz)
 	if err != nil {
 		return err
 	}
@@ -118,4 +132,25 @@ func (h *Handler) TimeTravel(c *fiber.Ctx) error {
 		return err
 	}
 	return c.JSON(out.TimelineFrom(events, card.Employee.Site))
+}
+
+// SetIPDecision — POST /api/newcomers/{id}/ip-decision {"decision"} → карточка новичка.
+func (h *Handler) SetIPDecision(c *fiber.Ctx) error {
+	id, err := pathID(c)
+	if err != nil {
+		return err
+	}
+	var body in.IPDecision
+	if err := bindBody(c, &body); err != nil {
+		return err
+	}
+	decision, err := body.Validate()
+	if err != nil {
+		return err
+	}
+	card, err := h.services.Newcomers.SetIPDecision(c.UserContext(), id, decision)
+	if err != nil {
+		return err
+	}
+	return c.JSON(out.NewcomerFrom(*card))
 }

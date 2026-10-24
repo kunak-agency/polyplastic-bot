@@ -132,6 +132,14 @@ function resolve(req: MockRequest): MockResult {
   if (t.status !== 'resolved') {
     t.status = 'resolved'
     t.sla_due_at = null
+    const note = str(req.body.done_note).split(/\s+/).filter(Boolean).join(' ')
+    if (note)
+      push(t, {
+        from: 'staff',
+        author: t.assignee_name ?? 'HR',
+        text: '✅ Что сделано: ' + note,
+        internal: true,
+      })
     push(t, { from: 'bot', author: null, text: RESOLVED_TEXT, internal: false })
   }
   return { status: 200, data: detail(t) }

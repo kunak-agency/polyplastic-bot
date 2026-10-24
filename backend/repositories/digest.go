@@ -74,3 +74,39 @@ func (r *OverviewRepo) DigestTexts(ctx context.Context, site string, from, to ti
 	}
 	return answers, nil
 }
+
+// DoneNotePrefix — пометка внутренней заметки «что сделано» в ticket_messages (волна 4, #31):
+// своего поля у обращения нет, строка хранится заметкой с этим префиксом.
+const DoneNotePrefix = "✅ Что сделано: "
+
+// DoneNoteRow — заметка «что сделано» за период: категория обращения и строка HR. FullName — для
+// обезличивания строки, наружу не идёт.
+type DoneNoteRow struct {
+	Category   string
+	Restricted bool
+	Site       string
+	FullName   string
+	Text       string
+	CreatedAt  time.Time
+}
+
+// DigestDone — заметки «что сделано» за [from, to) по площадке новичка (пусто — все). Тестовые
+// обращения не берутся.
+func (r *OverviewRepo) DigestDone(ctx context.Context, site string, from, to time.Time) ([]DoneNoteRow, error) {
+	if r == nil {
+		return nil, ErrNoDatabase
+	}
+	var rows []DoneNoteRow
+	q := r.db.WithContext(ctx).Table("ticket_messages m").
+		Joins("JOIN tickets t ON t.id = m.ticket_id").Joins("JOIN employees e ON e.id = t.employee_id").
+		Select("t.category, t.restricted, e.site, e.full_name, m.text, m.created_at").
+		Where("m.internal = true AND left(m.text, ?) = ?", len([]rune(DoneNotePrefix)), DoneNotePrefix).
+		Where("t.is_test = false AND m.created_at >= ? AND m.created_at < ?", from, to)
+	if site != "" {
+		q = q.Where("e.site = ?", site)
+	}
+	if err := q.Order("m.created_at").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}

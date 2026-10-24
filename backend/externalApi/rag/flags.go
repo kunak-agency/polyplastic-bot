@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -44,11 +45,27 @@ type Flag struct {
 
 // FlagsResponse — ответ POST /flags. Degraded — LLM недоступен или ответил не по схеме: флагов
 // нет, потому что не размечено, а не потому что их нет.
+//
+// v2 (flags-classify v2), у старого rag полей нет — тогда они нулевые:
+//   - ToneConfidence — уверенность в тоне 0–1, nil — модель не дала;
+//   - Summary — строка для HR ≤ 120 символов без ПДн, при F10 пусто;
+//   - ClarifyHint — код категории для уточняющего вопроса (F1/F2/F3/F4/F6/F8) или пусто.
 type FlagsResponse struct {
-	Flags     []Flag `json:"flags"`
-	Sentiment string `json:"sentiment"`
-	Quote     string `json:"quote"`
-	Degraded  bool   `json:"degraded"`
+	Flags          []Flag   `json:"flags"`
+	Sentiment      string   `json:"sentiment"`
+	Quote          string   `json:"quote"`
+	Degraded       bool     `json:"degraded"`
+	ToneConfidence *float64 `json:"tone_confidence"`
+	Summary        string   `json:"summary"`
+	ClarifyHint    *string  `json:"clarify_hint"`
+}
+
+// Hint — ClarifyHint или пусто.
+func (r *FlagsResponse) Hint() string {
+	if r == nil || r.ClarifyHint == nil {
+		return ""
+	}
+	return *r.ClarifyHint
 }
 
 // DefaultFlagsTimeout — срок POST /flags: LLM до 10 с плюс один ретрай. Бот ждёт в фоне, ответ
@@ -63,6 +80,9 @@ func flagsTimeout() time.Duration {
 }
 
 const maxFlagsBody = 1 << 16
+
+// maxSummaryRunes — потолок Summary (rag режет до 120 сам; здесь страховка от старого или чужого rag).
+const maxSummaryRunes = 120
 
 // Flags — POST /flags. Ошибка — разметки нет; regex в Go от этого не зависит.
 func (c *Client) Flags(ctx context.Context, req FlagsRequest) (*FlagsResponse, error) {
@@ -108,5 +128,13 @@ func (c *Client) Flags(ctx context.Context, req FlagsRequest) (*FlagsResponse, e
 		kept = append(kept, f)
 	}
 	out.Flags = kept
+	if c := out.ToneConfidence; c != nil && (*c < 0 || *c > 1) {
+		out.ToneConfidence = nil
+	}
+	if r := []rune(strings.TrimSpace(out.Summary)); len(r) > maxSummaryRunes {
+		out.Summary = string(r[:maxSummaryRunes-1]) + "…"
+	} else {
+		out.Summary = string(r)
+	}
 	return &out, nil
 }

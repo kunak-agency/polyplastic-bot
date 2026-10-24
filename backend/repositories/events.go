@@ -134,7 +134,7 @@ func (r *EventRepo) OpenSurvey(ctx context.Context, employeeID uuid.UUID) (*doma
 func (r *EventRepo) UpsertAnswer(ctx context.Context, a *domain.SurveyAnswer) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "event_id"}, {Name: "question_no"}},
-		DoUpdates: clause.AssignmentColumns([]string{"value", "skipped", "reason", "text", "flags", "is_test", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"value", "skipped", "reason", "text", "flags", "sentiment", "is_test", "updated_at"}),
 	}).Create(a).Error
 }
 

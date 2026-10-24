@@ -49,6 +49,12 @@ type Features struct {
 	TZ            bool // FEATURE_TZ — пояс новичка и площадки, окно 8–18, праздники
 	NudgesDefault bool // FEATURE_NUDGES_DEFAULT — авто-напоминания 4 ч / 24 ч
 	Catchup       bool // FEATURE_CATCHUP — догоняющая очередь позднего входа
+	// RiskV2 — FEATURE_RISK_V2: зоны риска v2 (одна зона и главная причина), поводы push
+	// руководителю v2 (D+1 «план», D+14, D+87 с решением по ИС, лимиты), утренняя сводка рекрутеру.
+	RiskV2 bool
+	// Clarify — FEATURE_CLARIFY: уточняющий вопрос по шаблону категории после тревожного ответа
+	// опроса (низкая оценка + причина без текста, короткий негативный текст), не чаще раза в сутки.
+	Clarify bool
 }
 
 // On — имена включённых флагов для сводки старта.
@@ -63,6 +69,8 @@ func (f Features) On() []string {
 		{"FEATURE_TZ", f.TZ},
 		{"FEATURE_NUDGES_DEFAULT", f.NudgesDefault},
 		{"FEATURE_CATCHUP", f.Catchup},
+		{"FEATURE_RISK_V2", f.RiskV2},
+		{"FEATURE_CLARIFY", f.Clarify},
 	} {
 		if x.on {
 			on = append(on, x.name)
@@ -230,6 +238,8 @@ func Load() (Config, error) {
 		TZ:            flag("FEATURE_TZ"),
 		NudgesDefault: flag("FEATURE_NUDGES_DEFAULT"),
 		Catchup:       flag("FEATURE_CATCHUP"),
+		RiskV2:        flag("FEATURE_RISK_V2"),
+		Clarify:       flag("FEATURE_CLARIFY"),
 	}
 	c.Digest = Digest{UserIDs: ids(os.Getenv("MAX_DIGEST_USER_IDS")), CabinetURL: strings.TrimRight(env("CABINET_URL", DefaultCabinetURL), "/")}
 	c.Bot.Fake = c.AppEnv == EnvDevelopment && !c.Max.Enabled()

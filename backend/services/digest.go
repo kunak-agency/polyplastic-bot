@@ -92,10 +92,16 @@ type Digest struct {
 	Sites           []DigestSiteRow
 	Probation       int  // решений по ИС в неделю после отчётной
 	ProbationNow    bool // эта неделя после отчётной — текущая («на этой неделе»)
-	Aggregates      DigestAggregates
-	Text            DigestText
-	MaxText         string
-	Link            string
+	// Tone — тон текстовых ответов за отчётную неделю; ToneTrend — 4 недели по площадкам,
+	// последняя — отчётная (overview_tone.go). Числа считает код, строку в MAX тоже пишет код.
+	Tone      ToneCell
+	ToneTrend ToneTrend
+	// Done — «Сделано по темам» из «что сделано» при решении обращений за неделю (#31).
+	Done       []DigestDoneTheme
+	Aggregates DigestAggregates
+	Text       DigestText
+	MaxText    string
+	Link       string
 }
 
 // DigestTotals — сводка окна.
@@ -188,7 +194,12 @@ func (s *DigestService) Get(ctx context.Context, week, site string) (*Digest, er
 	if err != nil {
 		return nil, err
 	}
+	done, err := s.repos.Overview().DigestDone(ctx, site, from, to)
+	if err != nil {
+		return nil, err
+	}
 	d := BuildDigest(rows, texts, site, from, now, s.tax)
+	d.Done = BuildDigestDone(done, s.tax)
 	d.Link = s.link(week, site)
 	d.Text = s.text(ctx, d.Aggregates)
 	d.MaxText = DigestMaxMessage(d)
@@ -317,6 +328,9 @@ func BuildDigest(rows *repositories.OverviewRows, texts []repositories.DigestTex
 			d.Probation++
 		}
 	}
+
+	d.ToneTrend = BuildTone(rows, site, from.AddDate(0, 0, -7*(TrendWeeks-1)), TrendWeeks, loc)
+	d.Tone = toneWeek(rows, site, from, loc)
 
 	d.Aggregates = digestAggregates(d)
 	d.Text = TemplateDigestText(d.Aggregates)
@@ -470,6 +484,10 @@ func DigestMaxMessage(d *Digest) string {
 	case d.ConfidentialAny:
 		b.WriteString("Есть конфиденциальные сигналы — у HR-партнёра и СБ.\n")
 	}
+	b.WriteString(ToneLine(d.Tone) + "\n")
+	if block := digestDoneBlock(d.Done); block != "" {
+		b.WriteString("\n" + block)
+	}
 	fmt.Fprintf(&b, "\nЗоны риска: красных %d, жёлтых %d.\n", d.Risks.Red, d.Risks.Yellow)
 	when := "на следующей неделе"
 	if d.ProbationNow {
@@ -507,6 +525,8 @@ func DigestFacts(d *Digest) string {
 	b, _ := json.Marshal(map[string]any{
 		"aggregates": d.Aggregates, "themes": themes, "hidden": d.Hidden, "confidential": d.Confidential,
 		"risks_red": d.Risks.Red, "risks_yellow": d.Risks.Yellow, "probation": d.Probation, "min_group": AnonymityMinGroup,
+		"tone": map[string]any{"pos": d.Tone.Pos, "neu": d.Tone.Neu, "neg": d.Tone.Neg, "n": d.Tone.N},
+		"done": d.Done,
 	})
 	return string(b)
 }

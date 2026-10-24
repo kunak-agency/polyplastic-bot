@@ -18,6 +18,7 @@ func (h *Handler) ListTickets(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	f.RecruiterID = recruiterScope(c) // FEATURE_AUTH: рекрутер — обращения своих новичков
 	list, err := h.services.Tickets.List(c.UserContext(), f)
 	if err != nil {
 		return err
@@ -102,13 +103,21 @@ func (h *Handler) NoteTicket(c *fiber.Ctx) error {
 	return card(c)(h.services.Tickets.Note(c.UserContext(), id, text))
 }
 
-// ResolveTicket — POST /api/tickets/{id}/resolve.
+// ResolveTicket — POST /api/tickets/{id}/resolve {"done_note"?}: тело необязательно.
 func (h *Handler) ResolveTicket(c *fiber.Ctx) error {
 	id, err := pathID(c)
 	if err != nil {
 		return err
 	}
-	return card(c)(h.services.Tickets.Resolve(c.UserContext(), id))
+	var body in.TicketResolve
+	if err := bindBody(c, &body); err != nil {
+		return err
+	}
+	note, err := body.Validate()
+	if err != nil {
+		return err
+	}
+	return card(c)(h.services.Tickets.Resolve(c.UserContext(), id, note))
 }
 
 // card — ответ действием: карточка обращения с перепиской.

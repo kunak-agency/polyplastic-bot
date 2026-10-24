@@ -9,6 +9,7 @@ import (
 	"log"
 	"os/signal"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -103,8 +104,9 @@ func main() {
 	// Планировщик таймлайна: без базы ему нечего читать, без бота — некому отправлять.
 	if repos.Enabled() && ext.Max != nil {
 		go svc.Scheduler.Run(ctx, cfg.Scheduler.Interval)
-		go svc.Digest().RunWeekly(ctx) // дайджест руководителю подбора, пн 9:00
-		go svc.Manager().Run(ctx)      // push руководителю подразделения
+		go svc.Digest().RunWeekly(ctx)     // дайджест руководителю подбора, пн 9:00
+		go svc.Manager().Run(ctx)          // push руководителю подразделения
+		go svc.RecruiterMorning().Run(ctx) // утренняя сводка рекрутеру 9:00 (FEATURE_RISK_V2)
 	}
 
 	// База знаний: rag держит загрузки в памяти — дождаться его и перезалить сохранённые документы.
@@ -122,8 +124,13 @@ func main() {
 	app.Use(handlers.RequestID)
 	app.Use(fiberlogger.New())
 	// AllowHeaders не задаём: при пустом значении fiber отражает запрошенные заголовки.
+	// AllowCredentials — cookie сессии кабинета (FEATURE_AUTH) с другого origin в dev
+	// (api_contract_auth.md, «Сессия»). Только с явным списком: при «*» fiber падает, а браузер
+	// cookie не отдаёт.
+	allow := origins(cfg.Origins)
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: strings.Join(origins(cfg.Origins), ","),
+		AllowOrigins:     strings.Join(allow, ","),
+		AllowCredentials: !slices.Contains(allow, "*"),
 	}))
 	handlers.RegisterRoutes(app, h)
 

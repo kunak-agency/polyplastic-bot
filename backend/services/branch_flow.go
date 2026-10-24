@@ -255,6 +255,16 @@ func holderOf(evs []*domain.ScheduledEvent, now time.Time) *domain.ScheduledEven
 // runBlock — отправить реплики блока по очереди до первого вопроса или «Дальше».
 func (s *SchedulerService) runBlock(ctx context.Context, tx *repositories.Repos, f *flow, key string, o runOpts) (blockRun, error) {
 	evs := f.block(key)
+	if key == catchupMissedKey { // поздний вход: сводка материалов одним сообщением (scheduler_catchup.go)
+		var pending []*domain.ScheduledEvent
+		for _, ev := range evs {
+			if ev.Status == domain.EventScheduled {
+				pending = append(pending, ev)
+			}
+		}
+		n, err := s.flushMissed(ctx, tx, f, pending, o.test, true)
+		return blockRun{sent: n}, err
+	}
 	holder := holderOf(evs, s.now())
 	var pending []*domain.ScheduledEvent
 	for _, ev := range evs {
@@ -283,6 +293,10 @@ func (s *SchedulerService) runBlock(ctx context.Context, tx *repositories.Repos,
 		}
 		if !arrived {
 			return blockRun{halt: true}, nil
+		}
+		if holder.Catchup {
+			// догоняющие вопросы в сводку не сворачиваем: ждут ответа, остальные блоки идут
+			return blockRun{}, nil
 		}
 		n, err := s.flushBlock(ctx, tx, f, pending, o.test)
 		return blockRun{sent: n}, err
@@ -374,8 +388,15 @@ func (s *SchedulerService) typingPause(ctx context.Context, e *domain.Employee, 
 // flushBlock — пришло время следующего блока, а этот ждёт ответа: необязательные реплики —
 // skipped, обязательные — одним сообщением «Что вы пропустили».
 func (s *SchedulerService) flushBlock(ctx context.Context, tx *repositories.Repos, f *flow, pending []*domain.ScheduledEvent, test bool) (int, error) {
+	return s.flushMissed(ctx, tx, f, pending, test, false)
+}
+
+// flushMissed — сводка «Что вы пропустили». media — поздний вход: материалы без текста тоже
+// попадают в сводку, а их вложения уходят сразу после неё (не больше catchupMaxMedia сообщений).
+func (s *SchedulerService) flushMissed(ctx context.Context, tx *repositories.Repos, f *flow, pending []*domain.ScheduledEvent, test, media bool) (int, error) {
 	var missed []*domain.ScheduledEvent
 	var texts []string
+	var atts [][]max.AttachmentRef
 	for _, ev := range pending {
 		locked, err := tx.Events.ByIDForUpdate(ctx, ev.ID)
 		if err != nil {
@@ -387,9 +408,18 @@ func (s *SchedulerService) flushBlock(ctx context.Context, tx *repositories.Repo
 		step, ok := f.step(locked)
 		// Опрос в сводку не кладём (его заголовок — не сообщение): он пропущен, как необязательный.
 		if ok && step.Required && sendable(f.e, step) && !isSurvey(step) {
-			if t := strings.TrimSpace(stepText(step, f.e, s.now())); t != "" {
+			t := strings.TrimSpace(stepText(step, f.e, s.now()))
+			var a []max.AttachmentRef
+			if media && len(step.Media) > 0 {
+				a, _ = s.attachFor(ctx, f.e, step.Media, step.Title)
+			}
+			if t != "" || len(a) > 0 {
 				missed = append(missed, locked)
+				if t == "" {
+					t = step.Title
+				}
 				texts = append(texts, t)
+				atts = append(atts, GroupAttachments(a)...)
 				continue
 			}
 		}
@@ -422,6 +452,16 @@ func (s *SchedulerService) flushBlock(ctx context.Context, tx *repositories.Repo
 		}
 		if mid, err = s.max.Send(ctx, recipientOf(f.e).msg(part, "", rows)); err != nil {
 			break
+		}
+	}
+	if err == nil {
+		for i, g := range atts {
+			if i == catchupMaxMedia {
+				break
+			}
+			if _, e := s.max.Send(ctx, max.OutMessage{ChatID: recipientOf(f.e).ChatID, UserID: recipientOf(f.e).UserID, Attachments: g}); e != nil {
+				logger.Warn("планировщик: вложение сводки новичку %s не ушло: %v", f.e.ID, e)
+			}
 		}
 	}
 	text := strings.Join(parts, "\n\n")
@@ -469,8 +509,34 @@ func (s *SchedulerService) runEmployee(ctx context.Context, tx *repositories.Rep
 			first[ev.Block] = ev.FireAt
 		}
 	}
+	if s.features.Catchup {
+		// поздний вход: сводка «Что вы пропустили» первой, за ней догоняющий блок, потом обычные
+		rank := func(k string) int {
+			switch {
+			case k == catchupMissedKey:
+				return 0
+			case catchupBlock(f.block(k)):
+				return 1
+			}
+			return 2
+		}
+		sort.SliceStable(keys, func(i, j int) bool { return rank(keys[i]) < rank(keys[j]) })
+	}
 	sent := 0
 	for i, key := range keys {
+		if key != catchupMissedKey && !test && catchupBlock(f.block(key)) && !catchupStarted(f.block(key)) {
+			site := s.SiteFor(e)
+			ok, err := s.budgetLeft(ctx, tx, e, site, s.now(), true)
+			if err != nil {
+				return sent, err
+			}
+			if !ok || !InWorkHours(s.now(), site) && !catchupFirstSession(f) {
+				if err := s.postponeCatchup(ctx, tx, f, key); err != nil {
+					return sent, err
+				}
+				continue
+			}
+		}
 		o := runOpts{test: test, start: start, paused: paused}
 		for _, k := range keys[i+1:] {
 			// «пришло время следующего блока» — самый поздний из созревших: блоки с тем же
@@ -743,7 +809,7 @@ func (s *SchedulerService) remindNoAnswer(ctx context.Context) (int, error) {
 			if limit <= 0 || limit > len(rule.RemindAfterH) {
 				limit = len(rule.RemindAfterH)
 			}
-			site := domain.SiteOf(e.Site)
+			site := s.SiteFor(e)
 			if ev.Reminded >= limit {
 				// после последнего напоминания — ещё сутки, затем «не отвечен»
 				last := rule.RemindAfterH[limit-1] + 24

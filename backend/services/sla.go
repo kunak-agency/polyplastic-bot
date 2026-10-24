@@ -27,7 +27,7 @@ func SLADue(created time.Time, priority string, site domain.Site) time.Time {
 func InWorkHours(now time.Time, site domain.Site) bool {
 	t := now.In(site.Loc)
 	wd := t.Weekday()
-	if !site.IsWorkday(wd) {
+	if !site.IsWorkDate(t) {
 		return false
 	}
 	m := t.Hour()*60 + t.Minute()
@@ -39,7 +39,7 @@ func workStart(t time.Time, site domain.Site) time.Time {
 	t = t.In(site.Loc)
 	day := civilDate(t, site.Loc)
 	m := t.Hour()*60 + t.Minute()
-	if site.IsWorkday(day.Weekday()) {
+	if site.IsWorkDate(day) {
 		if m < site.DayStart[day.Weekday()] {
 			return atMinutes(day, site.DayStart[day.Weekday()], site.Loc)
 		}

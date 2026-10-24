@@ -9,8 +9,9 @@ import (
 )
 
 // Календарь таймлайна: когда шаг «D±N HH:MM» уходит конкретному новичку. Правила держит код
-// (01-architecture.md): время площадки, рабочие часы, перенос с выходных. Праздники РФ и смены
-// GTP — следующие итерации.
+// (01-architecture.md): время площадки, рабочие часы, перенос с выходных. Под FEATURE_TZ правила
+// берутся у SchedulerService.SiteFor: пояс новичка, окно 8–18 и праздники РФ (scheduler_tz.go).
+// Смены GTP — следующие итерации.
 
 // defaultStepTime — время шага без своего времени (UX-спецификация п. 2.3: «иначе 10:00»).
 const defaultStepTime = 10 * 60
@@ -49,7 +50,7 @@ func civilDate(t time.Time, loc *time.Location) time.Time {
 func FireAt(start time.Time, dayOffset int, hhmm string, site domain.Site, workHoursOnly bool) time.Time {
 	d0 := civilDate(start, site.Loc)
 	date := d0.AddDate(0, 0, dayOffset)
-	if !site.IsWorkday(date.Weekday()) {
+	if !site.IsWorkDate(date) {
 		fwd := nextWorkday(date, site)
 		if dayOffset < 0 && !fwd.Before(d0) {
 			date = prevWorkday(date, site)
@@ -101,15 +102,18 @@ func atMinutes(date time.Time, mins int, loc *time.Location) time.Time {
 	return time.Date(y, m, d, mins/60, mins%60, 0, 0, loc)
 }
 
+// maxDaysOff — сколько нерабочих дней подряд обходят переносы: выходные плюс январские праздники.
+const maxDaysOff = 31
+
 func nextWorkday(date time.Time, site domain.Site) time.Time {
-	for i := 0; i < 7 && !site.IsWorkday(date.Weekday()); i++ {
+	for i := 0; i < maxDaysOff && !site.IsWorkDate(date); i++ {
 		date = date.AddDate(0, 0, 1)
 	}
 	return date
 }
 
 func prevWorkday(date time.Time, site domain.Site) time.Time {
-	for i := 0; i < 7 && !site.IsWorkday(date.Weekday()); i++ {
+	for i := 0; i < maxDaysOff && !site.IsWorkDate(date); i++ {
 		date = date.AddDate(0, 0, -1)
 	}
 	return date

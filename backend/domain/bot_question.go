@@ -55,6 +55,11 @@ type BotQuestion struct {
 	IsTest       bool
 	// Sentiment — тональность Question (domain.Sentiment*): pos | neu | neg; nil — не размечен.
 	Sentiment *string
+	// Разметка /flags v2, как у SurveyAnswer: уверенность в тоне, цитата, строка для HR. nil — не
+	// размечено (regex без ответа модели, LLM недоступна, старая запись).
+	ToneConfidence *float64
+	Quote          *string
+	Summary        *string
 }
 
 // Значения BotQuestion.Kind.

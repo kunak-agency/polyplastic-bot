@@ -27,6 +27,8 @@ type TicketFilter struct {
 	Route    string
 	Assignee string
 	Newcomer *uuid.UUID
+	// RecruiterID — обращения новичков этого рекрутера (роль recruiter, FEATURE_AUTH).
+	RecruiterID *uuid.UUID
 }
 
 // Create — новое обращение со следующим номером.
@@ -72,6 +74,9 @@ func (r *TicketRepo) List(ctx context.Context, f TicketFilter) ([]domain.Ticket,
 	}
 	if f.Site != "" {
 		q = q.Where("employee_id IN (?)", r.db.Model(&domain.Employee{}).Select("id").Where("site = ?", f.Site))
+	}
+	if f.RecruiterID != nil {
+		q = q.Where("employee_id IN (?)", r.db.Model(&domain.Employee{}).Select("id").Where("recruiter_id = ?", *f.RecruiterID))
 	}
 	var out []domain.Ticket
 	return out, q.Order("number DESC").Find(&out).Error

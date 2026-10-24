@@ -133,7 +133,7 @@ func (s *SchedulerService) remindSurveys(ctx context.Context) (int, error) {
 					due++
 				}
 			}
-			if ev.Reminded >= due || !InWorkHours(now, domain.SiteOf(e.Site)) {
+			if ev.Reminded >= due || !InWorkHours(now, s.SiteFor(e)) {
 				continue
 			}
 			text := strings.TrimSpace(stepText(domain.ScenarioStep{TextTy: rule.TextTy, TextVy: rule.TextVy}, e, now))

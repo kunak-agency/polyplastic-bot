@@ -41,6 +41,9 @@ type BotService struct {
 	// replies — FEATURE_REPLIES: ответ на сообщение новичка уходит реплаем (OutMessage.ReplyTo);
 	// выключен — ReplyTo стирается перед отправкой (sendReply).
 	replies bool
+	// clarify — FEATURE_CLARIFY: уточняющий вопрос по шаблону категории после тревожного ответа
+	// опроса (clarify.go).
+	clarify bool
 
 	wg sync.WaitGroup // фоновые отправки пакета после согласия
 }
@@ -341,6 +344,8 @@ func (b *BotService) callback(ctx context.Context, u max.Update) error {
 		return b.terminalButton(ctx, u, emp.ID, strings.TrimPrefix(p, preTerminal))
 	case strings.HasPrefix(p, preContinue):
 		return b.continuePress(ctx, u, emp.ID, strings.TrimPrefix(p, preContinue))
+	case isClarifyPayload(p):
+		return b.clarifyCallback(ctx, u, emp.ID)
 	case strings.HasPrefix(p, preReason), strings.HasPrefix(p, preWrite), strings.HasPrefix(p, preSkip),
 		strings.HasPrefix(p, preRemind), strings.HasPrefix(p, preAnswer), strings.HasPrefix(p, preDone):
 		return b.surveyCallback(ctx, u, emp.ID)
@@ -531,9 +536,12 @@ type surveyOutcome struct {
 	optEsc    bool
 	flagQ     int
 	outcomes  []int
-	emp       *domain.Employee
-	ev        *domain.ScheduledEvent
-	step      domain.ScenarioStep
+	// clarifyCode — категория уточняющего вопроса к ответу clarifyQ (с нуля); пусто — не нужен.
+	clarifyCode string
+	clarifyQ    int
+	emp         *domain.Employee
+	ev          *domain.ScheduledEvent
+	step        domain.ScenarioStep
 }
 
 func (b *BotService) surveyCallback(ctx context.Context, u max.Update, empID uuid.UUID) error {
@@ -667,6 +675,7 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 				out.optFlags, out.flagQ = append(out.optFlags, f), qi+1
 				out.optLabel = valueLabel(sv, q, v)
 			}
+			out.clarifyQ, out.clarifyCode = qi, answerClarify(sv, q, v, commentScreen(sv, q, v), out.branch != nil)
 		case "done":
 			if st.Screen != domain.ScreenQuestion || qScale(sv, q) != qMulti {
 				out.notification = "Этот вопрос уже позади"
@@ -700,6 +709,7 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 			answer.Reason = reasons[act.value]
 			if len(st.Results) > st.Q {
 				st.Results[st.Q].Reason = reasons[act.value]
+				out.clarifyQ, out.clarifyCode = qi, reasonClarify(q, st.Results[st.Q], reasons[act.value])
 			}
 			advance(st)
 		case "write":
@@ -732,6 +742,7 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 			}
 			if len(st.Results) > st.Q {
 				st.Results[st.Q].Wrote = true
+				out.clarifyQ, out.clarifyCode = qi, textClarify(sv, q, st.Results[st.Q], act.text, codes)
 			}
 			advance(st)
 		case "skip":

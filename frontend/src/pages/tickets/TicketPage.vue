@@ -13,6 +13,7 @@ import TicketSla from '@/components/tickets/TicketSla.vue'
 import TicketStatus from '@/components/tickets/TicketStatus.vue'
 import TicketPriority from '@/components/tickets/TicketPriority.vue'
 import AssignDialog from '@/components/tickets/AssignDialog.vue'
+import ResolveDialog from '@/components/tickets/ResolveDialog.vue'
 import { Button } from '@/components/ui/button'
 import { apiGetNewcomer } from '@/api/newcomers'
 import {
@@ -30,7 +31,16 @@ import { useNow } from '@/composables/useNow'
 import { useTicketFormat } from '@/composables/useTicketFormat'
 import { errorMessage } from '@/lib/apiError'
 import { formatDayOffset } from '@/lib/calendar'
-import { canNotifyManager, isRestricted, signatureRole, ticketsOfNewcomer } from '@/lib/tickets'
+import {
+  canNotifyManager,
+  doneNoteBlock,
+  foldQuote,
+  isRestricted,
+  signatureRole,
+  ticketsOfNewcomer,
+  visibleQuote,
+} from '@/lib/tickets'
+import { TONE_ICON, isSentiment } from '@/lib/tone'
 import { useOperatorStore } from '@/stores/operator'
 import { useTicketsStore } from '@/stores/tickets'
 import type {
@@ -155,12 +165,26 @@ function onAssign(body: TicketAssignRequest): void {
   void assign(body, body.assignee_name === me.value.trim() ? 'taken' : 'assigned')
 }
 
-async function resolve(): Promise<void> {
+// "Resolve" asks for an optional "what was done" first (wave 4, #31).
+const resolveOpen = ref(false)
+const noteBlock = computed(() => (ticket.value ? doneNoteBlock(ticket.value) : null))
+
+function resolve(): void {
+  if (!ticket.value || resolved.value || busy.value) return
+  resolveOpen.value = true
+}
+
+async function onResolve(doneNote: string): Promise<void> {
   if (!ticket.value || resolved.value) return
   busy.value = true
   try {
-    await apiResolveTicket(ticket.value.id)
-    toast.success(t('tickets.detail.toast.resolved', { number: ticket.value.number }))
+    await apiResolveTicket(ticket.value.id, doneNote ? { done_note: doneNote } : {})
+    resolveOpen.value = false
+    toast.success(
+      doneNote && !noteBlock.value
+        ? t('tickets.detail.toast.resolvedNote', { number: ticket.value.number })
+        : t('tickets.detail.toast.resolved', { number: ticket.value.number }),
+    )
     await refresh()
   } catch (e) {
     toast.error(errorMessage(e, 'tickets.detail.toast.resolveFailed'))
@@ -243,6 +267,21 @@ function onComposerKey(e: KeyboardEvent): void {
   }
 }
 
+// ── Summary card (wave 4, #26) ──────────────────────────────────────────────
+// Title: the model's one-line summary when there is one, the category otherwise.
+const headline = computed(() => ticket.value?.summary_model?.trim() || null)
+const tone = computed(() => {
+  const v = ticket.value?.tone
+  return isSentiment(v) ? v : null
+})
+// F10 and F5/F9 never show a quote; a long one is folded.
+const quote = computed(() => (ticket.value ? visibleQuote(ticket.value) : null))
+const quoteFold = computed(() => (quote.value ? foldQuote(quote.value) : null))
+const quoteFull = ref(false)
+watch(id, () => {
+  quoteFull.value = false
+})
+
 // ── Thread ──────────────────────────────────────────────────────────────────
 function author(m: TicketMessage): string {
   if (m.from === 'bot') return t('tickets.detail.thread.bot')
@@ -304,11 +343,18 @@ function when(iso: string): string {
               <span class="tabular">{{
                 t('tickets.detail.number', { number: ticket.number })
               }}</span>
-              <span class="head__cat" :title="t(`tickets.categoryFull.${ticket.category}`)">
+              <span v-if="headline" class="head__cat">{{ headline }}</span>
+              <span v-else class="head__cat" :title="t(`tickets.categoryFull.${ticket.category}`)">
                 {{ category(ticket) }}
               </span>
             </h1>
             <div class="head__badges">
+              <span
+                v-if="headline"
+                class="head__catline"
+                :title="t(`tickets.categoryFull.${ticket.category}`)"
+                >{{ category(ticket) }}</span
+              >
               <TicketPriority :priority="ticket.priority" />
               <TicketStatus :status="ticket.status" />
               <TicketSla :ticket="ticket" :now="now" />
@@ -367,9 +413,27 @@ function when(iso: string): string {
         <div class="panes__main">
           <SectionCard :title="t('tickets.detail.summary.title')">
             <p class="summary">{{ ticket.summary }}</p>
-            <blockquote v-if="ticket.quote && !restricted" class="quote">
+            <p v-if="tone" class="tone" :title="t('tickets.detail.summary.toneHint')">
+              <span class="tone__icon" aria-hidden="true">{{ TONE_ICON[tone] }}</span>
+              {{ t(`tickets.detail.summary.tone.${tone}`) }}
+              <span class="muted">· {{ t('tickets.detail.summary.toneLabel') }}</span>
+            </p>
+            <blockquote v-if="quote && quoteFold" class="quote">
               <div class="quote__label">{{ t('tickets.detail.summary.quote') }}</div>
-              «{{ ticket.quote }}»
+              «{{ quoteFull ? quote : quoteFold.short }}»
+              <button
+                v-if="quoteFold.folded"
+                type="button"
+                class="quote__more"
+                :aria-expanded="quoteFull"
+                @click="quoteFull = !quoteFull"
+              >
+                {{
+                  quoteFull
+                    ? t('tickets.detail.summary.showLess')
+                    : t('tickets.detail.summary.showAll')
+                }}
+              </button>
             </blockquote>
           </SectionCard>
 
@@ -558,6 +622,13 @@ function when(iso: string): string {
         :busy="busy"
         @submit="onAssign"
       />
+      <ResolveDialog
+        v-model:open="resolveOpen"
+        :number="ticket.number"
+        :block="noteBlock"
+        :busy="busy"
+        @submit="onResolve"
+      />
     </template>
   </PageContainer>
 </template>
@@ -652,6 +723,34 @@ function when(iso: string): string {
   border-left: 3px solid var(--border-strong);
   background: var(--bg-subtle);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.tone {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: var(--text-sm);
+}
+.tone__icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.head__catline {
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+  align-self: center;
+}
+.quote__more {
+  display: block;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-style: normal;
+  cursor: pointer;
 }
 .quote__label {
   font-size: var(--text-xs);

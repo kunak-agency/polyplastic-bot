@@ -55,8 +55,12 @@ type Ticket struct {
 	Anonymous     bool // анонимность HR-процессом не обеспечена — всегда false (UX 2.7)
 	Summary       string
 	Quote         *string
-	SLADueAt      *time.Time
-	Source        string
+	// SummaryModel — строка модели для HR (/flags v2, ≤ 120 символов, без ПДн): заголовок карточки
+	// в кабинете. nil — модель не размечала (degraded, F10, обращение не из текста). Summary
+	// остаётся сводкой кода.
+	SummaryModel *string `gorm:"column:summary_model"`
+	SLADueAt     *time.Time
+	Source       string
 
 	// Связи: запрос «позвать человека», свободный вопрос, событие таймлайна.
 	HumanRequestID *uuid.UUID `gorm:"type:uuid"`

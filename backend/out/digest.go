@@ -25,6 +25,18 @@ type Digest struct {
 	Probation    DigestProbation    `json:"probation"`
 	Text         DigestText         `json:"text"`
 	Message      DigestMessage      `json:"max_message"`
+	Tone         Tone               `json:"tone"`
+	ToneTrend    ToneTrend          `json:"tone_trend"`
+	// Done — «Сделано по темам» (волна 4, #31): категория, сколько обращений закрыто с «что
+	// сделано», до трёх обезличенных строк. Без имён; F5/F9/F10 не берутся.
+	Done []DigestDone `json:"done"`
+}
+
+type DigestDone struct {
+	Category string   `json:"category"`
+	Label    string   `json:"label"`
+	Count    int      `json:"count"`
+	Notes    []string `json:"notes"`
 }
 
 type DigestTotals struct {
@@ -105,6 +117,12 @@ func DigestFrom(d *services.Digest) Digest {
 		Probation:    DigestProbation{Count: d.Probation, ThisWeek: d.ProbationNow},
 		Text:         DigestText{Summary: d.Text.Summary, Themes: d.Text.Themes, Changes: d.Text.Changes, Source: d.Text.Source, Rejected: nonNil(d.Text.Rejected)},
 		Message:      DigestMessage{Text: d.MaxText, Length: len([]rune(d.MaxText)), Link: d.Link},
+		Tone:         toneFrom(d.Tone),
+		ToneTrend:    toneTrendFrom(d.ToneTrend),
+		Done:         []DigestDone{},
+	}
+	for _, x := range d.Done {
+		r.Done = append(r.Done, DigestDone{Category: x.Category, Label: x.Label, Count: x.Count, Notes: nonNil(x.Notes)})
 	}
 	if d.Site != "" {
 		s := d.Site
@@ -205,6 +223,7 @@ type ManagerCard struct {
 	Connection    string        `json:"connection"`
 	LastPulse     *int          `json:"last_pulse"`
 	ProbationDate string        `json:"probation_date"`
+	IPDecision    *string       `json:"ip_decision"` // keep | extend | part | null
 	Attention     []string      `json:"attention"`
 	Meetings      []ManagerTask `json:"meetings"`
 }
@@ -223,7 +242,7 @@ func ManagerViewFrom(v *services.ManagerView) ManagerView {
 		card := ManagerCard{NewcomerID: c.NewcomerID, FullName: c.FullName, Site: c.Site, Department: c.Department,
 			Position: c.Position, StartDate: c.StartDate.Format(overviewDate), Day: c.Day, Stage: c.Stage,
 			Connection: c.Connection, LastPulse: c.LastPulse, ProbationDate: c.ProbationDate.Format(overviewDate),
-			Attention: nonNil(c.Attention), Meetings: []ManagerTask{}}
+			IPDecision: c.IPDecision, Attention: nonNil(c.Attention), Meetings: []ManagerTask{}}
 		for _, m := range c.Meetings {
 			card.Meetings = append(card.Meetings, ManagerTask{ID: m.ID, Kind: m.Kind, Status: m.Status, Text: m.Text,
 				CreatedAt: m.CreatedAt.Format("2006-01-02T15:04:05Z07:00")})

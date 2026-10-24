@@ -31,6 +31,13 @@ const (
 	NudgeSilent        = "silent_3d"       // не отвечает боту больше 3 дней
 	NudgeProbation     = "probation_3d"    // решение по испытательному сроку через 3 дня
 	NudgeMonth         = "d30_meeting"     // D+30 — встреча 1:1
+	// FEATURE_RISK_V2 (services/manager_rules.go):
+	NudgeRegular    = "regular_meeting" // плановая встреча: D+14 всем и нейтральный повод вместо скрытого
+	NudgePlanNeeded = "plan_needed"     // D+1: адаптационный план не приложен
+	NudgeIPDiscuss  = "ip_discuss"      // руководитель нажал «Обсудить с HR» под D+87 — задача HR
+	// NudgeRecruiterMorning — утренняя сводка рекрутеру (services/recruiter_morning.go): та же
+	// таблица как журнал push с идемпотентным Key, EmployeeID пустой.
+	NudgeRecruiterMorning = "recruiter_morning"
 )
 
 // Статусы задачи «Встреча 1:1».

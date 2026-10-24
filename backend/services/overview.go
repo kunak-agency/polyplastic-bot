@@ -60,6 +60,13 @@ type OverviewService struct {
 	repos *repositories.Repos
 	tax   *taxonomy.Taxonomy
 	now   func() time.Time
+	opts  OverviewOptions
+}
+
+// OverviewOptions — режимы расчёта обзора. RiskV2 — зоны риска v2 (FEATURE_RISK_V2,
+// overview_risk.go); false — прежние правила.
+type OverviewOptions struct {
+	RiskV2 bool
 }
 
 // Overview — сервис обзора. Отдельного поля в Services нет: обзор только читает, и ему
@@ -73,7 +80,7 @@ func (s *Services) Overview() *OverviewService {
 	if s.Tickets != nil {
 		tax = s.Tickets.tax
 	}
-	return &OverviewService{repos: s.repos, tax: tax, now: now}
+	return &OverviewService{repos: s.repos, tax: tax, now: now, opts: OverviewOptions{RiskV2: s.features.RiskV2}}
 }
 
 // Overview — результат GET /api/overview.
@@ -88,6 +95,8 @@ type Overview struct {
 	Actions     []ActionItem
 	Heatmap     Heatmap
 	Trend       Trend
+	// ToneWeek — тон текстовых ответов за текущую ISO-неделю (overview_tone.go).
+	ToneWeek ToneCell
 }
 
 // OverviewTiles — плитки.
@@ -183,7 +192,11 @@ func (s *OverviewService) Get(ctx context.Context, site string) (*Overview, erro
 	if err != nil {
 		return nil, err
 	}
-	o := BuildOverview(rows, site, now, s.tax)
+	// FEATURE_AUTH: рекрутер видит обзор только по своим новичкам (auth.go, RecruiterScope).
+	if rec := RecruiterScope(ViewerFrom(ctx)); rec != nil {
+		rows.Employees = filterEmployees(rows.Employees, DashboardScope{RecruiterID: rec}.match)
+	}
+	o := BuildOverview(rows, site, now, s.tax, s.opts)
 	return &o, nil
 }
 
@@ -227,7 +240,8 @@ func slaRunning(t repositories.OverviewTicket) bool {
 }
 
 // BuildOverview — все агрегаты из строк. Чистая функция: её проверяют тесты без базы.
-func BuildOverview(rows *repositories.OverviewRows, site string, now time.Time, tax *taxonomy.Taxonomy) Overview {
+// opts — необязательно: без него (и при RiskV2=false) зоны риска по прежним правилам.
+func BuildOverview(rows *repositories.OverviewRows, site string, now time.Time, tax *taxonomy.Taxonomy, opts ...OverviewOptions) Overview {
 	loc := domain.SiteOf(site).Loc
 	today := civilDate(now.In(loc), loc)
 	endOfToday := today.AddDate(0, 0, 1)
@@ -410,6 +424,9 @@ func BuildOverview(rows *repositories.OverviewRows, site string, now time.Time, 
 			Zone: zone, Reasons: reasons, Overdue: overdue, LastPulse: e.LastPulse, OpenTickets: open,
 		})
 	}
+	if len(opts) > 0 && opts[0].RiskV2 {
+		o.Risks = RiskZonesV2(rows, now, tax) // плитки и просрочки выше — как были
+	}
 	sort.SliceStable(o.Risks, func(i, j int) bool {
 		a, b := o.Risks[i], o.Risks[j]
 		if a.Zone != b.Zone {
@@ -498,6 +515,7 @@ func BuildOverview(rows *repositories.OverviewRows, site string, now time.Time, 
 
 	o.Heatmap = buildHeatmap(rows, people2site(rows), site, periodFrom, tax)
 	o.Trend = buildTrend(rows, people2site(rows), site, now, loc)
+	o.ToneWeek = toneWeek(rows, site, wFrom, loc)
 	return o
 }
 

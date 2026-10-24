@@ -25,6 +25,8 @@ type Services struct {
 	Tickets   *TicketService    // обращения (tickets.go)
 	Documents *DocumentService  // база знаний (documents.go)
 	Media     *MediaService     // медиатека и вложения для бота (media.go, media_max.go)
+	Auth      *AuthService      // вход в кабинет, сессии (auth.go; FEATURE_AUTH)
+	Users     *UserService      // пользователи, команда, дашборды ролей (users.go, *_dashboard.go)
 	// Bot — обработка событий MAX (bot.go); nil, если бот выключен (нет токена и не подделка).
 	Bot *BotService
 	// digestOpts — получатели дайджеста, ссылка на кабинет, LLM (digest.go, manager.go).
@@ -32,6 +34,8 @@ type Services struct {
 	botCfg     config.Bot
 	// rewriteLLM — подмена модели переписывания обращения (тесты); nil — по digestOpts.LLM.
 	rewriteLLM RewriteLLM
+	// features — фича-флаги (зоны риска v2 и push v2 читают RiskV2: overview.go, manager.go).
+	features config.Features
 }
 
 // Options — настройки слоя.
@@ -64,6 +68,7 @@ func NewServices(r *repositories.Repos, ext *externalApi.ExternalAPI, o Options)
 	}
 	managerCabinetURL = cabinetBase(o.Digest.CabinetURL) // кнопки бота руководителю (manager_bot.go)
 	sch := NewSchedulerService(r, ext.Max, now, o.PackGap)
+	sch.SetFeatures(o.Features) // пояса, наджи по умолчанию, догоняющая очередь (scheduler_*.go)
 	tax := o.Taxonomy
 	if tax == nil {
 		t, err := taxonomy.LoadDefault("")
@@ -81,9 +86,12 @@ func NewServices(r *repositories.Repos, ext *externalApi.ExternalAPI, o Options)
 		Newcomers: &NewcomerService{repos: r, scheduler: sch, bot: o.Bot, now: now, botReady: ext.Max != nil},
 		Scenarios: &ScenarioService{repos: r, scheduler: sch, now: now},
 		Tickets:   tickets,
+		Auth:      newAuthService(r, o.Features.Auth, now),
+		Users:     &UserService{repos: r, now: now, tax: tax},
 		// дайджест и руководитель (digest.go, manager.go)
 		digestOpts: o.Digest,
 		botCfg:     o.Bot,
+		features:   o.Features,
 	}
 	var docsRAG DocsRAG
 	if ext.RAG != nil { // nil-указатель в интерфейсе выглядел бы подключённым клиентом
@@ -99,6 +107,7 @@ func NewServices(r *repositories.Repos, ext *externalApi.ExternalAPI, o Options)
 		s.Bot = NewBotService(ext.Max, r, sch, now)
 		s.Bot.tickets = tickets
 		s.Bot.replies = o.Features.Replies
+		s.Bot.clarify = o.Features.Clarify
 		if ext.RAG != nil { // nil-указатель в интерфейсе выглядел бы подключённым клиентом
 			s.Bot.rag = ext.RAG
 			s.Bot.asr = ext.RAG // голосовые: POST /transcribe того же сервиса

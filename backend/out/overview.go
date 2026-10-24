@@ -19,6 +19,7 @@ type Overview struct {
 	ActionToday []ActionItem    `json:"action_today"`
 	Heatmap     Heatmap         `json:"heatmap"`
 	Trend       Trend           `json:"trend"`
+	ToneWeek    Tone            `json:"tone_week"`
 }
 
 type OverviewWeek struct {
@@ -130,7 +131,8 @@ func OverviewFrom(o *services.Overview) Overview {
 			MinGroup: o.Heatmap.MinGroup, PeriodDays: o.Heatmap.PeriodDays, Sites: o.Heatmap.Sites,
 			Categories: []HeatCategory{}, Respondents: o.Heatmap.Respondents, Cells: []HeatCell{},
 		},
-		Trend: Trend{Weeks: []string{}, MinGroup: services.AnonymityMinGroup, Series: []TrendSeries{}},
+		Trend:    Trend{Weeks: []string{}, MinGroup: services.AnonymityMinGroup, Series: []TrendSeries{}},
+		ToneWeek: toneFrom(o.ToneWeek),
 	}
 	if o.Site != "" {
 		s := o.Site

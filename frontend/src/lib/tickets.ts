@@ -35,6 +35,57 @@ export function canNotifyManager(category: TicketCategory): boolean {
   return !MANAGER_HIDDEN_CATEGORIES.includes(category)
 }
 
+// ── Closing the loop (wave 4, #31) ──────────────────────────────────────────
+
+// "What was done" is not sent to the newcomer for these: F5/F9 belong to the
+// HR partner and security, F10 keeps no words of the newcomer.
+export const DONE_NOTE_SILENT_CATEGORIES: readonly TicketCategory[] = ['F5', 'F9', 'F10']
+export const DONE_NOTE_MAX = 300
+
+export type DoneNoteBlock = 'anonymous' | 'confidential' | null
+
+// Why the note will NOT reach the newcomer; null — it will. The server flag
+// wins when present; the category and anonymity are the fallback.
+export function doneNoteBlock(t: {
+  category: TicketCategory
+  anonymous: boolean
+  restricted?: boolean
+  done_note_reaches?: boolean
+}): DoneNoteBlock {
+  if (t.anonymous) return 'anonymous'
+  if (isRestricted(t) || DONE_NOTE_SILENT_CATEGORIES.includes(t.category)) return 'confidential'
+  if (t.done_note_reaches === false) return 'confidential'
+  return null
+}
+
+// One line, as the server stores it.
+export function normDoneNote(s: string): string {
+  return s.split(/\s+/).filter(Boolean).join(' ')
+}
+
+// ── Quote (wave 4, #26) ─────────────────────────────────────────────────────
+
+// F10 never shows a quote, whatever arrives; restricted tickets neither.
+export function visibleQuote(t: {
+  category: TicketCategory
+  quote: string | null
+  restricted?: boolean
+}): string | null {
+  if (t.category === 'F10' || isRestricted(t)) return null
+  const q = t.quote?.trim()
+  return q ? q : null
+}
+
+// A long quote is folded to its first QUOTE_FOLD characters, cut at a word.
+export const QUOTE_FOLD = 220
+
+export function foldQuote(q: string, limit = QUOTE_FOLD): { short: string; folded: boolean } {
+  if (q.length <= limit) return { short: q, folded: false }
+  const cut = q.slice(0, limit)
+  const space = cut.lastIndexOf(' ')
+  return { short: (space > limit * 0.6 ? cut.slice(0, space) : cut).trimEnd() + '…', folded: true }
+}
+
 // ── SLA ─────────────────────────────────────────────────────────────────────
 
 // The deadline is the server's (working hours, bot time excluded); the cabinet

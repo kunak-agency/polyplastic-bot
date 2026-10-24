@@ -36,6 +36,9 @@ type OverviewEvent struct {
 	Status     string
 	SentAt     *time.Time
 	IsTest     bool
+	// Attempts — неудачные попытки отправки; Catchup — в догоняющей очереди (зоны риска v2).
+	Attempts int
+	Catchup  bool
 }
 
 // OverviewAnswer — ответ опроса без текста новичка: текст в агрегаты не попадает никогда.
@@ -47,6 +50,16 @@ type OverviewAnswer struct {
 	Value      *int
 	Skipped    bool
 	Flags      domain.StringList
+	// Sentiment — тональность текста ответа (pos | neu | neg); nil — текста нет или не размечен.
+	Sentiment *string
+	IsTest    bool
+	CreatedAt time.Time
+}
+
+// OverviewQuestion — размеченный по тональности свободный вопрос: без текста, только тон и время.
+type OverviewQuestion struct {
+	EmployeeID uuid.UUID
+	Sentiment  *string
 	IsTest     bool
 	CreatedAt  time.Time
 }
@@ -70,6 +83,8 @@ type OverviewRows struct {
 	Events    []OverviewEvent
 	Answers   []OverviewAnswer
 	Tickets   []OverviewTicket
+	// Questions — свободные вопросы с тональностью (не старше since): агрегат тона.
+	Questions []OverviewQuestion
 }
 
 // Load — новички площадки (пусто — все) и их события, ответы и обращения. Ответы и
@@ -95,15 +110,21 @@ func (r *OverviewRepo) Load(ctx context.Context, site string, since time.Time) (
 		ids[i] = e.ID
 	}
 	if err := db.Model(&domain.ScheduledEvent{}).
-		Select("id, employee_id, day_offset, title, kind, fire_at, status, sent_at, is_test").
+		Select("id, employee_id, day_offset, title, kind, fire_at, status, sent_at, is_test, attempts, catchup").
 		Where("employee_id IN ?", ids).Order("fire_at, position").
 		Scan(&out.Events).Error; err != nil {
 		return nil, err
 	}
 	if err := db.Model(&domain.SurveyAnswer{}).
-		Select("employee_id, event_id, question_no, scale, value, skipped, flags, is_test, created_at").
+		Select("employee_id, event_id, question_no, scale, value, skipped, flags, sentiment, is_test, created_at").
 		Where("employee_id IN ? AND created_at >= ?", ids, since).Order("created_at").
 		Scan(&out.Answers).Error; err != nil {
+		return nil, err
+	}
+	if err := db.Model(&domain.BotQuestion{}).
+		Select("employee_id, sentiment, is_test, created_at").
+		Where("employee_id IN ? AND created_at >= ? AND sentiment IS NOT NULL", ids, since).Order("created_at").
+		Scan(&out.Questions).Error; err != nil {
 		return nil, err
 	}
 	// Открытые — все, закрытые — только за окно (для heat map).
@@ -114,4 +135,27 @@ func (r *OverviewRepo) Load(ctx context.Context, site string, since time.Time) (
 		return nil, err
 	}
 	return &out, nil
+}
+
+// ToneMark — тональность одного текстового ответа новичка без текста: для карточки.
+type ToneMark struct {
+	Kind      string // survey | question
+	Sentiment string
+	CreatedAt time.Time
+}
+
+// RecentTone — последние n размеченных текстов новичка (ответы опросов и свободные вопросы),
+// свежие первыми. Текст не читается.
+func (r *OverviewRepo) RecentTone(ctx context.Context, employeeID uuid.UUID, n int) ([]ToneMark, error) {
+	if r == nil {
+		return nil, ErrNoDatabase
+	}
+	var out []ToneMark
+	err := r.db.WithContext(ctx).Raw(`
+SELECT kind, sentiment, created_at FROM (
+  SELECT 'survey' AS kind, sentiment, created_at FROM survey_answers WHERE employee_id = ? AND sentiment IS NOT NULL
+  UNION ALL
+  SELECT 'question' AS kind, sentiment, created_at FROM bot_questions WHERE employee_id = ? AND sentiment IS NOT NULL
+) t ORDER BY created_at DESC LIMIT ?`, employeeID, employeeID, n).Scan(&out).Error
+	return out, err
 }
