@@ -112,6 +112,11 @@ vue-i18n, @vueuse/core, reka-ui (shadcn-vue), tailwindcss 4, lucide-vue-next, vu
 
 - Секреты лежат только в `.env` (шаблон `.env.example` в корне): `MAX_BOT_TOKEN`,
   `RUNPOD_API_KEY`, `LLM_*`, `DATABASE_URL`.
+- Фича-флаги итерации 24.10 (`config.Features`, `backend/.env.example`): `FEATURE_REPLIES`,
+  `FEATURE_AUTH`, `FEATURE_TZ`, `FEATURE_NUDGES_DEFAULT`, `FEATURE_CATCHUP`. Все bool
+  (`strconv.ParseBool`), по умолчанию выключены; сводка старта пишет, какие включены. На ВМ
+  переходят через `deploy/terraform/scripts/make-env.sh`. Включаем по одному после прогона на
+  телефоне: replies → auth → tz → nudges_default → catchup; откат — выключить флаг.
 - Имя compose-проекта задаём явно (`name: polyplastic`). Без него соседние `backend/`
   конфликтуют, на этом уже обжигались в hack-kosmos.
 - Postgres слушает `127.0.0.1:5437`. Порт 5432 занят системным Postgres, 5433–5436 заняты

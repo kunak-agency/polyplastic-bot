@@ -1092,3 +1092,33 @@ ffmpeg; ≤ 20 МБ, `RAG_ASR_MAX_MB`)
 ровно одно из `text`/`payload`/голосовое, нет файла по `audio_path`, пустой или > 20 МБ; 409 —
 бот не на подделке MAX или новичок не подключён.
 
+
+### Схема итерации 24.10 (волна 0, `domain/user.go`, `nudge.go`)
+
+Схему обновляет AutoMigrate при старте. Все новые колонки nullable или с дефолтом, поведение не
+меняется, пока флаги `FEATURE_*` выключены (`a_core_stack.md`, «Окружение»).
+
+**Новые таблицы:**
+
+| Таблица | Поля | Заметки |
+|---|---|---|
+| `users` | `id` uuid, `login` (уникальный), `password_hash`, `full_name`, `role`, `active` bool (default true), `tz` (IANA, null), `manager_name` (null), `created_at`, `updated_at` | роли `hr_lead` \| `recruiter` \| `manager` (`domain.Role*`); `manager_name` сопоставляется с `employees.manager_name` |
+| `sessions` | `id` (64 hex = 32 случайных байта, PK), `user_id`, `expires_at`, `created_ip`, `created_at` | `domain.NewSessionID`, `domain.SessionTTL` = 12 ч |
+| `nudges` | `id`, `employee_id`, `event_id` (null), `kind` (`auto` \| `manual`), `n`, `sent_at`, `created_by` (uuid пользователя, null = авто), `message_id`, `created_at` | журнал напоминаний новичку; `manager_nudges` — другое (push руководителю) |
+| `holidays` | `date` (PK, date), `title`, `created_at` | праздники РФ, правятся в Настройках |
+
+**Новые поля:**
+
+| Таблица | Поле | Значение |
+|---|---|---|
+| `employees` | `recruiter_id` uuid null | закреплённый рекрутер (`users.id`); `recruiter_name` остаётся |
+| `employees` | `tz` text null | IANA-пояс новичка, переопределяет пояс площадки |
+| `employees` | `unresponsive_since` timestamptz null | статус «не отвечает» после второго авто-напоминания |
+| `employees` | `catchup_started_at`, `catchup_done_at` timestamptz null | догоняющая очередь собрана / пройдена («Догнал ✓») |
+| `scheduled_events` | `catchup` bool not null default false | событие в догоняющей очереди; прогресс «N из M» — `EventRepo.CatchupProgress` |
+| `survey_answers` | `sentiment` text null | `pos` \| `neu` \| `neg` для `text` |
+| `bot_questions` | `sentiment` text null | `pos` \| `neu` \| `neg` для `question` |
+
+**Площадки** (`domain/site.go`, без таблицы): у `Site` поле `TZ` (IANA, сейчас `Europe/Moscow`).
+`domain.WorkHours8to18(code)` — та же площадка с окном 8:00–18:00 пн–пт. Пока не используется:
+текущие часы прежние (пн–чт 9–18, пт 9–17), переключение — в планировщике под `FEATURE_TZ`.

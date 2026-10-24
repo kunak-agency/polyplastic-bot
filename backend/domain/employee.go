@@ -37,8 +37,13 @@ type Employee struct {
 	ManagerName   string
 	MentorName    string
 	RecruiterName string
-	StartDate     time.Time `gorm:"type:date"`
-	Shift         *string   // "1" | "2" | "3" | nil
+	// RecruiterID — закреплённый рекрутер (User.ID); nil — «без рекрутера». RecruiterName — старое
+	// текстовое поле из импорта, остаётся как есть.
+	RecruiterID *uuid.UUID `gorm:"type:uuid"`
+	// TZ — IANA-пояс новичка, переопределяет пояс площадки (Site.TZ); nil — пояс площадки.
+	TZ        *string
+	StartDate time.Time `gorm:"type:date"`
+	Shift     *string   // "1" | "2" | "3" | nil
 
 	ScenarioID      uuid.UUID `gorm:"type:uuid"`
 	ScenarioVersion int
@@ -76,6 +81,15 @@ type Employee struct {
 	Flags BoolMap `gorm:"type:jsonb"`
 	// AwaitFreeText — бот ждёт свободный текст («Другое», open_free_text) → обращение.
 	AwaitFreeText *FreeTextWait `gorm:"type:jsonb"`
+
+	// UnresponsiveSince — статус «не отвечает» после второго авто-напоминания (чип «Не отвечает
+	// с 24.10»); автонаджи выключены до первого ответа. nil — отвечает.
+	UnresponsiveSince *time.Time
+	// CatchupStartedAt — когда собрана догоняющая очередь позднего входа (FEATURE_CATCHUP); nil —
+	// не догоняет. Прогресс «догоняет N из M» — по событиям ScheduledEvent.Catchup
+	// (EventRepo.CatchupProgress). CatchupDoneAt — очередь пуста, чип «Догнал ✓».
+	CatchupStartedAt *time.Time
+	CatchupDoneAt    *time.Time
 }
 
 // InviteToken — приглашение: случайная строка (≤ 128 символов, без ПДн) для deep link.

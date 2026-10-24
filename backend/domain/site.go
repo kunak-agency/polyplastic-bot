@@ -16,15 +16,20 @@ const (
 // На хакатоне у всех трёх площадок Москва; смены GTP — следующая итерация.
 type Site struct {
 	Code string
-	Loc  *time.Location
+	// TZ — IANA-имя пояса площадки (Employee.TZ переопределяет); Loc — он же, загруженный.
+	TZ  string
+	Loc *time.Location
 	// DayStart, DayEnd — рабочие часы в минутах от полуночи по дням недели (time.Weekday).
 	// DayEnd 0 — выходной.
 	DayStart [7]int
 	DayEnd   [7]int
 }
 
+// TZMoscow — пояс всех трёх площадок на хакатоне.
+const TZMoscow = "Europe/Moscow"
+
 // moscow — Europe/Moscow. Пакет time/tzdata подключён выше, поэтому загрузка не падает.
-var moscow = mustLoc("Europe/Moscow")
+var moscow = mustLoc(TZMoscow)
 
 func mustLoc(name string) *time.Location {
 	loc, err := time.LoadLocation(name)
@@ -36,12 +41,25 @@ func mustLoc(name string) *time.Location {
 
 // standardHours — пн–чт 9:00–18:00, пт 9:00–17:00, сб и вс — выходные.
 func standardHours(code string) Site {
-	s := Site{Code: code, Loc: moscow}
+	s := Site{Code: code, TZ: TZMoscow, Loc: moscow}
 	for d := time.Monday; d <= time.Friday; d++ {
 		s.DayStart[d] = 9 * 60
 		s.DayEnd[d] = 18 * 60
 	}
 	s.DayEnd[time.Friday] = 17 * 60
+	return s
+}
+
+// WorkHours8to18 — правила площадки с окном 8:00–18:00 пн–пт (сб и вс — выходные): набор из
+// плана итерации 24.10. Пока НЕ используется — Sites держат standardHours; переключает
+// планировщик под FEATURE_TZ.
+func WorkHours8to18(code string) Site {
+	s := SiteOf(code)
+	s.DayStart, s.DayEnd = [7]int{}, [7]int{}
+	for d := time.Monday; d <= time.Friday; d++ {
+		s.DayStart[d] = 8 * 60
+		s.DayEnd[d] = 18 * 60
+	}
 	return s
 }
 

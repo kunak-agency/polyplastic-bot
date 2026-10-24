@@ -63,6 +63,9 @@ type ScheduledEvent struct {
 	Reminded int
 	// Snapshot — шаг «Отправить себе» (send-test): резолвится из снимка, а не из версии.
 	Snapshot *StepSnap `gorm:"type:jsonb"`
+	// Catchup — событие стоит в догоняющей очереди позднего входа (обязательный вопрос из
+	// пропущенного дня, 1 блок в день); false — обычный таймлайн.
+	Catchup bool `gorm:"not null;default:false"`
 }
 
 // SurveyState — где новичок в «живом опросе»: одно сообщение, которое правится после каждого
@@ -115,4 +118,7 @@ type SurveyAnswer struct {
 	Text       string     // причина своими словами (текст новичка)
 	Flags      StringList `gorm:"type:jsonb"`
 	IsTest     bool
+	// Sentiment — тональность Text (domain.Sentiment*): pos | neu | neg; nil — не размечен или
+	// текста нет.
+	Sentiment *string
 }

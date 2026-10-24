@@ -59,6 +59,10 @@ func AllModels() []any {
 		&MediaFileData{},
 		&NewcomerFile{},
 		&TextRewrite{},
+		&User{},
+		&Session{},
+		&Nudge{},
+		&Holiday{},
 	}
 }
 

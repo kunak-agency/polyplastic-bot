@@ -37,6 +37,38 @@ type Config struct {
 	LLM       LLM
 	Docs      Docs
 	Digest    Digest
+	Features  Features
+}
+
+// Features — фича-флаги итерации 24.10 (FEATURE_*). Все выключены по умолчанию: выкатываются
+// по одному после прогона на телефоне, откат — выключить флаг. Значение — strconv.ParseBool
+// (1, t, true, TRUE…); пусто или мусор — false.
+type Features struct {
+	Replies       bool // FEATURE_REPLIES — ответы бота реплаем на сообщение новичка
+	Auth          bool // FEATURE_AUTH — вход в кабинет, роли, сессии
+	TZ            bool // FEATURE_TZ — пояс новичка и площадки, окно 8–18, праздники
+	NudgesDefault bool // FEATURE_NUDGES_DEFAULT — авто-напоминания 4 ч / 24 ч
+	Catchup       bool // FEATURE_CATCHUP — догоняющая очередь позднего входа
+}
+
+// On — имена включённых флагов для сводки старта.
+func (f Features) On() []string {
+	var on []string
+	for _, x := range []struct {
+		name string
+		on   bool
+	}{
+		{"FEATURE_REPLIES", f.Replies},
+		{"FEATURE_AUTH", f.Auth},
+		{"FEATURE_TZ", f.TZ},
+		{"FEATURE_NUDGES_DEFAULT", f.NudgesDefault},
+		{"FEATURE_CATCHUP", f.Catchup},
+	} {
+		if x.on {
+			on = append(on, x.name)
+		}
+	}
+	return on
 }
 
 // Digest — еженедельный дайджест руководителю подбора и ссылки из MAX в кабинет
@@ -192,6 +224,13 @@ func Load() (Config, error) {
 			PresencePenalty: float("LLM_PRESENCE_PENALTY", 1.0),
 		},
 	}
+	c.Features = Features{
+		Replies:       flag("FEATURE_REPLIES"),
+		Auth:          flag("FEATURE_AUTH"),
+		TZ:            flag("FEATURE_TZ"),
+		NudgesDefault: flag("FEATURE_NUDGES_DEFAULT"),
+		Catchup:       flag("FEATURE_CATCHUP"),
+	}
 	c.Digest = Digest{UserIDs: ids(os.Getenv("MAX_DIGEST_USER_IDS")), CabinetURL: strings.TrimRight(env("CABINET_URL", DefaultCabinetURL), "/")}
 	c.Bot.Fake = c.AppEnv == EnvDevelopment && !c.Max.Enabled()
 	if c.Docs.MaxUploadMB <= 0 || c.Docs.MaxUploadMB > 25 {
@@ -246,7 +285,15 @@ func (c Config) Summary() []string {
 		fmt.Sprintf("LLM: модель %s, адрес %s, ключ %s, temperature %.2f, presence_penalty %.2f",
 			c.LLM.Model, orNone(c.LLM.BaseURL), set(c.LLM.APIKey), c.LLM.Temperature, c.LLM.PresencePenalty),
 		fmt.Sprintf("дайджест: получателей в MAX %d, кабинет %s", len(c.Digest.UserIDs), c.Digest.CabinetURL),
+		fmt.Sprintf("фича-флаги: %s", features(c.Features.On())),
 	}
+}
+
+func features(on []string) string {
+	if len(on) == 0 {
+		return "все выключены"
+	}
+	return "включены " + strings.Join(on, ", ")
 }
 
 // addr — PORT: голый номер («8000») слушается только на loopback (api_contract.md: локально
@@ -304,6 +351,12 @@ func duration(key string, def time.Duration) time.Duration {
 		return d
 	}
 	return def
+}
+
+// flag — FEATURE_*: пусто или мусор — false (что взято, видно в Summary).
+func flag(key string) bool {
+	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(key)))
+	return err == nil && v
 }
 
 // integer — id чата; пусто или мусор — 0 («не задан», видно в Summary).

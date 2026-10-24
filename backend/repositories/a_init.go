@@ -35,6 +35,10 @@ type Repos struct {
 	Documents *DocumentRepo
 	Media     *MediaRepo
 	Rewrites  *TextRewriteRepo
+	Users     *UserRepo
+	Sessions  *SessionRepo
+	Nudges    *NudgeRepo
+	Holidays  *HolidayRepo
 }
 
 // newRepos — репозитории поверх db (база или транзакция).
@@ -50,6 +54,10 @@ func newRepos(db *gorm.DB) *Repos {
 		Documents: &DocumentRepo{db: db},
 		Media:     &MediaRepo{db: db},
 		Rewrites:  &TextRewriteRepo{db: db},
+		Users:     &UserRepo{db: db},
+		Sessions:  &SessionRepo{db: db},
+		Nudges:    &NudgeRepo{db: db},
+		Holidays:  &HolidayRepo{db: db},
 	}
 }
 
@@ -69,7 +77,7 @@ func (r *Repos) Truncate(ctx context.Context) error {
 	}
 	if err := r.db.WithContext(ctx).Exec(`TRUNCATE employees, invite_tokens, human_requests, scenarios,
 		scenario_versions, scenario_steps, scheduled_events, survey_answers, marker_states, bot_questions,
-		tickets, ticket_messages, bot_chats, text_rewrites`).Error; err != nil {
+		tickets, ticket_messages, bot_chats, text_rewrites, users, sessions, nudges, holidays`).Error; err != nil {
 		return err
 	}
 	return r.restartTicketSeq(ctx)
@@ -83,7 +91,7 @@ func (r *Repos) ResetDemo(ctx context.Context) error {
 	}
 	if err := r.db.WithContext(ctx).Exec(`TRUNCATE employees, invite_tokens, human_requests, scenarios,
 		scenario_versions, scenario_steps, scheduled_events, survey_answers, bot_questions,
-		tickets, ticket_messages`).Error; err != nil {
+		tickets, ticket_messages, nudges`).Error; err != nil {
 		return err
 	}
 	return r.restartTicketSeq(ctx)

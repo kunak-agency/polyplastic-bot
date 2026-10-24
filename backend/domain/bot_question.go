@@ -35,7 +35,11 @@ type BotQuestion struct {
 	Attempt int
 
 	MessageID string // mid сообщения с ответом
-	Expanded  bool   // раскрыто «Подробнее»
+	// SourceMID — mid сообщения новичка с вопросом (текст или голосовое): на него бот отвечает
+	// реплаем, на него же — ответ HR по обращению из этого вопроса. nil — старые записи.
+	SourceMID *string `gorm:"column:source_mid"`
+
+	Expanded  bool // раскрыто «Подробнее»
 	HelpfulAt *time.Time
 	NotThat   int        // нажатий «Не то»
 	HumanAt   *time.Time // передано человеку из этого ответа
@@ -49,6 +53,8 @@ type BotQuestion struct {
 	TicketID     *uuid.UUID `gorm:"type:uuid"`
 	TicketNumber int64      // номер для текста сигнала F5/F9 («Обращение #N»)
 	IsTest       bool
+	// Sentiment — тональность Question (domain.Sentiment*): pos | neu | neg; nil — не размечен.
+	Sentiment *string
 }
 
 // Значения BotQuestion.Kind.
