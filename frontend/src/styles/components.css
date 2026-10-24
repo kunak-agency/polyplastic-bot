@@ -4,10 +4,9 @@
 
 /* ── Layout ──────────────────────────────────────────────────────────────── */
 .app {
-  /* The page reserves only the 56 px rail: the expanded sidebar is laid over
-     the page (see .sidebar), so the charts never lose width to it. */
+  /* The first column is the sidebar slot: 220 px docked, 56 px as a rail. */
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -20,21 +19,20 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 248px;
+  width: 220px;
   height: 100vh;
   overflow: hidden;
   /* Above the sticky topbar (z-index 10): the panel covers the whole height. */
   z-index: 30;
-  box-shadow: var(--shadow-lg);
 }
 .sidebar--collapsed {
   width: 56px;
-  box-shadow: none;
 }
-.sidebar-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 29;
+.sidebar-slot {
+  width: 220px;
+}
+.sidebar-slot--collapsed {
+  width: 56px;
 }
 
 .sidebar-brand {

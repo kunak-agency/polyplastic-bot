@@ -9,13 +9,27 @@ import AppLogo from '@/components/common/AppLogo.vue'
 import { useTicketsStore } from '@/stores/tickets'
 import { useSiteStore } from '@/stores/site'
 
-// At rest the sidebar is a 56 px icon rail with the names in the tooltips;
-// expanded it names every section in a panel laid OVER the page, so the content
-// never loses width to it. Any navigation, a click outside or Escape folds it
-// back.
+// By default the sidebar is a docked 220 px panel naming every section; the
+// page gets the rest of the width. The toggle folds it to a 56 px icon rail
+// with the names in the tooltips; the choice is remembered per browser.
 const route = useRoute()
 const { t } = useI18n()
-const collapsed = ref(true)
+const STORAGE_KEY = 'korsik.sidebar.collapsed'
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+const collapsed = ref(readCollapsed())
+watch(collapsed, (v) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, v ? '1' : '0')
+  } catch {
+    // storage blocked: the choice lasts until reload
+  }
+})
 
 // Badge of open (not resolved) tickets, for the site picked in the topbar —
 // the same list the queue shows. Refreshed every minute and on site change;
@@ -40,17 +54,6 @@ function badge(item: NavItem): number {
   return item.id === 'tickets' && ticketsLoaded.value ? openCount.value : 0
 }
 
-watch(
-  () => route.fullPath,
-  () => (collapsed.value = true),
-)
-
-function onKey(e: KeyboardEvent): void {
-  if (e.key === 'Escape') collapsed.value = true
-}
-onMounted(() => document.addEventListener('keydown', onKey))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
-
 // A detail screen belongs to its section: its first crumb links back to it.
 function isActive(item: NavItem): boolean {
   return route.name === item.routeName || route.meta.crumbs?.[0]?.to === item.routeName
@@ -58,17 +61,16 @@ function isActive(item: NavItem): boolean {
 </script>
 
 <template>
-  <!-- The slot holds the rail's width in the page grid; the panel itself is
-       fixed, so expanding it covers the page instead of pushing it. -->
-  <div class="sidebar-slot">
-    <div v-if="!collapsed" class="sidebar-backdrop" aria-hidden="true" @click="collapsed = true" />
+  <!-- The slot holds the panel's width in the page grid; the panel itself is
+       fixed, so it stays put while the page scrolls. -->
+  <div :class="['sidebar-slot', { 'sidebar-slot--collapsed': collapsed }]">
     <aside :class="['sidebar', { 'sidebar--collapsed': collapsed }]">
       <RouterLink
         class="sidebar-brand"
         :to="{ name: 'overview' }"
         :aria-label="t('common.appName')"
       >
-        <AppLogo :size="32" :wordmark="false" />
+        <AppLogo :size="32" :wordmark="!collapsed" />
       </RouterLink>
 
       <nav class="sidebar-nav" :aria-label="t('common.nav.label')">
