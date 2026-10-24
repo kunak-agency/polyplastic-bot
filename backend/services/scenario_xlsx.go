@@ -63,6 +63,9 @@ func (s *ScenarioService) ImportExcel(ctx context.Context, name string, r io.Rea
 	if err != nil {
 		return nil, err
 	}
+	if s.onImport != nil {
+		s.onImport(ctx, imp)
+	}
 	d, err := s.Get(ctx, id)
 	if err != nil {
 		return nil, err

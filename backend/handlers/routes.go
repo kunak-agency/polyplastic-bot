@@ -40,6 +40,7 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 	// v4 — статистика кнопок и последствия публикации (scenario_stats.go).
 	api.Get("/scenarios/:id/stats", h.ScenarioStats)
 	api.Post("/scenarios/:id/publish/preview", h.PublishPreview)
+	api.Post("/scenarios/:id/rewrite-vy", h.RewriteVy) // v4: «вы» и нейтральный род (scenario_rewrite.go)
 
 	// v2 — обращения (api_contract.md, «v2 — итерация 3» и «Уточнения v2»).
 	api.Get("/tickets", h.ListTickets)

@@ -72,6 +72,11 @@ const (
 	warnNonHTTPS      = "non_https_link"
 	warnTimeOrder     = "time_order_fixed"
 	warnCommand       = "command_unmapped"
+	warnOnboarding    = "covered_by_onboarding"
+	warnFromHelp      = "text_from_help"
+	warnStartDay      = "start_day_placeholder"
+	warnDupGreeting   = "duplicate_greeting"
+	warnSurveyMissing = "survey_missing"
 )
 
 // flagRecruiter — флаг новичка «рекрутер дал отмашку» (ТЗ, колонка H).
@@ -132,11 +137,12 @@ type tzParser struct {
 	lastCondSites domain.StringList // условие площадки строки («для офисных») для строк-продолжений
 	lastTitle     string
 	openSurvey    int // индекс шага-опроса, в который дописываются вопросы следующих строк (−1 — нет)
+	pdfWarned     map[string]bool
 }
 
 // parseTZRows — разбор листа: rows — ячейки строк, header — индекс строки шапки.
 func parseTZRows(rows [][]string, header int, cols map[string]int) (*tzImport, error) {
-	p := &tzParser{cols: cols, approx: map[string]bool{}, siteSet: map[string]bool{}, openSurvey: -1}
+	p := &tzParser{cols: cols, approx: map[string]bool{}, siteSet: map[string]bool{}, openSurvey: -1, pdfWarned: map[string]bool{}}
 	for i := header + 1; i < len(rows); i++ {
 		p.row(i+1, rows[i])
 	}
@@ -344,7 +350,7 @@ func (p *tzParser) row(n int, row []string) {
 	text := pc.text
 	lines := splitLines(normalizeCell(rawText))
 	if len(lines) > 0 && reHRTaskHead.MatchString(lines[0]) {
-		st.HRTask, st.Kind = true, domain.KindTask
+		st.HRTask, st.Kind = true, domain.KindText // текстовый шаг с hr_task: бот не шлёт, HR видит текст
 		text = withName(joinTrim(lines[1:]))
 		pc = parsedCell{text: text}
 		questions = nil
@@ -376,6 +382,11 @@ func (p *tzParser) row(n int, row []string) {
 		case len(splitMediaNames(media)) == 0 && !strings.Contains(lo, "ссылк"):
 			p.warn(n, stepIdx, warnMediaMissing, fmt.Sprintf("В тексте «# %s», но имени вложения в колонке «Сопроводительное изображение» нет", truncateRunes(a, 60)))
 		}
+	}
+	// «(презентация)» в макете (r32), а вложения нет — заглушка файла в медиатеке.
+	if len(splitMediaNames(media)) == 0 && strings.Contains(strings.ToLower(kindRaw), "презентац") {
+		st.Media = append(st.Media, domain.MediaRef{Name: "Корпоративная презентация (файл)"})
+		p.warn(n, stepIdx, warnNoContent, "В макете указана презентация, но файла в ТЗ нет — загрузите «Корпоративная презентация (файл)» в медиатеку")
 	}
 	// Колонка J — главное содержание (список документов): к тексту целиком.
 	if extra != "" {
@@ -417,12 +428,10 @@ func (p *tzParser) row(n int, row []string) {
 		normalizeSurvey(st.Survey)
 		p.openSurvey = stepIdx
 	default:
-		var truncated []string
+		var labels []string
 		for i, o := range pc.options {
-			label, cut := shortLabel(o.label)
-			if cut {
-				truncated = append(truncated, "«"+o.label+"»")
-			}
+			label := strings.TrimSpace(o.label)
+			labels = append(labels, label)
 			btn := domain.StepButton{Label: label, OpensFreeText: o.other}
 			if br, ok := pc.branches[i]; ok {
 				btn.Branch = br
@@ -436,8 +445,8 @@ func (p *tzParser) row(n int, row []string) {
 			}
 			st.Buttons = append(st.Buttons, btn)
 		}
-		if len(truncated) > 0 {
-			p.warn(n, stepIdx, "label_truncated", fmt.Sprintf("Подписи кнопок длиннее %d символов сокращены: %s", maxImportLabel, strings.Join(truncated, ", ")))
+		if w := longLabelWarn(labels...); w != nil {
+			p.warn(n, stepIdx, w.code, w.msg)
 		}
 		if len(st.Buttons) > 0 && st.Kind == domain.KindSurvey {
 			st.Kind = domain.KindText
@@ -668,22 +677,48 @@ func (p *tzParser) branchRow(n int, w whenSpec, rawText, tag, media string) {
 	}
 	names := splitMediaNames(media)
 	perTag := len(parseSites(tag)) > 0
-	for _, name := range names {
-		dup := false
+	addFile := func(name string) {
 		for _, a := range br.Actions {
 			if a.Type == domain.ActionSendFile && a.Media == name {
-				dup = true
+				return
 			}
 		}
-		if !dup {
-			br.Actions = append(br.Actions, domain.Action{Type: domain.ActionSendFile, Media: name, PerTag: perTag})
+		br.Actions = append(br.Actions, domain.Action{Type: domain.ActionSendFile, Media: name, PerTag: perTag})
+	}
+	// «#Приложить пдф-ку …» — документ площадки (send_file per_tag); картинка из колонки I —
+	// иллюстрация к реплике ветки (r26–r28: «Изображение 5» + PDF «где пообедать»).
+	pdf := ""
+	for _, a := range pc.attach {
+		if lo := strings.ToLower(a); strings.Contains(lo, "пдф") || strings.Contains(lo, "pdf") {
+			pdf = pdfMediaName(a)
 		}
 	}
-	if len(names) == 0 && len(pc.attach) > 0 {
-		p.warn(n, stepIdx, warnMediaMissing, "Ветка просит приложить файл, но имени вложения в строке нет")
+	if pdf != "" {
+		addFile(pdf)
+		if !p.pdfWarned[pdf] {
+			p.pdfWarned[pdf] = true
+			p.warn(n, stepIdx, warnMediaMissing, fmt.Sprintf("Документ «%s» в ТЗ не приложен — загрузите PDF для каждой площадки в медиатеку", pdf))
+		}
 	}
 	if pc.text != "" && len(br.Messages) == 0 {
 		br.Messages = append(br.Messages, domain.BranchMessage{TextTy: pc.text, TextVy: pc.text, Media: domain.MediaRefList{}, Buttons: []domain.StepButton{}})
+	}
+	for _, name := range names {
+		if pdf == "" || len(br.Messages) == 0 {
+			addFile(name)
+			continue
+		}
+		m := &br.Messages[0]
+		dup := false
+		for _, r := range m.Media {
+			dup = dup || r.Name == name
+		}
+		if !dup {
+			m.Media = append(m.Media, domain.MediaRef{Name: name})
+		}
+	}
+	if len(names) == 0 && pdf == "" && len(pc.attach) > 0 {
+		p.warn(n, stepIdx, warnMediaMissing, "Ветка просит приложить файл, но имени вложения в строке нет")
 	}
 	for _, s := range parseSites(tag) {
 		p.siteSet[s] = true
@@ -752,7 +787,7 @@ func (p *tzParser) finish() {
 			if p.implicitYesNo(st, nextSurvey) {
 				rep.ImplicitYesNo++
 				p.warn(p.stepRow[i], i, warnImplicitYesNo, "Вопрос без вариантов ответа — добавлены кнопки «Да, расскажи» / «Нет, спасибо»")
-				p.warn(p.stepRow[i], i, warnNoContent, "Ответа на «да» в ТЗ нет — в ветке заглушка вложения, загрузите материал")
+				p.warn(p.stepRow[i], i, warnNoContent, "Ответа на «да» в ТЗ нет — в ветке заглушка вложения и запасной текст «Материал скоро добавим…»: загрузите материал и замените текст")
 			}
 			isQ := len(st.Buttons) > 0 || st.Survey != nil || st.Kind == domain.KindInput
 			if i == b.first && isQ {
@@ -832,6 +867,7 @@ func (p *tzParser) finish() {
 		addMedia(r.Media...)
 	}
 	p.collectCommands()
+	p.postProcess()
 	if ty+vy > 0 {
 		p.warn(firstAddr, -1, warnAddressForm, fmt.Sprintf("Тексты ТЗ в одной форме обращения (на «ты» — %d, на «вы» — %d): вторая форма скопирована из найденной, перепишите её в редакторе", ty, vy))
 	}
@@ -877,7 +913,9 @@ func (p *tzParser) implicitYesNo(st *domain.ScenarioStep, nextSurvey bool) bool 
 		name += " (" + strings.Join(st.Sites, ", ") + ")"
 	}
 	yes := emptyBranch()
-	yes.Messages = []domain.BranchMessage{{Media: domain.MediaRefList{{Name: name}}, Buttons: []domain.StepButton{}}}
+	// Текст-заглушка — HR видит его в редакторе и заменит; пока файла нет, бот пошлёт только его.
+	yes.Messages = []domain.BranchMessage{{TextTy: textMaterialSoonTy, TextVy: textMaterialSoonVy,
+		Media: domain.MediaRefList{{Name: name}}, Buttons: []domain.StepButton{}}}
 	st.Buttons = domain.ButtonList{{Label: labelImplicitYes, Branch: yes}, {Label: labelImplicitNo}}
 	return true
 }
@@ -1008,4 +1046,129 @@ func sitesEqual(a, b domain.StringList) bool {
 		}
 	}
 	return true
+}
+
+// Тексты команд сценария по умолчанию (кабинет их правит).
+var defaultCommandTexts = map[string][2]string{ // ty, vy
+	"/food": {"Лови список мест, где можно пообедать рядом с работой 🍽", "Вот список мест, где можно пообедать рядом с работой 🍽"},
+	"/hr":   {"Соединяю с HR — напиши вопрос, ответ придёт сюда же.", "Соединяю с HR — напишите вопрос, ответ придёт сюда же."},
+}
+
+// defaultCommandHelp — строка команды в тексте /help, подставленном в заглушку r3.
+var defaultCommandHelp = map[string]string{"/food": "подскажу, где пообедать", "/hr": "свяжу с HR"}
+
+var (
+	reTomorrow = regexp.MustCompile(`(^|[^\p{L}])([Зз])автра([^\p{L}]|$)`)
+	reGreeting = regexp.MustCompile(`(?i)^\s*(привет|здравствуй|добрый\s+день)`)
+	reNiceMeet = regexp.MustCompile(`(?i)приятно\s+(?:с\s+\p{L}+\s+)?познакомит`)
+)
+
+// isAddressQuestion — все кнопки шага ставят форму обращения (r5/r6).
+func isAddressQuestion(st domain.ScenarioStep) bool {
+	if len(st.Buttons) == 0 {
+		return false
+	}
+	for _, b := range st.Buttons {
+		ok := false
+		if b.Branch != nil {
+			for _, a := range b.Branch.Actions {
+				ok = ok || (a.Type == domain.ActionSetField && a.Field == "address_form")
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// postProcess — правки после сборки блоков (06 §1.4, §1.8, §1.11; замечания оркестратора):
+// вопрос ТЗ о форме обращения и реакция на него покрыты знакомством; заглушка «Что умеет этот
+// бот…» — текст /help; «завтра» в D−1 — {start_day}; тексты команд; двойное приветствие;
+// «опрос» в поводе без опроса в блоке.
+func (p *tzParser) postProcess() {
+	steps := p.out.steps
+	for bi, b := range p.blocks {
+		end := len(steps)
+		if bi+1 < len(p.blocks) {
+			end = p.blocks[bi+1].first
+		}
+		hasSurvey, surveyWord := false, -1
+		for i := b.first; i < end; i++ {
+			st := &steps[i]
+			if st.Survey != nil {
+				hasSurvey = true
+			}
+			if surveyWord < 0 && reSurveyWord.MatchString(st.Title) {
+				surveyWord = i
+			}
+			if isAddressQuestion(*st) {
+				c := domain.ConditionAddressUnset
+				st.Condition = &c
+				p.warn(p.stepRow[i], i, warnOnboarding, "Форму обращения спрашивает встроенное знакомство до первого шага — этот вопрос уйдёт, только если форма не выбрана")
+				if i+1 < end && len(steps[i+1].Buttons) == 0 && reNiceMeet.MatchString(steps[i+1].TextTy) {
+					c2 := domain.ConditionAddressUnset
+					steps[i+1].Condition = &c2
+					p.warn(p.stepRow[i+1], i+1, warnOnboarding, "Реакцию на выбор формы («очень приятно») уже говорит встроенное знакомство — шаг уйдёт, только если форма не выбрана")
+				}
+			}
+			if st.DayOffset == -1 && reTomorrow.MatchString(st.TextTy) {
+				fix := func(t string) string {
+					return reTomorrow.ReplaceAllStringFunc(t, func(m string) string {
+						sm := reTomorrow.FindStringSubmatch(m)
+						ph := "{start_day}"
+						if sm[2] == "З" {
+							ph = "{Start_day}"
+						}
+						return sm[1] + ph + sm[3]
+					})
+				}
+				st.TextTy, st.TextVy = fix(st.TextTy), fix(st.TextVy)
+				p.warn(p.stepRow[i], i, warnStartDay, "«Завтра» заменено на {start_day}: при выходе в понедельник шаг D−1 уходит в пятницу, и бот скажет «в понедельник, …», а не «завтра»")
+			}
+			if i > b.first && reGreeting.MatchString(st.TextTy) && reGreeting.MatchString(steps[i-1].TextTy) &&
+				steps[i-1].Survey == nil && sitesEqual(steps[i-1].Sites, st.Sites) {
+				p.warn(p.stepRow[i], i, warnDupGreeting, "Два приветствия подряд в одном блоке — новичок получит «Привет» дважды; объедините или уберите одно")
+			}
+		}
+		if surveyWord >= 0 && !hasSurvey {
+			p.warn(p.stepRow[surveyWord], surveyWord, warnSurveyMissing, "В поводе указан опрос, но вопросов опроса в этом блоке нет — добавьте опрос или поправьте повод")
+		}
+	}
+	// Заглушка «Что умеет этот бот…» (r3) — текст /help и команды сценария.
+	for i := range steps {
+		st := &steps[i]
+		if !isPlaceholder(st.TextTy) || !strings.Contains(strings.ToLower(st.TextTy), "умеет") {
+			continue
+		}
+		ty, vy := textHelpTy, textHelpVy
+		for _, c := range p.out.commands {
+			what, ok := defaultCommandHelp[c.Name]
+			if !ok {
+				what = strings.ToLower(commandDescription(c))
+			}
+			line := "\n• " + c.Name + " — " + what
+			ty += line
+			vy += line
+		}
+		st.TextTy, st.TextVy = ty, vy
+		p.warn(p.stepRow[i], i, warnFromHelp, "В ТЗ здесь заглушка — подставлен текст /help бота; проверьте и поправьте")
+	}
+	for i := range p.out.commands {
+		c := &p.out.commands[i]
+		if t, ok := defaultCommandTexts[c.Name]; ok {
+			c.TextTy, c.TextVy = t[0], t[1]
+		}
+	}
+}
+
+var rePDFHead = regexp.MustCompile(`(?i)^\s*(?:приложить\s+)?(?:пдф-?\p{L}*|pdf)\s*`)
+
+// pdfMediaName — имя записи медиатеки для «#Приложить пдф-ку с …»: «PDF — с …».
+func pdfMediaName(attach string) string {
+	rest := strings.TrimSpace(rePDFHead.ReplaceAllString(attach, ""))
+	if rest == "" {
+		return "PDF"
+	}
+	return "PDF — " + truncateRunes(rest, 80)
 }

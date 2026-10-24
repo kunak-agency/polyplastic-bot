@@ -53,6 +53,7 @@ type StepIn struct {
 	FlagRequired *string              `json:"flag_required"`
 	NoAnswer     *domain.NoAnswerRule `json:"no_answer"`
 	Advance      *string              `json:"advance"`
+	AIRewrite    *domain.AIRewrite    `json:"ai_rewrite"` // пометка rewrite-vy, проходит как есть
 }
 
 // ParseSteps — тело PUT: {"steps":[…]} по контракту («Уточнения v1»); голый массив тоже
@@ -98,6 +99,7 @@ func ValidateSteps(list []StepIn) ([]domain.ScenarioStep, error) {
 			Condition: s.Condition,
 			Key:       strings.TrimSpace(s.Key), Required: s.Required, Media: s.Media, Gallery: s.Gallery,
 			AltText: s.AltText, HRTask: s.HRTask, FlagRequired: s.FlagRequired, NoAnswer: s.NoAnswer, Advance: s.Advance,
+			AIRewrite: s.AIRewrite,
 		}
 		if st.Media == nil {
 			st.Media = domain.MediaRefList{}
@@ -185,7 +187,15 @@ func validateSurvey(f *fields, p, kind string, sv *domain.Survey) {
 		if strings.TrimSpace(q.Text) == "" {
 			f.add(fmt.Sprintf("%ssurvey.questions[%d].text", p, j), errs.CodeRequired, "Обязательное поле")
 		}
-		if sv.Scale == domain.ScaleChoice && len(q.Options) < 2 {
+		// Тип вопроса — свой (повопросный опрос импорта: шкала, да/нет, текст в опросе-выборе),
+		// иначе шкала опроса. «Другое — свой ответ» (other) — тоже вариант.
+		qt := strings.ToLower(strings.TrimSpace(q.Type))
+		choice := qt == "choice" || qt == "multi" || (qt == "" && sv.Scale == domain.ScaleChoice)
+		n := len(q.Options)
+		if q.Other {
+			n++
+		}
+		if choice && n < 2 {
 			f.add(fmt.Sprintf("%ssurvey.questions[%d].options", p, j), errs.CodeOutOfRange, "У выбора нужны хотя бы два варианта")
 		}
 	}

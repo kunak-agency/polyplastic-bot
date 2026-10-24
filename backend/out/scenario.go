@@ -52,6 +52,7 @@ type Step struct {
 	FlagRequired *string              `json:"flag_required"`
 	NoAnswer     *domain.NoAnswerRule `json:"no_answer"`
 	Advance      *string              `json:"advance"`
+	AIRewrite    *domain.AIRewrite    `json:"ai_rewrite"` // тексты переписаны автоматически (rewrite-vy)
 }
 
 type Button struct {
@@ -106,6 +107,7 @@ func ScenarioDetailFrom(d services.ScenarioDetail) ScenarioDetail {
 			Survey: surveyOut(s.Survey), Condition: s.Condition, WorkHoursOnly: s.WorkHoursOnly,
 			Key: s.Key, Required: s.Required, Media: media, Gallery: s.Gallery, AltText: s.AltText,
 			HRTask: s.HRTask, FlagRequired: s.FlagRequired, NoAnswer: s.NoAnswer, Advance: s.Advance,
+			AIRewrite: s.AIRewrite,
 		}
 	}
 	cmds, rules := d.Scenario.Commands, d.Scenario.Rules

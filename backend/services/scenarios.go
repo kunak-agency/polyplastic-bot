@@ -18,6 +18,8 @@ type ScenarioService struct {
 	now       func() time.Time
 	// onPublish — после публикации: список команд бота в MAX (branch_commands.go).
 	onPublish func(ctx context.Context)
+	// onImport — после импорта Excel: заглушки медиатеки для имён вложений (branch_media.go).
+	onImport func(ctx context.Context, imp *tzImport)
 }
 
 // ScenarioSummary — строка списка сценариев.

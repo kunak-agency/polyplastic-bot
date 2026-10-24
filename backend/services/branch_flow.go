@@ -43,6 +43,7 @@ var continueLabel = func() string {
 // Причины в answer, которые видит HR.
 const (
 	skipHRTask      = "пропущено: задача HR, бот не отправляет"
+	skipOnboarding  = "пропущено: форма обращения уже выбрана при подключении"
 	skipNoAnswer    = "пропущено: не было ответа на вопрос блока"
 	skipEndBlock    = "пропущено: ветка завершила блок"
 	skipGoto        = "пропущено: ветка перешла к другому блоку"
@@ -104,7 +105,7 @@ func flagOn(e *domain.Employee, flag string) bool { return e.Flags != nil && e.F
 // sendable — шаг уйдёт новичку (не задача HR, отмашка есть, согласие для опроса).
 func sendable(e *domain.Employee, s domain.ScenarioStep) bool {
 	switch {
-	case s.HRTask:
+	case s.HRTask, coveredByOnboarding(e, s):
 		return false
 	case s.FlagRequired != nil && *s.FlagRequired != "" && !flagOn(e, *s.FlagRequired):
 		return false
@@ -112,6 +113,12 @@ func sendable(e *domain.Employee, s domain.ScenarioStep) bool {
 		return false
 	}
 	return true
+}
+
+// coveredByOnboarding — шаг с условием «форма обращения не выбрана», а она уже выбрана
+// (встроенное знакомство спрашивает её до первого шага).
+func coveredByOnboarding(e *domain.Employee, s domain.ScenarioStep) bool {
+	return s.Condition != nil && *s.Condition == domain.ConditionAddressUnset && e.AddressForm != nil
 }
 
 // advanceOf — как уходит следующая реплика после шага без вопроса.
@@ -219,7 +226,7 @@ type blockRun struct {
 	halt bool // блок ждёт новичка: следующие блоки тоже ждут
 }
 
-// runOpts — прогон блока: test — машина времени; start — начало такта; later — ранний fire_at
+// runOpts — прогон блока: test — машина времени; start — начало такта; later — поздний fire_at
 // следующих созревших блоков (nil — их нет).
 type runOpts struct {
 	test     bool
@@ -290,16 +297,18 @@ func (s *SchedulerService) sendRun(ctx context.Context, tx *repositories.Repos, 
 	prevAuto := false
 	for i, ev := range pending {
 		step, found := f.step(ev)
-		hasNext := false
+		hasNext, nextSurvey := false, false
 		for _, nx := range pending[i+1:] {
 			if st, ok := f.step(nx); ok && sendable(f.e, st) {
-				hasNext = true
+				hasNext, nextSurvey = true, isSurvey(st)
 				break
 			}
 		}
 		cont := false
 		auto := false
-		if found && sendable(f.e, step) && !isQuestion(step) && hasNext {
+		// Вступление к опросу (ТЗ r38, r54, r61: «предлагаем пройти опрос») — опрос сразу следом,
+		// без «Дальше →»: кнопки опроса и есть следующий шаг новичка.
+		if found && sendable(f.e, step) && !isQuestion(step) && hasNext && !nextSurvey {
 			if advanceOf(step) == domain.AdvanceAuto {
 				autoRun++
 				auto = true
@@ -376,14 +385,20 @@ func (s *SchedulerService) flushBlock(ctx context.Context, tx *repositories.Repo
 			continue
 		}
 		step, ok := f.step(locked)
-		if ok && step.Required && sendable(f.e, step) {
-			missed = append(missed, locked)
-			texts = append(texts, stepText(step, f.e, s.now()))
-			continue
+		// Опрос в сводку не кладём (его заголовок — не сообщение): он пропущен, как необязательный.
+		if ok && step.Required && sendable(f.e, step) && !isSurvey(step) {
+			if t := strings.TrimSpace(stepText(step, f.e, s.now())); t != "" {
+				missed = append(missed, locked)
+				texts = append(texts, t)
+				continue
+			}
 		}
 		locked.Status, locked.Answer = domain.EventSkipped, strPtr(skipNoAnswer)
 		if ok && step.HRTask {
 			locked.Answer = strPtr(skipHRTask)
+		}
+		if ok && coveredByOnboarding(f.e, step) {
+			locked.Answer = strPtr(skipOnboarding)
 		}
 		if err := tx.Events.Save(ctx, locked); err != nil {
 			return 0, err
@@ -393,12 +408,23 @@ func (s *SchedulerService) flushBlock(ctx context.Context, tx *repositories.Repo
 	if len(missed) == 0 {
 		return 0, nil
 	}
-	text := textMissedHead + "\n\n" + strings.Join(texts, "\n\n— — —\n\n")
+	// Сводка — одним сообщением, если влезает в предел MAX; иначе частями (кнопка — на последней).
+	parts := missedParts(texts)
 	if test {
-		text = testPrefix + text
+		parts[0] = testPrefix + parts[0]
 	}
-	msg := recipientOf(f.e).msg(text, "", [][]max.Button{humanRow(nil)})
-	mid, err := s.max.Send(ctx, msg)
+	var mid string
+	var err error
+	for i, part := range parts {
+		var rows [][]max.Button
+		if i == len(parts)-1 {
+			rows = [][]max.Button{humanRow(nil)}
+		}
+		if mid, err = s.max.Send(ctx, recipientOf(f.e).msg(part, "", rows)); err != nil {
+			break
+		}
+	}
+	text := strings.Join(parts, "\n\n")
 	now := s.now()
 	for _, ev := range missed {
 		if err != nil {
@@ -444,8 +470,11 @@ func (s *SchedulerService) runEmployee(ctx context.Context, tx *repositories.Rep
 	for i, key := range keys {
 		o := runOpts{test: test, start: start, paused: paused}
 		for _, k := range keys[i+1:] {
+			// «пришло время следующего блока» — самый поздний из созревших: блоки с тем же
+			// fire_at, что и вопрос (D−3 и D−1 у выхода в понедельник — обе в пятницу), не
+			// должны заслонять те, что созрели после вопроса
 			t := first[k]
-			if o.later == nil || t.Before(*o.later) {
+			if o.later == nil || t.After(*o.later) {
 				o.later = &t
 			}
 			if d := blockDay(f, k); o.laterDay == nil || d > *o.laterDay {
@@ -765,4 +794,29 @@ func withContinue(m max.OutMessage, eventID uuid.UUID) max.OutMessage {
 	}
 	m.Buttons = append(append([][]max.Button{}, rows...), cont, humanRow(&eventID))
 	return m
+}
+
+// missedParts — «Что вы пропустили» частями не длиннее maxTextLen: реплики не режутся, пока
+// реплика сама не длиннее предела.
+func missedParts(texts []string) []string {
+	const sep = "\n\n— — —\n\n"
+	parts := []string{textMissedHead}
+	for _, t := range texts {
+		last := &parts[len(parts)-1]
+		joiner := sep
+		if *last == textMissedHead {
+			joiner = "\n\n"
+		}
+		if utf8.RuneCountInString(*last)+utf8.RuneCountInString(joiner+t) <= maxTextLen {
+			*last += joiner + t
+			continue
+		}
+		for utf8.RuneCountInString(t) > maxTextLen {
+			r := []rune(t)
+			parts = append(parts, string(r[:maxTextLen]))
+			t = string(r[maxTextLen:])
+		}
+		parts = append(parts, t)
+	}
+	return parts
 }

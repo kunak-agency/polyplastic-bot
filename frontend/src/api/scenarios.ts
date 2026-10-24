@@ -11,6 +11,8 @@ import type {
   ScenarioCreateRequest,
   ScenarioDetail,
   ScenarioStep,
+  RewriteVyRequest,
+  RewriteVyResponse,
 } from '@/types/api'
 
 export async function apiListScenarios(): Promise<ListResponse<Scenario>> {
@@ -110,5 +112,17 @@ export async function apiSendTest(
 // reminder); the answer is the scenario with steps.
 export async function apiPatchScenario(id: string, body: ScenarioPatch): Promise<ScenarioDetail> {
   const r = await http.patch<ScenarioDetail>(`/scenarios/${encodeURIComponent(id)}`, body)
+  return r.data
+}
+
+// "You" texts of the draft from the "ty" texts (LLM with code checks, rule
+// fallback). The model takes seconds per text, so the cabinet calls it one step
+// at a time; the server keeps each call under its 30 s write timeout.
+export async function apiRewriteVy(id: string, body: RewriteVyRequest): Promise<RewriteVyResponse> {
+  const r = await http.post<RewriteVyResponse>(
+    `/scenarios/${encodeURIComponent(id)}/rewrite-vy`,
+    body,
+    { timeout: 40_000 },
+  )
   return r.data
 }

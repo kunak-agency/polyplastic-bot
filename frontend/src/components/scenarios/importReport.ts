@@ -72,3 +72,22 @@ export function useImportReport(id: Ref<string>) {
   }
   return { report, clear }
 }
+
+// After rewrite-vy: the warnings the rewrite resolved leave the report. A step
+// warning goes by (step_id, code); allCopied also drops the scenario-wide
+// address_form_copied (it has no step) once every copied text was rewritten.
+export function dropImportWarnings(
+  id: string,
+  cleared: { step_id: string; code: string }[],
+  allCopied: boolean,
+): void {
+  const r = reports.value[id]
+  if (!r) return
+  const gone = new Set(cleared.map((c) => `${c.step_id}|${c.code}`))
+  const warnings = r.warnings.filter((w) => {
+    if (allCopied && w.code === 'address_form_copied' && !w.step_id) return false
+    return !gone.has(`${w.step_id ?? ''}|${w.code}`)
+  })
+  reports.value = { ...reports.value, [id]: { ...r, warnings } }
+  store()
+}

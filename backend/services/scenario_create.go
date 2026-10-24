@@ -158,5 +158,8 @@ func (s *ScenarioService) ImportExcelInto(ctx context.Context, id uuid.UUID, r i
 		return nil, err
 	}
 	d.Scenario.Rules, d.Scenario.Commands = imp.rules, imp.commands
+	if s.onImport != nil {
+		s.onImport(ctx, imp)
+	}
 	return &ImportResult{Detail: d, Report: imp.report}, nil
 }

@@ -126,6 +126,11 @@ func (s *TicketService) open(ctx context.Context, tx *repositories.Repos, e *dom
 	if err != nil {
 		return nil, false, err
 	}
+	// Открытое обращение той же категории, но другому адресату (вопрос HR после ввода r34, а
+	// новичок жмёт «Описать проблему» рекрутеру) — не дописываем: у рекрутера своё обращение.
+	if cur != nil && d.cat.Route != "" && cur.Route != "" && cur.Route != d.cat.Route {
+		cur = nil
+	}
 	if cur != nil {
 		if q := keepText(e, d.cat, d.quote); q != "" {
 			if err := tx.Tickets.AddMessage(ctx, &domain.TicketMessage{TicketID: cur.ID, From: domain.TicketMsgNewcomer, Text: q}); err != nil {

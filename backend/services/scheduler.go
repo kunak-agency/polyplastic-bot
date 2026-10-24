@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -119,7 +120,11 @@ func (s *SchedulerService) Tick(ctx context.Context) (int, error) {
 		return n, err
 	}
 	r, err := s.remindNoAnswer(ctx)
-	return n + r, err
+	if err != nil {
+		return n + r, err
+	}
+	sv, err := s.remindSurveys(ctx) // правило сценария r70 (scenario_rules_exec.go)
+	return n + r + sv, err
 }
 
 // DispatchEmployee — созревшие события одного новичка сразу, не дожидаясь такта (после
@@ -143,6 +148,30 @@ func (s *SchedulerService) dispatch(ctx context.Context, f repositories.DueFilte
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if f.EmployeeID == nil {
+		// такт — по новичку в своей транзакции: молчащий новичок с очередью за вопросом не
+		// съедает лимит выборки остальных, сбой одного не откатывает отправки другим
+		ids, err := s.repos.Events.DueEmployees(ctx, f)
+		if err != nil {
+			return 0, err
+		}
+		sent := 0
+		for _, id := range ids {
+			one := f
+			one.EmployeeID = &id
+			n, err := s.dispatchLocked(ctx, one, test)
+			sent += n
+			if err != nil {
+				return sent, err
+			}
+		}
+		return sent, nil
+	}
+	return s.dispatchLocked(ctx, f, test)
+}
+
+// dispatchLocked — dispatch под s.mu.
+func (s *SchedulerService) dispatchLocked(ctx context.Context, f repositories.DueFilter, test bool) (int, error) {
 	start := s.now()
 	sent := 0
 	err := s.repos.Transaction(ctx, func(tx *repositories.Repos) error {
@@ -189,6 +218,9 @@ func (s *SchedulerService) sendEvent(ctx context.Context, tx *repositories.Repos
 	case step.HRTask:
 		ev.Status, ev.Answer = domain.EventSkipped, strPtr(skipHRTask)
 		return false, tx.Events.Save(ctx, ev)
+	case coveredByOnboarding(e, step):
+		ev.Status, ev.Answer = domain.EventSkipped, strPtr(skipOnboarding)
+		return false, tx.Events.Save(ctx, ev)
 	case step.FlagRequired != nil && *step.FlagRequired != "" && !flagOn(e, *step.FlagRequired):
 		ev.Status, ev.Answer = domain.EventHeld, strPtr("ждёт отмашки: флаг "+*step.FlagRequired)
 		return false, tx.Events.Save(ctx, ev)
@@ -228,6 +260,10 @@ func (s *SchedulerService) sendEvent(ctx context.Context, tx *repositories.Repos
 		msg.Attachments = groups[len(groups)-1]
 	}
 
+	if emptyMessage(msg) {
+		logger.Warn("планировщик: шаг события %s без текста и без вложений — запасной текст", ev.ID)
+		msg.Text = strings.TrimSuffix(msg.Text, " ") + byForm(e, textMaterialSoonTy, textMaterialSoonVy)
+	}
 	mid, err := s.max.Send(ctx, msg)
 	if err != nil && len(msg.Attachments) > 0 && s.media != nil {
 		// MAX мог отказать по протухшему токену: забыть токены, загрузить заново, один повтор

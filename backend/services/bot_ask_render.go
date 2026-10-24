@@ -328,6 +328,9 @@ func baseText(e *domain.Employee, q *domain.BotQuestion) (string, string) {
 	case domain.QuestionAnswer:
 		return answerText(q, q.Expanded), formatMarkdown
 	case domain.QuestionAbstain:
+		if q.Answer != "" { // текст правила сценария r69
+			return q.Answer, ""
+		}
 		return abstainBase(e, q.Attempt), ""
 	case domain.QuestionRouted:
 		if q.Topic == "security" {
@@ -335,6 +338,9 @@ func baseText(e *domain.Employee, q *domain.BotQuestion) (string, string) {
 		}
 		return textRouted, formatMarkdown
 	case domain.QuestionError:
+		if q.Answer != "" {
+			return q.Answer, ""
+		}
 		return textRAGDown, ""
 	case domain.QuestionFlag:
 		text := flagText(e, q.Flags)

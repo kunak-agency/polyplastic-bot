@@ -34,6 +34,16 @@ func (r *EventRepo) AwaitingAnswer(ctx context.Context, before time.Time, limit 
 	return out, err
 }
 
+// OpenSurveys — отправленные и не законченные опросы, ушедшие не позже before (правило r70 —
+// напоминание об опросе).
+func (r *EventRepo) OpenSurveys(ctx context.Context, before time.Time, limit int) ([]domain.ScheduledEvent, error) {
+	var out []domain.ScheduledEvent
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND kind = ? AND sent_at IS NOT NULL AND sent_at <= ?", domain.EventSent, domain.KindSurvey, before).
+		Order("sent_at").Limit(limit).Find(&out).Error
+	return out, err
+}
+
 // MinVersion — наименьший номер версии событий (сотрудник, шаг): «Отправить себе» пишет
 // события с отрицательными номерами, чтобы не задеть уникальный индекс настоящих версий.
 func (r *EventRepo) MinVersion(ctx context.Context, employeeID, stepID uuid.UUID) (int, error) {

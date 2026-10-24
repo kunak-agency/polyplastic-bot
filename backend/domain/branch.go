@@ -22,6 +22,12 @@ const (
 	WaitInput    = "input"     // шаг kind=input: текст и/или фото новичка → карточка и HR
 )
 
+// ConditionAddressUnset — ScenarioStep.Condition: шаг уходит, только если форма обращения ещё
+// не выбрана. Встроенное знакомство (bot_started → «на ты / на вы» → согласие) спрашивает её
+// раньше любого шага, поэтому вопрос ТЗ «Как мы будем общаться?» (r5/r6) и реакция на него (r7)
+// пропускаются: новичок видит выбор формы один раз.
+const ConditionAddressUnset = "address_form_unset"
+
 // Значения ScenarioStep.Advance.
 const (
 	AdvanceButton = "button"

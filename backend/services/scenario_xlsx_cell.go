@@ -13,8 +13,10 @@ import (
 // Разбор ячейки «Текст сообщения» Excel-ТЗ (вердикт §1): внутри прозой записаны варианты
 // ответов, ветки «Если ответ X: …», опросы, вложения, гиперссылки и альтернативы текста.
 
-// maxImportLabel — видимая длина подписи кнопки в MAX; длиннее — обрезаем с label_truncated.
-const maxImportLabel = 18
+// labelLongRunes — подпись кнопки длиннее — предупреждение label_long (жёлтое, публикацию не
+// блокирует). Лимита на длину подписи у MAX нет (до 7 кнопок в ряд, до 30 рядов): длинную
+// подпись клиент сам обрезает на экране, поэтому импорт сохраняет подпись ТЗ целиком.
+const labelLongRunes = 24
 
 // Подписи терминальных кнопок пары «передать через Корсика / связаться с рекрутером».
 const (
@@ -23,11 +25,37 @@ const (
 	labelChatHR        = "Чат с HR"
 )
 
-// Коды действий терминальных кнопок (у терминальной кнопки нет своей ветки — действие в Action).
-const (
-	actionEscalatePrefix = "escalate:" // + route; кнопка с opens_free_text: бот ждёт текст → обращение
-	actionHandoffPrefix  = "handoff:"  // + recruiter|hr|security: связаться с человеком
-)
+// escalateButton — «передать через Корсика»: бот ждёт текст новичка → обращение по route.
+// Каноническая форма, как пишет редактор: действие в branch.actions + opens_free_text. Старую
+// строковую форму action «escalate:<route>» бот тоже понимает (branch.go, actionOf).
+func escalateButton(label, route string) domain.StepButton {
+	return domain.StepButton{Label: label, OpensFreeText: true, Branch: &domain.Branch{
+		Messages: []domain.BranchMessage{}, Then: domain.ThenContinue,
+		Actions: []domain.Action{{Type: domain.ActionEscalate, Route: route}},
+	}}
+}
+
+// handoffButton — «связаться с рекрутером / HR»: обращение-переписка через бота.
+func handoffButton(label, to string) domain.StepButton {
+	return domain.StepButton{Label: label, Branch: &domain.Branch{
+		Messages: []domain.BranchMessage{}, Then: domain.ThenContinue,
+		Actions: []domain.Action{{Type: domain.ActionHandoff, To: to}},
+	}}
+}
+
+// longLabelWarn — label_long для подписей длиннее labelLongRunes.
+func longLabelWarn(labels ...string) *cellWarn {
+	var long []string
+	for _, l := range labels {
+		if utf8.RuneCountInString(l) > labelLongRunes {
+			long = append(long, "«"+l+"»")
+		}
+	}
+	if len(long) == 0 {
+		return nil
+	}
+	return &cellWarn{"label_long", fmt.Sprintf("Подписи кнопок длиннее %d символов: %s — в чате MAX они видны, на узком экране клиент их обрежет; сократите в редакторе, если нужно", labelLongRunes, strings.Join(long, ", "))}
+}
 
 type cellWarn struct{ code, msg string }
 
@@ -107,23 +135,6 @@ func addressForm(s string) string {
 		return "vy"
 	}
 	return ""
-}
-
-// shortLabel — подпись не длиннее maxImportLabel: по границе слова с «…».
-func shortLabel(s string) (string, bool) {
-	s = strings.TrimSpace(s)
-	if utf8.RuneCountInString(s) <= maxImportLabel {
-		return s, false
-	}
-	r := []rune(s)[:maxImportLabel-1]
-	for i := len(r) - 1; i > maxImportLabel/2; i-- {
-		if r[i] == ' ' || r[i] == ',' {
-			r = r[:i]
-			break
-		}
-	}
-	cut := string(r)
-	return strings.TrimRight(cut, " ,.!:;—-") + "…", true
 }
 
 func splitLines(s string) []string {
@@ -207,7 +218,7 @@ func parseCell(raw string) parsedCell {
 			}
 			other = true
 		}
-		// Полная подпись: кнопки шага сокращаются при сборке (label_truncated), варианты опроса — нет.
+		// Подпись ТЗ целиком: длинная — предупреждение label_long при сборке шага.
 		pc.options = append(pc.options, cellOption{label: label, other: other})
 	}
 	pc.parseBranches(rest)
@@ -600,16 +611,10 @@ func parseBranchBody(body []string) (*domain.Branch, bool, []cellWarn) {
 				if strings.Contains(strings.ToLower(m[1]), "hr") {
 					to = "hr"
 				}
-				if utf8.RuneCountInString(label) > maxImportLabel {
-					// Кнопка «к человеку» с длинной подписью — стандартная короткая подпись.
-					short := labelChatRecruiter
-					if to == "hr" {
-						short = labelChatHR
-					}
-					warns = append(warns, cellWarn{"label_truncated", fmt.Sprintf("Подпись кнопки «%s» длиннее %d символов — заменена на «%s»", m[1], maxImportLabel, short)})
-					label = short
+				if w := longLabelWarn(label); w != nil {
+					warns = append(warns, *w)
 				}
-				buttons = append(buttons, domain.StepButton{Label: label, Action: actionHandoffPrefix + to})
+				buttons = append(buttons, handoffButton(label, to))
 			}
 		default:
 			text = append(text, reGoNext.ReplaceAllString(l, ""))
@@ -644,13 +649,13 @@ func escalationButtons(line string) []domain.StepButton {
 		if strings.Contains(lo, " в hr") {
 			route = "hr"
 		}
-		out = append(out, domain.StepButton{Label: labelEscalate, Action: actionEscalatePrefix + route, OpensFreeText: true})
+		out = append(out, escalateButton(labelEscalate, route))
 	}
 	switch {
 	case strings.Contains(lo, "связаться с рекрутером"):
-		out = append(out, domain.StepButton{Label: labelChatRecruiter, Action: actionHandoffPrefix + "recruiter"})
+		out = append(out, handoffButton(labelChatRecruiter, "recruiter"))
 	case strings.Contains(lo, "связаться с hr"):
-		out = append(out, domain.StepButton{Label: labelChatHR, Action: actionHandoffPrefix + "hr"})
+		out = append(out, handoffButton(labelChatHR, "hr"))
 	}
 	return out
 }

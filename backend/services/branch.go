@@ -112,13 +112,16 @@ func actionOf(action string) (domain.Action, bool) {
 
 // withButtonAction — действия ветки + действие из action кнопки; «escalate» с opens_free_text —
 // обращение после текста (open_free_text).
+// Каноническая форма (escalate в branch.actions + opens_free_text) — так же.
 func withButtonAction(acts []domain.Action, b domain.StepButton) []domain.Action {
-	a, ok := actionOf(b.Action)
-	if !ok {
+	out := append([]domain.Action{}, acts...)
+	if a, ok := actionOf(b.Action); ok {
+		out = append(out, a)
+	}
+	if len(out) == 0 {
 		return acts
 	}
-	out := append(append([]domain.Action{}, acts...), a)
-	if a.Type == domain.ActionEscalate && b.OpensFreeText {
+	if _, esc := hasAction(out, domain.ActionEscalate); esc && b.OpensFreeText {
 		if _, has := hasAction(out, domain.ActionOpenFreeText); !has {
 			out = append(out, domain.Action{Type: domain.ActionOpenFreeText})
 		}
@@ -450,8 +453,7 @@ func branchText(m domain.BranchMessage, e *domain.Employee, ev *domain.Scheduled
 
 // branchMessage — сообщение ветки: текст, вложения, терминальные кнопки и «Спросить человека».
 func (b *BotService) branchMessage(ctx context.Context, e *domain.Employee, ev *domain.ScheduledEvent, src string, mi int, m domain.BranchMessage) max.OutMessage {
-	var rows [][]max.Button
-	var row []max.Button
+	var btns []max.Button
 	for j, tb := range m.Buttons {
 		if tb.Action == "human" {
 			continue
@@ -460,21 +462,32 @@ func (b *BotService) branchMessage(ctx context.Context, e *domain.Employee, ev *
 		if u := buttonURL(tb.Action); u != "" {
 			btn = max.Button{Text: tb.Label, URL: u}
 		}
-		row = append(row, btn)
-		if len(row) == 2 {
-			rows, row = append(rows, row), nil
-		}
+		btns = append(btns, btn)
 	}
-	if row != nil {
-		rows = append(rows, row)
-	}
+	rows := packRows(btns)
 	if len(m.Buttons) > 0 {
 		id := ev.ID
 		rows = append(rows, humanRow(&id))
 	}
 	msg := recipientOf(e).msg(branchText(m, e, ev), "", rows)
 	msg.Attachments = b.attach(ctx, e, m.Media)
+	if emptyMessage(msg) {
+		logger.Warn("бот: реплика ветки «%s» без текста и без вложений (файла нет в медиатеке) — новичку %s запасной текст", src, e.ID)
+		msg.Text = strings.TrimSuffix(msg.Text, " ") + byForm(e, textMaterialSoonTy, textMaterialSoonVy)
+	}
 	return msg
+}
+
+// Запасной текст реплики, у которой нет ни текста, ни найденного вложения (заготовка ветки
+// «да» вопроса без вариантов, а материал HR ещё не загрузил): пустое сообщение не уходит.
+const (
+	textMaterialSoonVy = "Материал скоро добавим. А пока можно спросить меня или HR."
+	textMaterialSoonTy = "Материал скоро добавим. А пока можешь спросить меня или HR."
+)
+
+// emptyMessage — в сообщении нет ни текста (кроме пометки [ТЕСТ]), ни вложений.
+func emptyMessage(m max.OutMessage) bool {
+	return len(m.Attachments) == 0 && strings.TrimSpace(strings.TrimPrefix(m.Text, testPrefix)) == ""
 }
 
 // runPlan — после транзакции нажатия: сообщения ветки, видимые действия, then.

@@ -260,6 +260,12 @@ func (b *BotService) ask(ctx context.Context, to recipient, emp *domain.Employee
 	if resp != nil {
 		q.Confidence, q.Topic, q.AbstainReason = resp.Confidence, resp.Topic, resp.Reason()
 	}
+	if ruleRefusal(q.Kind) {
+		// правило сценария r69: отказ — текстом правила (он же в правке после нажатия)
+		if rule := scenarioRule(ctx, b.repos, emp, domain.RuleFreeQuestion); rule != nil {
+			q.Answer = byForm(emp, rule.TextTy, rule.TextVy)
+		}
+	}
 	err = b.repos.Transaction(ctx, func(tx *repositories.Repos) error {
 		if q.Kind == domain.QuestionAbstain {
 			kinds, err := tx.Questions.RecentKinds(ctx, emp.ID, b.now().Add(-abstainWindow), 2)
@@ -363,7 +369,14 @@ func (b *BotService) typing(ctx context.Context, chatID int64) (stop func()) {
 
 // sendQuestion — первое сообщение по записи; mid — в запись (для правок и разбора).
 func (b *BotService) sendQuestion(ctx context.Context, to recipient, emp *domain.Employee, q *domain.BotQuestion) {
-	mid, err := b.max.Send(ctx, questionMessage(to, emp, q))
+	msg := questionMessage(to, emp, q)
+	if ruleRefusal(q.Kind) && q.Answer != "" {
+		if rule := scenarioRule(ctx, b.repos, emp, domain.RuleFreeQuestion); rule != nil {
+			msg = ruleRefusalMessage(to, emp, q, rule)
+			msg.Attachments = b.attach(ctx, emp, rule.Media)
+		}
+	}
+	mid, err := b.max.Send(ctx, msg)
 	if err != nil {
 		logger.Warn("бот: ответ на вопрос %s не ушёл: %v", q.ID, err)
 		return
@@ -476,7 +489,7 @@ func (b *BotService) flagDetails(ctx context.Context, u max.Update, emp *domain.
 
 // isQuestionPayload — payload кнопок свободного вопроса.
 func isQuestionPayload(p string) bool {
-	for _, pre := range []string{preQMore, preQHelpful, preQNotThat, preQAlt, preQHR, preQRecruiter, preQRephrase, preQNoNeed, preFlagSend, preFlagWrite} {
+	for _, pre := range []string{preQMore, preQHelpful, preQNotThat, preQAlt, preQHR, preQRecruiter, preQChat, preQRephrase, preQNoNeed, preFlagSend, preFlagWrite} {
 		if strings.HasPrefix(p, pre) {
 			return true
 		}
@@ -567,7 +580,7 @@ func (b *BotService) questionCallback(ctx context.Context, u max.Update, emp *do
 			}
 			m := altMessage(to, q, srcs[i])
 			out.send, out.notification = &m, "Другой пункт"
-		case preQHR, preQRecruiter, preFlagSend:
+		case preQHR, preQRecruiter, preQChat, preFlagSend:
 			if q.HumanAt != nil {
 				out.notification = textHandedAlready
 				return nil
@@ -575,7 +588,7 @@ func (b *BotService) questionCallback(ctx context.Context, u max.Update, emp *do
 			target, line := domain.TargetHR, textHandedHR
 			cat := taxonomy.Question(taxonomy.RouteHR)
 			switch {
-			case prefix == preQRecruiter:
+			case prefix == preQRecruiter || (prefix == preQChat && idxRaw != taxonomy.RouteHR):
 				target, line = domain.TargetRecruiter, textHandedRecruiter
 				cat = taxonomy.Question(taxonomy.RouteRecruiter)
 			case prefix == preFlagSend || q.Kind == domain.QuestionFlag:
@@ -594,6 +607,12 @@ func (b *BotService) questionCallback(ctx context.Context, u max.Update, emp *do
 			t, created, err := b.tickets.open(ctx, tx, emp, d)
 			if err != nil {
 				return err
+			}
+			if prefix == preQChat && created { // «связаться с рекрутером» (r69) — сразу переписка
+				t.Status = domain.TicketHumanActive
+				if err := tx.Tickets.Save(ctx, t); err != nil {
+					return err
+				}
 			}
 			q.TicketID, q.TicketNumber = &t.ID, t.Number
 			out.handoff = &handoffResult{ticket: t, created: created}

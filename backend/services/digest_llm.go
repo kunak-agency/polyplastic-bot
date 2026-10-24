@@ -91,9 +91,17 @@ type llmMessage struct {
 }
 
 // openAILLM — vLLM на поде (OpenAI-совместимый /chat/completions), structured outputs.
+// Схема и параметры запроса — свои у каждого промпта: дайджест (newDigestLLM) и переписывание
+// обращения (newAddressLLM, address_form.go).
 type openAILLM struct {
-	cfg  config.LLM
-	http *http.Client
+	cfg             config.LLM
+	http            *http.Client
+	schemaName      string
+	schemaJSON      string
+	temperature     float64
+	presencePenalty float64
+	// maxTokens — потолок ответа по сообщениям запроса.
+	maxTokens func(messages []llmMessage) int
 }
 
 // newDigestLLM — nil, если LLM_BASE_URL не задан: дайджест собирается шаблоном.
@@ -101,22 +109,25 @@ func newDigestLLM(cfg config.LLM) DigestLLM {
 	if strings.TrimSpace(cfg.BaseURL) == "" {
 		return nil
 	}
-	return &openAILLM{cfg: cfg, http: &http.Client{Timeout: digestLLMTimeout}}
+	return &openAILLM{cfg: cfg, http: &http.Client{Timeout: digestLLMTimeout},
+		schemaName: "digest_text", schemaJSON: digestSchemaJSON,
+		temperature: 0.2, presencePenalty: cfg.PresencePenalty, // digest.md G: передавать явно
+		maxTokens: func([]llmMessage) int { return 450 }}
 }
 
 func (c *openAILLM) Complete(ctx context.Context, messages []llmMessage) (string, error) {
 	var schema any
-	_ = json.Unmarshal([]byte(digestSchemaJSON), &schema)
+	_ = json.Unmarshal([]byte(c.schemaJSON), &schema)
 	body := map[string]any{
 		"model":            c.cfg.Model,
 		"messages":         messages,
-		"temperature":      0.2, // digest.md G: передавать явно
-		"presence_penalty": c.cfg.PresencePenalty,
+		"temperature":      c.temperature,
+		"presence_penalty": c.presencePenalty,
 		"top_p":            0.8,
-		"max_tokens":       450,
+		"max_tokens":       c.maxTokens(messages),
 		"response_format": map[string]any{
 			"type":        "json_schema",
-			"json_schema": map[string]any{"name": "digest_text", "schema": schema},
+			"json_schema": map[string]any{"name": c.schemaName, "schema": schema},
 		},
 	}
 	b, _ := json.Marshal(body)

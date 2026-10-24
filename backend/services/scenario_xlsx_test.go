@@ -28,7 +28,7 @@ func syntheticTZRows() []tzRow {
 		{"Синтетическое ТЗ бота адаптации"},
 		{"№ п/п", "Месяц/день/время информирования", "Информационный повод", "Тег сотрудника", "Форма/Макет", "Текст сообщения", "Обязательный этап", "", "Сопроводительное изображение"},
 		// 3: заглушка
-		{"0", d3, "", "", "", "Описание бота...", "Да", "", "Картинка 1"},
+		{"0", d3, "", "", "", "Что умеет этот бот...", "Да", "", "Картинка 1"},
 		// 4: вступление на «вы»
 		{"0", d3, "", "", "", "Здравствуйте! Я ваш помощник Вася.", "Да", "", "Картинка 2"},
 		// 5–6: вопрос и варианты отдельной строкой
@@ -206,8 +206,9 @@ func TestImportTZReport(t *testing.T) {
 	if rep.Surveys != 5 || rep.ImplicitYesNo != 2 || rep.HRTasks != 1 || rep.Outcomes != 4 {
 		t.Errorf("опросов %d, да/нет %d, HR %d, outcomes %d", rep.Surveys, rep.ImplicitYesNo, rep.HRTasks, rep.Outcomes)
 	}
-	// Медиа: 14 картинок + 2 открытки + ФОТО + 2 заглушки «Материал: …»; личный план не в медиатеке.
-	if rep.MediaNames != 19 || len(rep.MediaNameList) != 19 {
+	// Медиа: 14 картинок + 2 открытки + ФОТО + 2 заглушки «Материал: …» + PDF обеда; личный план
+	// не в медиатеке.
+	if rep.MediaNames != 20 || len(rep.MediaNameList) != 20 {
 		t.Errorf("медиа-имён %d: %v", rep.MediaNames, rep.MediaNameList)
 	}
 	codes := warnCodes(rep)
@@ -215,14 +216,14 @@ func TestImportTZReport(t *testing.T) {
 		warnNoText: 1, warnOptionsMerged: 1, warnAltText: 1, warnColsShifted: 1, warnCredentials: 1,
 		warnHRTask: 1, warnNonHTTPS: 1, warnRecruiter: 2, warnPhotoUnnamed: 1, warnTimeOrder: 1,
 		warnOutcomes: 1, warnImplicitYesNo: 2, warnNoContent: 2, "link_in_text": 1, warnAddressForm: 1,
-		warnWhenApprox: 3,
+		warnWhenApprox: 3, warnOnboarding: 1, warnFromHelp: 1, warnStartDay: 2, "label_long": 1,
 	} {
 		if codes[code] != n {
 			t.Errorf("предупреждений %s: %d, ждём %d", code, codes[code], n)
 		}
 	}
-	if codes[warnGendered] == 0 || codes[warnMixedForm] == 0 || codes["label_truncated"] == 0 {
-		t.Errorf("нет gendered/mixed/label_truncated: %v", codes)
+	if codes[warnGendered] == 0 || codes[warnMixedForm] == 0 || codes["label_truncated"] != 0 {
+		t.Errorf("нет gendered/mixed или есть label_truncated: %v", codes)
 	}
 	for _, w := range rep.Warnings {
 		if w.Row < 3 || w.Message == "" {
@@ -287,6 +288,15 @@ func TestImportTZButtonsAndBranches(t *testing.T) {
 	steps, _, cmds, _ := parseFixture(t)
 	// Варианты отдельной строкой → кнопки предыдущего сообщения, set_field address_form.
 	ask := stepByText(t, steps, "Как к тебе обращаться")
+	// Форму спрашивает встроенное знакомство — шаг уйдёт, только если она не выбрана.
+	if ask.Condition == nil || *ask.Condition != domain.ConditionAddressUnset {
+		t.Errorf("условие вопроса о форме: %v", ask.Condition)
+	}
+	// Заглушка «Что умеет этот бот…» — текст /help и команды сценария на «ты» и «вы».
+	help := stepByText(t, steps, "Я Корсик — помощник")
+	if !strings.Contains(help.TextVy, "Спросите") || !strings.Contains(help.TextTy, "Спроси ") || !strings.Contains(help.TextTy, "/food") {
+		t.Errorf("заглушка → /help: %q / %q", help.TextTy, help.TextVy)
+	}
 	if len(ask.Buttons) != 2 || ask.Buttons[0].Branch == nil || ask.Buttons[0].Branch.Actions[0].Type != domain.ActionSetField ||
 		ask.Buttons[1].Branch.Actions[0].Value != "vy" {
 		t.Fatalf("ты/вы: %+v", ask.Buttons)
@@ -300,28 +310,35 @@ func TestImportTZButtonsAndBranches(t *testing.T) {
 	if strings.Contains(ready.TextTy, "Если") || strings.Contains(ready.TextTy, "Варианты") {
 		t.Errorf("ветки остались в тексте: %q", ready.TextTy)
 	}
-	tail := stepByText(t, steps, "Завтра всё покажу")
+	tail := stepByText(t, steps, "всё покажу")
 	if tail.DayOffset != ready.DayOffset || tail.Key <= ready.Key || len(tail.Buttons) != 0 {
 		t.Errorf("хвост: %+v", tail)
 	}
-	if !strings.Contains(ready.Buttons[0].Label, "…") || len([]rune(ready.Buttons[0].Label)) > maxImportLabel {
-		t.Errorf("подпись не сокращена: %q", ready.Buttons[0].Label)
+	// Подписи ТЗ не сокращаются (лимита у MAX нет).
+	if ready.Buttons[0].Label != "Да, жду с нетерпением!" {
+		t.Errorf("подпись сокращена: %q", ready.Buttons[0].Label)
 	}
-	// Ветка строками по тегам → send_file per_tag и текст ветки; /food — тот же файл.
+	// «Завтра» в D−1 → {Start_day}: при выходе в понедельник шаг уходит в пятницу.
+	if !strings.Contains(ready.TextTy, "{Start_day} первый день") {
+		t.Errorf("завтра → {Start_day}: %q", ready.TextTy)
+	}
+	// Ветка строками по тегам: «#Приложить пдф-ку» → send_file PDF per_tag, картинка колонки I —
+	// к реплике ветки; /food — тот же PDF и текст по умолчанию.
 	lunch := stepByText(t, steps, "Подсказать, где обедать")
 	yes := lunch.Buttons[0].Branch
 	if yes == nil || len(yes.Actions) != 1 || yes.Actions[0].Type != domain.ActionSendFile || !yes.Actions[0].PerTag ||
-		yes.Actions[0].Media != "Картинка 6" || yes.Messages[0].TextTy != "Приятного аппетита!" || lunch.Buttons[0].Action != "" {
+		yes.Actions[0].Media != "PDF — с кафе" || yes.Messages[0].TextTy != "Приятного аппетита!" || lunch.Buttons[0].Action != "" ||
+		len(yes.Messages[0].Media) != 1 || yes.Messages[0].Media[0].Name != "Картинка 6" {
 		t.Fatalf("ветка «Да» строками: %+v", yes)
 	}
 	cmd := map[string]domain.Command{}
 	for _, c := range cmds {
 		cmd[c.Name] = c
 	}
-	if c := cmd["/food"]; len(c.Actions) != 1 || c.Actions[0].Media != "Картинка 6" {
+	if c := cmd["/food"]; len(c.Actions) != 1 || c.Actions[0].Media != "PDF — с кафе" || c.TextTy == "" || c.TextVy == "" {
 		t.Errorf("/food: %+v", c)
 	}
-	if c := cmd["/hr"]; len(c.Actions) != 1 || c.Actions[0].Type != domain.ActionHandoff || c.Actions[0].To != "hr" {
+	if c := cmd["/hr"]; len(c.Actions) != 1 || c.Actions[0].Type != domain.ActionHandoff || c.Actions[0].To != "hr" || c.TextVy == "" {
 		t.Errorf("/hr: %+v", c)
 	}
 	// Варианты без заголовка + пара эскалации после веток.
@@ -329,14 +346,18 @@ func TestImportTZButtonsAndBranches(t *testing.T) {
 	if len(plan.Buttons) != 3 || plan.Buttons[2].Branch == nil || len(plan.Buttons[2].Branch.Messages[0].Buttons) != 2 {
 		t.Fatalf("план: %+v", plan.Buttons)
 	}
+	// Каноническая форма, как пишет редактор: действие в branch.actions.
 	pair := plan.Buttons[2].Branch.Messages[0].Buttons
-	if !pair[0].OpensFreeText || pair[0].Action != "escalate:recruiter" || pair[1].Action != "handoff:recruiter" {
+	if !pair[0].OpensFreeText || pair[0].Action != "" || pair[0].Branch == nil || pair[0].Branch.Actions[0].Type != domain.ActionEscalate ||
+		pair[0].Branch.Actions[0].Route != "recruiter" || pair[1].Branch == nil || pair[1].Branch.Actions[0].Type != domain.ActionHandoff ||
+		pair[1].Branch.Actions[0].To != "recruiter" {
 		t.Errorf("пара эскалации: %+v", pair)
 	}
 	// Вопрос без вариантов → «Да, расскажи / Нет, спасибо» с заглушкой материала.
 	bus := stepByText(t, steps, "Рассказать о маршруте")
 	if len(bus.Buttons) != 2 || bus.Buttons[0].Label != labelImplicitYes || bus.Buttons[0].Branch == nil ||
-		!strings.HasPrefix(bus.Buttons[0].Branch.Messages[0].Media[0].Name, "Материал:") {
+		!strings.HasPrefix(bus.Buttons[0].Branch.Messages[0].Media[0].Name, "Материал:") ||
+		bus.Buttons[0].Branch.Messages[0].TextVy != textMaterialSoonVy {
 		t.Errorf("неявный да/нет: %+v", bus.Buttons)
 	}
 	// Перед опросом вопрос не превращается в да/нет.
@@ -362,14 +383,15 @@ func TestImportTZSurveys(t *testing.T) {
 	if q1.Text != "Как прошло оформление?" || q1.Branches["1"] != nil || q1.Branches["2"] == nil || q1.Branches["3"] == nil {
 		t.Fatalf("ветки вопроса 1: %+v", q1.Branches)
 	}
-	if b := q1.Branches["2"].Messages[0]; b.TextTy != "Понял!" || len(b.Buttons) != 1 || b.Buttons[0].Action != "handoff:recruiter" {
+	if b := q1.Branches["2"].Messages[0]; b.TextTy != "Понял!" || len(b.Buttons) != 1 || b.Buttons[0].Label != "Связаться с рекрутером" ||
+		b.Buttons[0].Branch == nil || b.Buttons[0].Branch.Actions[0].Type != domain.ActionHandoff || b.Buttons[0].Branch.Actions[0].To != "recruiter" {
 		t.Errorf("ветка Б: %+v", b)
 	}
 	if f := q1.OptionFlags["3"]; f.Code != "F2" {
 		t.Errorf("флаг «трудности с документами»: %+v", q1.OptionFlags)
 	}
 	q2 := sv.Questions[1]
-	if b := q2.Branches["3"].Messages[0].Buttons; len(b) != 2 || b[0].Action != "escalate:hr" || b[1].Action != "handoff:hr" {
+	if b := q2.Branches["3"].Messages[0].Buttons; len(b) != 2 || b[0].Branch.Actions[0].Route != "hr" || !b[0].OpensFreeText || b[1].Branch.Actions[0].To != "hr" {
 		t.Errorf("маршрут HR: %+v", b)
 	}
 	if q2.OptionFlags["3"].Code != "F4" || sv.Questions[2].OptionFlags["3"].Code != "F1" {
@@ -429,7 +451,7 @@ func TestImportTZSurveys(t *testing.T) {
 	}
 	b2 := fq[1].Branches["2"]
 	if b2 == nil || len(b2.Actions) != 1 || b2.Actions[0].Type != domain.ActionOpenFreeText ||
-		b2.Messages[0].Buttons[0].Label != labelChatRecruiter || fq[1].Branches["1"].Messages[0].TextTy != "Ура!" {
+		b2.Messages[0].Buttons[0].Label != "Готов рассказать причину лично рекрутеру" || fq[1].Branches["1"].Messages[0].TextTy != "Ура!" {
 		t.Errorf("ветки вопроса 2: %+v", fq[1].Branches)
 	}
 	if fq[1].OptionFlags["2"].Code != "F7" || fq[1].OptionFlags["3"].Severity != "high" {
@@ -459,7 +481,7 @@ func TestImportTZRowsAndText(t *testing.T) {
 	}
 	// Письмо HR.
 	hr := stepByText(t, steps, "Рады видеть")
-	if !hr.HRTask || hr.Kind != domain.KindTask || strings.Contains(hr.TextTy, "отправить") || len(hr.Buttons) != 0 {
+	if !hr.HRTask || hr.Kind != domain.KindText || strings.Contains(hr.TextTy, "отправить") || len(hr.Buttons) != 0 {
 		t.Errorf("письмо HR: %+v", hr)
 	}
 	// Офис в «когда» и в поводе, продолжение блока наследует условие; флаг и личный файл.

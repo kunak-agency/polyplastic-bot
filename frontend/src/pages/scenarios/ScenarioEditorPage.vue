@@ -531,8 +531,11 @@ async function onPublish(body: PublishRequest): Promise<void> {
         v-if="importReport"
         :report="importReport"
         :steps="steps"
+        :scenario-id="id"
+        :dirty="dirty"
         @open="selectedId = $event"
         @close="clearImportReport"
+        @rewritten="adopt"
       />
 
       <ScenarioRules

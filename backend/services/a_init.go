@@ -30,6 +30,8 @@ type Services struct {
 	// digestOpts — получатели дайджеста, ссылка на кабинет, LLM (digest.go, manager.go).
 	digestOpts DigestOptions
 	botCfg     config.Bot
+	// rewriteLLM — подмена модели переписывания обращения (тесты); nil — по digestOpts.LLM.
+	rewriteLLM RewriteLLM
 }
 
 // Options — настройки слоя.

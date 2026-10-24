@@ -34,6 +34,7 @@ type Repos struct {
 	Tickets   *TicketRepo
 	Documents *DocumentRepo
 	Media     *MediaRepo
+	Rewrites  *TextRewriteRepo
 }
 
 // newRepos — репозитории поверх db (база или транзакция).
@@ -48,6 +49,7 @@ func newRepos(db *gorm.DB) *Repos {
 		Tickets:   &TicketRepo{db: db},
 		Documents: &DocumentRepo{db: db},
 		Media:     &MediaRepo{db: db},
+		Rewrites:  &TextRewriteRepo{db: db},
 	}
 }
 
@@ -67,7 +69,7 @@ func (r *Repos) Truncate(ctx context.Context) error {
 	}
 	if err := r.db.WithContext(ctx).Exec(`TRUNCATE employees, invite_tokens, human_requests, scenarios,
 		scenario_versions, scenario_steps, scheduled_events, survey_answers, marker_states, bot_questions,
-		tickets, ticket_messages, bot_chats`).Error; err != nil {
+		tickets, ticket_messages, bot_chats, text_rewrites`).Error; err != nil {
 		return err
 	}
 	return r.restartTicketSeq(ctx)

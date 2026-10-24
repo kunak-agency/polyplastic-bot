@@ -56,6 +56,18 @@ func (r *ScenarioRepo) ReplaceSteps(ctx context.Context, scenarioID uuid.UUID, s
 	return db.Create(&steps).Error
 }
 
+// SaveStep — записать один шаг черновика целиком (переписывание текстов, rewrite-vy).
+func (r *ScenarioRepo) SaveStep(ctx context.Context, st *domain.ScenarioStep) error {
+	return r.db.WithContext(ctx).Save(st).Error
+}
+
+// MarkDraft — сценарий снова черновик (правка шагов без записи всего сценария: параллельный
+// вызов мог поменять команды и правила).
+func (r *ScenarioRepo) MarkDraft(ctx context.Context, id uuid.UUID) error {
+	return r.db.WithContext(ctx).Model(&domain.Scenario{}).Where("id = ?", id).
+		Updates(map[string]any{"status": domain.ScenarioDraft, "updated_at": gorm.Expr("now()")}).Error
+}
+
 func (r *ScenarioRepo) CreateVersion(ctx context.Context, v *domain.ScenarioVersion) error {
 	return r.db.WithContext(ctx).Create(v).Error
 }

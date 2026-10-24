@@ -261,7 +261,9 @@ func stepText(s domain.ScenarioStep, e *domain.Employee, at time.Time) string {
 	if strings.TrimSpace(text) == "" {
 		text = s.TextTy + s.TextVy
 	}
-	if strings.TrimSpace(text) == "" {
+	if strings.TrimSpace(text) == "" && len(s.Media) == 0 {
+		// шаг-вложение без текста (ТЗ r60 «# Приложить открытку») уходит одним вложением: заголовок
+		// шага — служебный («Привет, {Имя}!» от соседней строки), новичку его не показываем
 		text = s.Title
 	}
 	name := FirstName(e.FullName)
@@ -319,8 +321,7 @@ func stepMessage(to recipient, s domain.ScenarioStep, e *domain.Employee, eventI
 	if test {
 		text = testPrefix + text
 	}
-	var rows [][]max.Button
-	var row []max.Button
+	var btns []max.Button
 	for i, b := range s.Buttons {
 		if b.Action == "human" {
 			continue // «Спросить человека» и так последним рядом
@@ -329,14 +330,9 @@ func stepMessage(to recipient, s domain.ScenarioStep, e *domain.Employee, eventI
 		if u := buttonURL(b.Action); u != "" {
 			btn = max.Button{Text: b.Label, URL: u}
 		}
-		row = append(row, btn)
-		if len(row) == 2 {
-			rows, row = append(rows, row), nil
-		}
+		btns = append(btns, btn)
 	}
-	if row != nil {
-		rows = append(rows, row)
-	}
+	rows := packRows(btns)
 	if len(s.Buttons) > 0 {
 		rows = append(rows, humanRow(&eventID))
 	}
@@ -530,16 +526,30 @@ func scaleRows(sv *domain.Survey, q domain.SurveyQuestion, id, qn string) [][]ma
 	case domain.ScaleYesNo:
 		rows = append(rows, []max.Button{answer("Да", 1), answer("Нет", 0)})
 	case domain.ScaleChoice:
-		var row []max.Button
+		var btns []max.Button
 		for i, o := range q.Options {
-			row = append(row, answer(o, i+1))
-			if len(row) == 2 {
-				rows, row = append(rows, row), nil
-			}
+			btns = append(btns, answer(o, i+1))
 		}
-		if row != nil {
-			rows = append(rows, row)
+		rows = append(rows, packRows(btns)...)
+	}
+	return rows
+}
+
+// pairLabelRunes — две кнопки в ряд, только если обе подписи не длиннее: подписи ТЗ не
+// сокращаются (до 50+ символов), а в ряду из двух MAX обрезал бы их уже на 15–18 символах.
+const pairLabelRunes = 16
+
+// packRows — кнопки по две в ряд для коротких подписей, длинные — по одной.
+func packRows(btns []max.Button) [][]max.Button {
+	var rows [][]max.Button
+	for i := 0; i < len(btns); i++ {
+		b := btns[i]
+		if i+1 < len(btns) && utf8.RuneCountInString(b.Text) <= pairLabelRunes && utf8.RuneCountInString(btns[i+1].Text) <= pairLabelRunes {
+			rows = append(rows, []max.Button{b, btns[i+1]})
+			i++
+			continue
 		}
+		rows = append(rows, []max.Button{b})
 	}
 	return rows
 }

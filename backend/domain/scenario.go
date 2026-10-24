@@ -154,6 +154,8 @@ type ScenarioStep struct {
 	FlagRequired *string       `json:"flag_required"`               // показ «по отмашке рекрутера»: флаг новичка
 	NoAnswer     *NoAnswerRule `gorm:"type:jsonb" json:"no_answer"` // nil — продолжать молча
 	Advance      *string       `json:"advance"`                     // button | auto | nil (= button, если в блоке есть следующий шаг)
+	// AIRewrite — тексты шага переписаны автоматически (POST /scenarios/{id}/rewrite-vy), nil — нет.
+	AIRewrite *AIRewrite `gorm:"type:jsonb" json:"ai_rewrite"`
 }
 
 // NoAnswerRule — «если не ответил»: напомнить через N часов, не больше Max раз.

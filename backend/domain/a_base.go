@@ -58,6 +58,7 @@ func AllModels() []any {
 		&MediaFile{},
 		&MediaFileData{},
 		&NewcomerFile{},
+		&TextRewrite{},
 	}
 }
 

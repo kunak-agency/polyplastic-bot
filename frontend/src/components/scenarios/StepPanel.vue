@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import BranchEditor from '@/components/scenarios/BranchEditor.vue'
 import MediaField from '@/components/scenarios/MediaField.vue'
 import SurveyEditor from '@/components/scenarios/SurveyEditor.vue'
+import AiRewriteBadge from '@/components/scenarios/AiRewriteBadge.vue'
 import { SITES } from '@/stores/site'
 import { formatDayOffset } from '@/lib/calendar'
 import { STAGES, STEP_KINDS, defaultSurvey } from '@/lib/scenarioSteps'
@@ -287,6 +288,7 @@ function minutes(s: number | null): string {
         </div>
       </FormField>
 
+      <AiRewriteBadge :step="step" />
       <FormField :label="t('scenarios.panel.textVy')" html-for="sp-vy">
         <textarea
           id="sp-vy"

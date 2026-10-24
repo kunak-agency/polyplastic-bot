@@ -2,11 +2,17 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertTriangle, ChevronDown, ChevronRight, FileSpreadsheet, X } from 'lucide-vue-next'
-import type { ScenarioStep } from '@/types/api'
+import type { ScenarioDetail, ScenarioStep } from '@/types/api'
 import type { ImportReport, ImportWarning } from './importReport'
+import RewriteVyButton from './RewriteVyButton.vue'
 
-const props = defineProps<{ report: ImportReport; steps: ScenarioStep[] }>()
-const emit = defineEmits<{ open: [stepId: string]; close: [] }>()
+const props = defineProps<{
+  report: ImportReport
+  steps: ScenarioStep[]
+  scenarioId?: string
+  dirty?: boolean
+}>()
+const emit = defineEmits<{ open: [stepId: string]; close: []; rewritten: [s: ScenarioDetail] }>()
 const { t, te } = useI18n()
 
 const open = ref(true)
@@ -68,6 +74,13 @@ function onPick(w: ImportWarning): void {
           {{ t(`scenarios.importReport.stats.${s.key}`) }}: <b>{{ s.n }}</b>
         </span>
       </span>
+      <RewriteVyButton
+        v-if="scenarioId"
+        :scenario-id="scenarioId"
+        :steps="steps"
+        :dirty="dirty"
+        @done="emit('rewritten', $event)"
+      />
       <button
         type="button"
         class="report__close"

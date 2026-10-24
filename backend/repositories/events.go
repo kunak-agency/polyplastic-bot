@@ -60,8 +60,24 @@ func (r *EventRepo) LockDue(ctx context.Context, f DueFilter) ([]domain.Schedule
 	if f.Limit <= 0 {
 		f.Limit = 100
 	}
+	var out []domain.ScheduledEvent
+	err := r.dueQuery(ctx, f).Select("e.*").Order("e.employee_id, e.fire_at, e.position").Limit(f.Limit).
+		Clauses(clause.Locking{Strength: "UPDATE", Table: clause.Table{Name: "e"}, Options: "SKIP LOCKED"}).
+		Find(&out).Error
+	return out, err
+}
+
+// DueEmployees — сотрудники с созревшими событиями (без блокировки). Такт отправляет их по
+// одному: новичок, который не отвечает и копит созревшие реплики за вопросом, не забирает лимит
+// выборки у остальных.
+func (r *EventRepo) DueEmployees(ctx context.Context, f DueFilter) ([]uuid.UUID, error) {
+	var out []uuid.UUID
+	err := r.dueQuery(ctx, f).Distinct("e.employee_id").Pluck("e.employee_id", &out).Error
+	return out, err
+}
+
+func (r *EventRepo) dueQuery(ctx context.Context, f DueFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Table("scheduled_events AS e").
-		Select("e.*").
 		Joins("JOIN employees m ON m.id = e.employee_id").
 		Where("e.status = ? AND m.connection = ?", domain.EventScheduled, domain.ConnConnected)
 	if f.MaxDay != nil {
@@ -73,11 +89,7 @@ func (r *EventRepo) LockDue(ctx context.Context, f DueFilter) ([]domain.Schedule
 	if f.EmployeeID != nil {
 		q = q.Where("e.employee_id = ?", *f.EmployeeID)
 	}
-	var out []domain.ScheduledEvent
-	err := q.Order("e.employee_id, e.fire_at, e.position").Limit(f.Limit).
-		Clauses(clause.Locking{Strength: "UPDATE", Table: clause.Table{Name: "e"}, Options: "SKIP LOCKED"}).
-		Find(&out).Error
-	return out, err
+	return q
 }
 
 // ScheduledOf — неотправленные события сотрудника (перенос даты, пересборка версии).

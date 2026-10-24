@@ -301,6 +301,42 @@ export interface ScenarioStep {
   flag_required?: string | null
   no_answer?: NoAnswerRule | null
   advance?: StepAdvance | null
+  // Texts rewritten by POST /scenarios/{id}/rewrite-vy; null — written by hand.
+  ai_rewrite?: AIRewrite | null
+}
+
+// The mark of rewrite-vy on a step: what the generator wrote. The editor shows
+// "AI, check it" while the step text still equals text_vy / text_ty here.
+export interface AIRewrite {
+  source: 'llm' | 'rule'
+  text_vy?: string
+  text_ty?: string
+  fields: string[]
+  at: string
+}
+
+// POST /scenarios/{id}/rewrite-vy (api_contract.md, v4).
+export interface RewriteVyRequest {
+  only_copied?: boolean
+  neutralize?: boolean
+  step_ids?: string[]
+  scenario_texts?: boolean
+}
+
+export interface RewriteVyItem {
+  step_id: string | null
+  field: string
+  before: string
+  after: string
+  source: 'llm' | 'rule'
+}
+
+export interface RewriteVyResponse {
+  updated: number
+  failed: number
+  items: RewriteVyItem[]
+  cleared_warnings: { step_id: string; code: string }[]
+  scenario: ScenarioDetail
 }
 
 // Scenario commands (/food, /hr): the bot runs the actions on the command.

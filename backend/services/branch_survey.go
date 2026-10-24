@@ -143,22 +143,15 @@ func hasPick(picks []int, v int) bool {
 
 // multiRows — переключатели «✓ …» по два в ряд и «Готово».
 func multiRows(q domain.SurveyQuestion, picks []int, id, qn string) [][]max.Button {
-	var rows [][]max.Button
-	var row []max.Button
+	var btns []max.Button
 	for i, o := range q.Options {
 		label := o
 		if hasPick(picks, i+1) {
 			label = "✓ " + o
 		}
-		row = append(row, max.Button{Text: label, Payload: preAnswer + id + ":" + qn + ":" + strconv.Itoa(i+1)})
-		if len(row) == 2 {
-			rows, row = append(rows, row), nil
-		}
+		btns = append(btns, max.Button{Text: label, Payload: preAnswer + id + ":" + qn + ":" + strconv.Itoa(i+1)})
 	}
-	if row != nil {
-		rows = append(rows, row)
-	}
-	return append(rows, []max.Button{{Text: btnDone, Payload: preDone + id + ":" + qn}})
+	return append(packRows(btns), []max.Button{{Text: btnDone, Payload: preDone + id + ":" + qn}})
 }
 
 // evalOutcomes — правила после опроса, которые сработали (индексы). В группе — первое
