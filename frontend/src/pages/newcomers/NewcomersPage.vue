@@ -45,7 +45,7 @@ function chipsFromQuery(): NewcomerChip[] {
   return NEWCOMER_CHIPS.filter((c) => raw.includes(c))
 }
 const chips = ref<NewcomerChip[]>(chipsFromQuery())
-const sortBy = ref<NewcomerSort>('risk')
+const sortBy = ref<NewcomerSort>('new')
 const q = ref('')
 const launchOpen = ref(false)
 
@@ -146,6 +146,7 @@ function openRow(e: MouseEvent, id: string): void {
       <label class="toolbar__sort">
         <span class="muted txt-sm">{{ t('newcomers.sort.label') }}</span>
         <select v-model="sortBy" class="input input--select">
+          <option value="new">{{ t('newcomers.sort.new') }}</option>
           <option value="risk">{{ t('newcomers.sort.risk') }}</option>
           <option value="day">{{ t('newcomers.sort.day') }}</option>
         </select>

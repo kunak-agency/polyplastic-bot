@@ -104,6 +104,15 @@ test('sorting by risk puts red first, then the furthest along', () => {
   )
 })
 
+test('sort "new": the latest added first by UUIDv7 id', () => {
+  const ids = ['01a16ae0-0000-7000-8000-000000000001', '01a16cd0-0000-7000-8000-000000000002', '01a16bc5-0000-7000-8000-000000000003']
+  const list = ids.map((id) => person(id))
+  assert.deepEqual(
+    sortNewcomers(list, 'new').map((n) => n.id),
+    [ids[1], ids[2], ids[0]],
+  )
+})
+
 test('progress spans D-3..D+90 and is clamped', () => {
   assert.equal(adaptationProgress(-3), 0)
   assert.equal(adaptationProgress(-10), 0)

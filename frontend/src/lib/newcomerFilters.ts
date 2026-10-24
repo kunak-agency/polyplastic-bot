@@ -69,13 +69,15 @@ export function chipCounts(list: Newcomer[], now: Date): Record<NewcomerChip, nu
   return counts
 }
 
-export type NewcomerSort = 'risk' | 'day'
+export type NewcomerSort = 'new' | 'risk' | 'day'
 
 const RISK_RANK: Record<Risk, number> = { red: 0, yellow: 1, green: 2 }
 
+// "new": the latest added first (ids are UUIDv7, ordered by creation time);
 // "risk": red first, then the furthest along; "day": the furthest along first.
 export function sortNewcomers(list: Newcomer[], by: NewcomerSort): Newcomer[] {
   return list.slice().sort((a, b) => {
+    if (by === 'new') return a.id < b.id ? 1 : a.id > b.id ? -1 : 0
     if (by === 'risk') {
       const r = RISK_RANK[a.risk] - RISK_RANK[b.risk]
       if (r !== 0) return r
