@@ -276,6 +276,7 @@ func (b *BotService) ticketConversation(ctx context.Context, u max.Update, emp *
 	}
 	var reply string
 	var t *domain.Ticket
+	toRAG := false
 	err := b.repos.Transaction(ctx, func(tx *repositories.Repos) error {
 		cur, err := tx.Tickets.Conversation(ctx, emp.ID)
 		if err != nil || cur == nil {
@@ -283,6 +284,18 @@ func (b *BotService) ticketConversation(ctx context.Context, u max.Update, emp *
 		}
 		if t, err = tx.Tickets.ByIDForUpdate(ctx, cur.ID); err != nil || t == nil {
 			return err
+		}
+		// Новый вопрос, пока HR ещё не включился в переписку, — в RAG, а не в обращение: иначе
+		// после «Спросить HR» про транспорт бот молчит на «как взять отпуск?» до закрытия.
+		if !t.AwaitDetails && looksLikeQuestion(text) {
+			msgs, err := tx.Tickets.Messages(ctx, t.ID)
+			if err != nil {
+				return err
+			}
+			if !staffJoined(msgs) {
+				t, toRAG = nil, true
+				return nil
+			}
 		}
 		e, err := tx.Employees.ByIDForUpdate(ctx, emp.ID)
 		if err != nil || e == nil {
@@ -327,6 +340,10 @@ func (b *BotService) ticketConversation(ctx context.Context, u max.Update, emp *
 		}
 		return tx.Tickets.Save(ctx, t)
 	})
+	if toRAG {
+		logger.Info("бот: вопрос новичка %s при открытом обращении без ответа HR → в RAG", emp.ID)
+		return false, nil
+	}
 	if err != nil || t == nil {
 		return false, err
 	}
@@ -335,6 +352,39 @@ func (b *BotService) ticketConversation(ctx context.Context, u max.Update, emp *
 		b.replyOn(ctx, recipientOf(emp).msg(reply, "", nil), u.MessageID) // «Добавил к обращению…»
 	}
 	return true, nil
+}
+
+// staffJoined — HR уже ответил в переписке обращения: дальше новичок говорит с человеком, и
+// любой его текст — в обращение. Пока HR не ответил (сразу после «Спросить HR»), новый вопрос
+// идёт в RAG.
+func staffJoined(msgs []domain.TicketMessage) bool {
+	for _, m := range msgs {
+		if m.From == domain.TicketMsgStaff && !m.Internal {
+			return true
+		}
+	}
+	return false
+}
+
+// questionWords — начало вопроса без знака «?»: голосовой ввод и быстрый набор его теряют.
+var questionWords = []string{"как ", "когда ", "где ", "что ", "сколько ", "можно ", "почему ", "кто ",
+	"какой ", "какая ", "какие ", "куда ", "зачем ", "есть ли ", "нужно ли ", "надо ли ", "подскажи"}
+
+// looksLikeQuestion — текст похож на новый вопрос, а не на «Хорошо» или уточнение к обращению.
+func looksLikeQuestion(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	for _, lead := range []string{"а ", "и ", "ещё ", "еще "} {
+		t = strings.TrimPrefix(t, lead)
+	}
+	if strings.Contains(t, "?") {
+		return true
+	}
+	for _, w := range questionWords {
+		if strings.HasPrefix(t, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- команды ---

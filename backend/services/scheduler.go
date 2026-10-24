@@ -281,6 +281,20 @@ func (s *SchedulerService) sendEvent(ctx context.Context, tx *repositories.Repos
 		msg.Attachments = groups[len(groups)-1]
 	}
 
+	if len(msg.Attachments) == 0 && len(step.Buttons) == 0 && !isSurvey(step) && !isQuestion(step) && step.Kind != domain.KindInput {
+		dup, err := s.repeatsRecent(ctx, tx, e.ID, ev.ID, msg.Text)
+		if err != nil {
+			return false, err
+		}
+		if dup {
+			// Поздний вход: D−3 и D−1 уходят подряд, и «напоминание о документах» повторяет список
+			// минутой раньше. Тот же текст за сутки второй раз не шлём.
+			logger.Info("планировщик: событие %s повторяет текст, ушедший за сутки, — пропущено", ev.ID)
+			ev.Status, ev.Answer = domain.EventSkipped, strPtr(skipRepeat)
+			return false, tx.Events.Save(ctx, ev)
+		}
+	}
+
 	if emptyMessage(msg) {
 		logger.Warn("планировщик: шаг события %s без текста и без вложений — запасной текст", ev.ID)
 		msg.Text = strings.TrimSuffix(msg.Text, " ") + byForm(e, textMaterialSoonTy, textMaterialSoonVy)
@@ -397,4 +411,71 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	}
+}
+
+// skipRepeat — причина пропуска: тот же текст этому сотруднику уже уходил за сутки.
+const skipRepeat = "повтор: тот же текст уже ушёл за сутки"
+
+// repeatWindow, repeatShare, repeatMinLines — когда сообщение считается повтором: за последние
+// сутки ушло сообщение, где есть не меньше repeatShare его содержательных строк (и их не меньше
+// repeatMinLines — короткие «Привет!» повтором не считаем).
+const (
+	repeatWindow   = 24 * time.Hour
+	repeatShare    = 0.7
+	repeatMinLines = 3
+)
+
+// repeatsRecent — text почти целиком уже уходил сотруднику за repeatWindow.
+func (s *SchedulerService) repeatsRecent(ctx context.Context, tx *repositories.Repos, employeeID, eventID uuid.UUID, text string) (bool, error) {
+	lines := contentLines(text)
+	if len(lines) < repeatMinLines {
+		return false, nil
+	}
+	evs, err := tx.Events.ByEmployee(ctx, employeeID)
+	if err != nil {
+		return false, err
+	}
+	since := s.now().Add(-repeatWindow)
+	for _, o := range evs {
+		if o.ID == eventID || o.Text == nil || o.SentAt == nil || o.SentAt.Before(since) {
+			continue
+		}
+		if o.Status != domain.EventSent && o.Status != domain.EventAnswered {
+			continue
+		}
+		if repeatOf(lines, contentLines(*o.Text)) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// contentLines — нормализованные строки текста длиннее 8 символов.
+func contentLines(text string) []string {
+	var out []string
+	for _, l := range strings.Split(text, "\n") {
+		l = strings.ToLower(strings.Join(strings.Fields(l), " "))
+		if len([]rune(l)) > 8 {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// repeatOf — доля строк lines, которые есть в prev, не меньше repeatShare.
+func repeatOf(lines, prev []string) bool {
+	if len(lines) == 0 || len(prev) == 0 {
+		return false
+	}
+	seen := make(map[string]bool, len(prev))
+	for _, l := range prev {
+		seen[l] = true
+	}
+	hit := 0
+	for _, l := range lines {
+		if seen[l] {
+			hit++
+		}
+	}
+	return float64(hit)/float64(len(lines)) >= repeatShare
 }
