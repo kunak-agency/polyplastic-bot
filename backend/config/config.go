@@ -91,6 +91,9 @@ type Call struct {
 	MaxDuration time.Duration
 	// BargeIn — перебивание бота голосом (CALL_BARGE_IN, по умолчанию 1).
 	BargeIn bool
+	// SpokenGreeting — Корсик здоровается голосом (CALL_SPOKEN_GREETING, по умолчанию нет):
+	// без него звонящий сразу задаёт вопрос, приветствие только текстом на экране.
+	SpokenGreeting bool
 }
 
 // Digest — еженедельный дайджест руководителю подбора и ссылки из MAX в кабинет
@@ -257,9 +260,10 @@ func Load() (Config, error) {
 		Call:          flag("FEATURE_CALL"),
 	}
 	c.Call = Call{
-		MaxConcurrent: int(integer("CALL_MAX_CONCURRENT")),
-		MaxDuration:   time.Duration(integer("CALL_MAX_SECONDS")) * time.Second,
-		BargeIn:       flagDefault("CALL_BARGE_IN", true),
+		MaxConcurrent:  int(integer("CALL_MAX_CONCURRENT")),
+		MaxDuration:    time.Duration(integer("CALL_MAX_SECONDS")) * time.Second,
+		BargeIn:        flagDefault("CALL_BARGE_IN", true),
+		SpokenGreeting: flagDefault("CALL_SPOKEN_GREETING", false),
 	}
 	if c.Call.MaxConcurrent <= 0 {
 		c.Call.MaxConcurrent = 2

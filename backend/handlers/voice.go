@@ -38,6 +38,7 @@ var silenceAfter = 8 * time.Second
 type voiceOpts struct {
 	audio   bool // голос: распознавание и синтез; false — только текст (микрофона нет)
 	bargeIn bool // CALL_BARGE_IN
+	greet   bool // CALL_SPOKEN_GREETING: приветствие голосом
 	site    string
 	callID  string
 }
@@ -134,6 +135,12 @@ func (v *voiceCall) start(parent context.Context) {
 	go v.speak()
 	go v.turns()
 	turn := v.nextTurn()
+	if !v.opts.greet {
+		// Звонящий говорит первым: приветствие — подсказкой на экране, Корсик сразу слушает.
+		v.send("bot.say", map[string]any{"turn": turn, "text": services.VoiceHint, "sources": []services.VoiceSource{}, "silent": true})
+		v.armSilence()
+		return
+	}
 	v.send("bot.say", map[string]any{"turn": turn, "text": services.VoiceGreeting, "sources": []services.VoiceSource{}})
 	v.say(phrase{turn: turn, text: services.VoiceGreeting})
 	v.say(phrase{turn: turn, end: true})
