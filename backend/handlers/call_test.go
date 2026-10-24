@@ -285,7 +285,7 @@ func textIs(s string) func(map[string]any) bool {
 	return func(ev map[string]any) bool { return ev["text"] == s }
 }
 
-var defaultCallCfg = config.Call{MaxConcurrent: 2, MaxDuration: time.Minute, BargeIn: true}
+var defaultCallCfg = config.Call{MaxConcurrent: 2, MaxDuration: time.Minute, BargeIn: true, SpokenGreeting: true}
 
 // startCall — звонок со стороны браузера: start и приветствие доиграно.
 func startCall(t *testing.T, url string, input string) *testCall {
@@ -626,4 +626,23 @@ func TestCallNotUpgrade(t *testing.T) {
 	if resp.StatusCode != http.StatusUpgradeRequired {
 		t.Fatalf("статус %d", resp.StatusCode)
 	}
+}
+
+func TestCallNoSpokenGreeting(t *testing.T) {
+	pod := newFakePod(t)
+	cfg := defaultCallCfg
+	cfg.SpokenGreeting = false
+	url := callServer(t, pod, true, cfg)
+	c, _, err := dialCall(t, url, "https://call.example.ru")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.send(map[string]any{"type": "start", "input": "voice", "site": "grpp"})
+	hint := c.waitFor("bot.say", turnIs(1))
+	if hint["silent"] != true || hint["text"] != services.VoiceHint {
+		t.Fatalf("подсказка вместо приветствия %v", hint)
+	}
+	c.none("audio.start", 400*time.Millisecond)
+	c.send(map[string]any{"type": "user.text", "text": "когда аванс"})
+	c.waitFor("audio.start", turnIs(2))
 }
