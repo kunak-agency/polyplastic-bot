@@ -14,8 +14,8 @@ import (
 // предложениям, пока синтез идёт.
 const TTSFormat = "audio/L16;rate=24000"
 
-// ttsEngineDefault — движок, если CALL_TTS_ENGINE не задан: пусто — решает под (Google при ключе).
-const ttsEngineDefault = ""
+// ttsEngineDefault — движок, если CALL_TTS_ENGINE не задан. Ветка call-demo-silero: Silero 24 кГц.
+const ttsEngineDefault = "silero"
 
 // Synthesize — POST /tts {text}: поток звука. Срок задаёт ctx вызывающего (на синтез, а не на
 // длину фразы); тело закрывает вызывающий.
