@@ -116,14 +116,12 @@ func (h *Handler) Me(c *fiber.Ctx) error {
 
 // ── Мидлвар: сессия и матрица ролей ─────────────────────────────────────────
 
-// publicPath — маршруты без сессии: готовность, вход и выход, dev-маршруты в development.
+// publicPath — маршруты без сессии: готовность, вход и выход. Dev-маршруты (демо-чат, машина
+// времени, имитация сообщений) тоже за сессией: стенд за ними пишет в живой MAX.
 func publicPath(c *fiber.Ctx) bool {
 	p := c.Path()
 	switch p {
 	case "/api/health", "/api/auth/login", "/api/auth/logout":
-		return true
-	}
-	if isDev() && (strings.HasPrefix(p, "/api/dev/") || reSendTest.MatchString(p)) {
 		return true
 	}
 	return false
