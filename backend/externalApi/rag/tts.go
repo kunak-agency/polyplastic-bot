@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 )
 
 // TTSFormat — что отдаёт POST /tts: PCM16LE моно 8 кГц (audio/L16;rate=8000), чанками по
@@ -20,18 +19,13 @@ func (c *Client) Synthesize(ctx context.Context, text string) (io.ReadCloser, er
 	if c == nil || c.baseURL == "" {
 		return nil, fmt.Errorf("rag: адрес не задан (RAG_BASE_URL)")
 	}
-	req := map[string]string{"text": text}
-	// Голос звонка: CALL_TTS_SPEAKER (aidar | eugene у Silero v5_5_ru); пусто — голос пода по умолчанию.
-	if sp := os.Getenv("CALL_TTS_SPEAKER"); sp != "" {
-		req["speaker"] = sp
-	}
-	body, _ := json.Marshal(req)
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/tts", bytes.NewReader(body))
+	body, _ := json.Marshal(map[string]string{"text": text})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/tts", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	hreq.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(hreq)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
