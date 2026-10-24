@@ -35,6 +35,7 @@ type BotService struct {
 	rag       RAGAsker // nil — на вопросы бот отвечает «не могу проверить по документам»
 	tickets   *TicketService
 	media     MediaAttacher // nil — вложения веток не уходят (branch_media.go)
+	asr       Transcriber   // nil — голосовые не распознаются (bot_voice.go)
 	now       func() time.Time
 
 	wg sync.WaitGroup // фоновые отправки пакета после согласия
@@ -774,12 +775,20 @@ func (b *BotService) message(ctx context.Context, u max.Update) error {
 	}
 	to := recipient{ChatID: u.ChatID, UserID: u.UserID}
 	if emp == nil {
-		if strings.TrimSpace(u.Text) == "" {
+		if strings.TrimSpace(u.Text) == "" && len(u.Audio) == 0 {
 			b.send(ctx, to.msg(textContactNoted, "", nil)) // контакт по кнопке «Проверить по телефону»
 		} else {
 			b.send(ctx, inviteBrokenMessage(to))
 		}
 		return nil
+	}
+	// Голосовое без текста: распознать и дальше вести как набранный текст (bot_voice.go).
+	if strings.TrimSpace(u.Text) == "" && len(u.Audio) > 0 {
+		text, ok := b.voiceText(ctx, u, emp)
+		if !ok {
+			return nil
+		}
+		u.Text = text
 	}
 	codes := flags.Codes(u.Text)
 	logger.Info("бот: текст от новичка %s, флаги %v, аудио %d", emp.ID, codes, len(u.Audio))

@@ -16,6 +16,7 @@ import (
 	"main/config"
 	"main/externalApi"
 	"main/externalApi/max"
+	"main/externalApi/rag"
 	"main/repositories"
 	"main/services"
 
@@ -35,6 +36,12 @@ type api struct {
 
 func newAPI(t *testing.T) *api {
 	t.Helper()
+	return newAPIWithRAG(t, nil)
+}
+
+// newAPIWithRAG — то же с клиентом rag (nil — без него, как newAPI).
+func newAPIWithRAG(t *testing.T, ragClient *rag.Client) *api {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL не задан")
@@ -52,7 +59,7 @@ func newAPI(t *testing.T) *api {
 	moscow, _ := time.LoadLocation("Europe/Moscow")
 	now := time.Date(2026, 11, 2, 12, 0, 0, 0, moscow) // понедельник
 	fake := max.NewFake()
-	svc := services.NewServices(repos, &externalApi.ExternalAPI{Max: fake}, services.Options{
+	svc := services.NewServices(repos, &externalApi.ExternalAPI{Max: fake, RAG: ragClient}, services.Options{
 		Bot: config.Bot{Username: "korsik_test_bot", InviteLinkFormat: config.DefaultInviteLinkFormat},
 		Now: func() time.Time { return now },
 	})

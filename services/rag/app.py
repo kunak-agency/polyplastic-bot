@@ -5,6 +5,7 @@ POST /ask    {"question", "site", "trace_id", "address_form"?} -> ответ с 
 POST /flags  {"text", "context", "survey_question"?} -> флаги F0–F10, тон, цитата, degraded
 POST /documents (multipart: file, doc?) -> {doc_id, chunks, clauses, low_confidence_pages}
 GET  /documents -> {"items": [...], "total": N}
+POST /transcribe (multipart: audio) -> {text, lang, duration_s, confidence} (asr.py, README «Голос»)
 
 Контракт /ask и /flags: agency/system/api_contract.md. /documents описан в README сервиса.
 """
@@ -21,6 +22,7 @@ import threading
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, model_validator
 
+import asr
 from chunker import load_corpus
 from documents import DocRecord, DocumentStore, make_doc_id
 from parsers import CorruptDocument, UnsupportedDocument, parse_document
@@ -38,6 +40,7 @@ MAX_UPLOAD_BYTES = int(float(os.getenv("RAG_MAX_UPLOAD_MB", "25")) * 1024 * 1024
 class State:
     pipeline: Pipeline | None = None
     store: DocumentStore | None = None
+    recognizer = asr.Recognizer()  # T-one грузится при первом /transcribe или на прогреве
     upload_lock = threading.Lock()  # загрузки по одной: реестр и индекс меняются согласованно
 
 
@@ -66,6 +69,11 @@ async def lifespan(app: FastAPI):
     # отвечает лишь когда модели и LLM прогреты и первый /ask не платит за холодный старт.
     if os.getenv("RAG_WARMUP", "1") != "0":
         state.pipeline.warmup()
+        if os.getenv("RAG_ASR_WARMUP", "1") != "0":
+            try:
+                state.recognizer.warmup()
+            except Exception as exc:  # без распознавания сервис всё равно нужен
+                log.warning("asr: прогрев не удался: %s", exc)
     yield
     gen = state.pipeline.generator if state.pipeline else None
     if gen is not None and hasattr(gen, "close"):
@@ -223,3 +231,29 @@ def flags(req: FlagsRequest) -> FlagsResponse:
     log.info("flags: context=%s → %s%s", req.context, [f["code"] for f in res.flags] or "[]",
              " (degraded)" if res.degraded else "")
     return FlagsResponse(**res.as_dict())
+
+
+# --- /transcribe (голосовые новичков, asr.py) ---
+
+class TranscribeResponse(BaseModel):
+    text: str
+    lang: str
+    duration_s: float
+    confidence: float | None
+
+
+@app.post("/transcribe", response_model=TranscribeResponse)
+def transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
+    data = audio.file.read(asr.MAX_AUDIO_BYTES + 1)
+    if len(data) > asr.MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail=f"файл больше {asr.MAX_AUDIO_BYTES // (1024 * 1024)} МБ")
+    try:
+        res = asr.transcribe(data, state.recognizer)
+    except asr.AudioTooLong as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except asr.AudioError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except asr.ASRUnavailable as exc:
+        log.warning("asr: распознавание недоступно: %s", exc)
+        raise HTTPException(status_code=503, detail="распознавание недоступно") from exc
+    return TranscribeResponse(text=res.text, lang=res.lang, duration_s=res.duration_s, confidence=res.confidence)

@@ -55,21 +55,36 @@ type SimulateMessage struct {
 	// Flag — необязательно, только с text: текст считается размеченным этим кодом F0–F10, как
 	// ответ /flags (бот его пока не вызывает). Так в dev показываются F4, F10 и др. без regex.
 	Flag string `json:"flag"`
+	// AudioPath — голосовое из файла на машине API (только dev): бот скачает его у подделки MAX
+	// и распознает, как настоящее. Вместо пути можно прислать multipart с файлом в поле audio.
+	AudioPath string `json:"audio_path"`
 }
 
-// SimulateMessageInput — проверенное тело: ровно одно из Text и Payload.
+// SimulateMessageInput — проверенное тело: ровно одно из Text, Payload и голосового.
 type SimulateMessageInput struct {
 	NewcomerID uuid.UUID
 	Text       string
 	Payload    string
 	Flag       string
+	AudioPath  string
 }
 
-func (s SimulateMessage) Validate() (SimulateMessageInput, error) {
+// MaxSimulatedAudioBytes — потолок голосового в dev-хуке (как у бота: maxVoiceBytes).
+const MaxSimulatedAudioBytes = 20 << 20
+
+// Validate — hasAudio: голосовое пришло файлом multipart (audio_path проверяется здесь).
+func (s SimulateMessage) Validate(hasAudio bool) (SimulateMessageInput, error) {
 	var f fields
-	out := SimulateMessageInput{NewcomerID: f.uuid("newcomer_id", s.NewcomerID), Text: strings.TrimSpace(s.Text), Payload: strings.TrimSpace(s.Payload), Flag: strings.ToUpper(strings.TrimSpace(s.Flag))}
-	if (out.Text == "") == (out.Payload == "") {
-		f.add("text", errs.CodeRequired, "Нужно ровно одно: text или payload")
+	out := SimulateMessageInput{NewcomerID: f.uuid("newcomer_id", s.NewcomerID), Text: strings.TrimSpace(s.Text), Payload: strings.TrimSpace(s.Payload), Flag: strings.ToUpper(strings.TrimSpace(s.Flag)), AudioPath: strings.TrimSpace(s.AudioPath)}
+	voice := hasAudio || out.AudioPath != ""
+	n := 0
+	for _, set := range []bool{out.Text != "", out.Payload != "", voice} {
+		if set {
+			n++
+		}
+	}
+	if n != 1 || (hasAudio && out.AudioPath != "") {
+		f.add("text", errs.CodeRequired, "Нужно ровно одно: text, payload или голосовое (audio_path / файл audio)")
 	}
 	if out.Flag != "" && out.Text == "" {
 		f.add("flag", errs.CodeRequired, "flag — только вместе с text")

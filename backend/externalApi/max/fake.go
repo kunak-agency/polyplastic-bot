@@ -29,6 +29,8 @@ type Fake struct {
 	presses     map[string]pressRef
 	typingUntil map[int64]time.Time
 
+	files fakeFiles // Download (download.go)
+
 	batches chan fakeBatch
 	marker  int64
 

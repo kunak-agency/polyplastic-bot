@@ -98,6 +98,7 @@ func NewServices(r *repositories.Repos, ext *externalApi.ExternalAPI, o Options)
 		s.Bot.tickets = tickets
 		if ext.RAG != nil { // nil-указатель в интерфейсе выглядел бы подключённым клиентом
 			s.Bot.rag = ext.RAG
+			s.Bot.asr = ext.RAG // голосовые: POST /transcribe того же сервиса
 		}
 	}
 	s.SetMedia(s.Media) // вложения шагов и веток (branch_media.go)

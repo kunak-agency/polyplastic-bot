@@ -68,6 +68,9 @@ LLM не задан, не ответил или дважды ответил не
 Regex-триггеры (уволь*, взятк*, откат*, ударил*) живут в Go и срабатывают независимо от
 этого сервиса.
 
+`POST /transcribe` (multipart: `audio`) → `{"text","lang","duration_s","confidence"}` —
+распознавание голосовых, раздел «v4 — Голосовые» ниже.
+
 ## frontend → backend
 
 Ошибки в формате clinik/toplivo: `{"error":{"code":"...","message":"...","traceId":"..."}}`.
@@ -242,7 +245,7 @@ production-сборке её нет, а сервер с `APP_ENV=production` о�
   в памяти процесса API: перезапуск его очищает. Страница кабинета `/dev/chat` есть только в
   `pnpm dev`.
   - `GET /api/dev/chat/{newcomer_id}` →
-    `{"messages":[{"id":"mid.fake.7|in.8|toast.9","from":"bot|newcomer|toast","kind":"text|press|start","text":"…","format":"|markdown|html","buttons":[[{"text":"…","type":"callback|link|request_contact","payload":"…","url":"…"}]],"attachments":[{"type":"image|file|…","url":"токен подделки"}],"notify":true,"payload":"нажатая кнопка","reply_to":"mid","edited":false,"at":"…","edited_at":"…|null"}],"typing":false}`
+    `{"messages":[{"id":"mid.fake.7|in.8|toast.9","from":"bot|newcomer|toast","kind":"text|press|start|voice","text":"…","format":"|markdown|html","buttons":[[{"text":"…","type":"callback|link|request_contact","payload":"…","url":"…"}]],"attachments":[{"type":"image|file|…","url":"токен подделки"}],"notify":true,"payload":"нажатая кнопка","reply_to":"mid","edited":false,"at":"…","edited_at":"…|null"}],"typing":false}`
     — только диалог этого новичка (его `user_id`/`chat_id`; до подключения — синтетический
     `user_id` из `simulate-start`). Ошибки: 422 — не UUID; 404 — новичка нет или не подделка.
   - `POST /api/dev/chat/{newcomer_id}/press` `{"message_id":"mid…","payload":"…"}` →
@@ -1034,3 +1037,54 @@ ISO-неделя по Москве; неделя в будущем или не `
 - `GET /api/newcomers/{id}` и список: новое поле `flags` (`{"recruiter_enabled": true, …}`) — отмашка рекрутера и флаги `set_flag` веток.
 - Медиатека: `used_in` считает и команды сценария (`send_file`), и правила (картинка, ветки кнопок) — черновик и последняя версия; запись, на которую ссылается `/food`, удалить нельзя (409).
 - Демо-чат: синтетический `user_id` новичка берётся из последних байт UUID (раньше — из первых, это время UUIDv7: новички, заведённые за минуту, склеивались в один аккаунт).
+
+### v4 — Голосовые (24.10, `services/rag/asr.py`, `backend/services/bot_voice.go`)
+
+Новичок говорит голосом — бот распознаёт речь и ведёт текст так же, как набранный: ввод шага
+(r34), «свой вариант» / причина после ветки опроса (`AwaitFreeText`), ответ на вопрос опроса,
+детали к сигналу, вопрос в RAG. Всё локально: T-one (sherpa-onnx, CPU) в rag-сервисе, звук и
+текст третьим лицам не уходят (п. 4.3.2 Положения).
+
+**rag: `POST /transcribe`** (multipart, поле `audio`; ogg/opus, m4a, mp3, wav — всё, что знает
+ffmpeg; ≤ 20 МБ, `RAG_ASR_MAX_MB`)
+→ 200
+```json
+{"text": "сколько дней отпуска положено после шести месяцев работы", "lang": "ru",
+ "duration_s": 3.65, "confidence": null}
+```
+- `text` — строчными, без пунктуации и цифр (так пишет T-one). Тишина или ничего не
+  распознано — `"text": ""`, это не ошибка.
+- `confidence` — всегда `null`: T-one через sherpa-onnx вероятностей не отдаёт. Поле оставлено под
+  другой движок.
+- `lang` — всегда `"ru"`.
+- Ошибки: 413 — длиннее 120 с (`RAG_ASR_MAX_SECONDS`) или больше 20 МБ; 422 — пустой файл или
+  ffmpeg не разобрал звук; 503 — нет ffmpeg или модели T-one (сервис при этом жив, `/ask` работает).
+- Текст в лог не пишется — только длительность, время распознавания и число символов.
+
+**backend (бот)**
+- MAX присылает голосовое вложением `type:"audio"` с `payload.url` и `payload.token` (и
+  `duration`). Если в вложении есть `transcription` от MAX — берётся она, своё распознавание не
+  зовём (**[проверить]**: приходит ли поле вообще).
+- Иначе бот скачивает файл по `payload.url` тем же `http.Client`, что и API MAX (корневой
+  сертификат Минцифры), но **без** токена бота; только `https://`, ≤ 20 МБ, срок 30 с
+  (`max.Downloader`, `externalApi/max/download.go`). Пока качает и распознаёт — «печатает».
+  **[проверить]**: отдаёт ли CDN MAX файл без `Authorization`.
+- Файл → `POST /transcribe` rag-сервиса (срок 20 с, `rag.Client.Transcribe`). `duration` > 120 с
+  — сразу отказ, без скачивания.
+- Успех: новичку уходит «🎙 Распознал: <текст с заглавной>», затем текст обрабатывается как
+  обычное сообщение (тот же `message()`, порядок веток прежний).
+- Неудача (нет ссылки, не скачалось, rag недоступен или 4xx/5xx, пустой текст, длиннее 120 с,
+  бот собран без rag): «Не разобрал голосовое, напишите текстом, пожалуйста.» («напиши» на
+  «ты»); дальше сообщение не обрабатывается.
+- Голосовое с подписью (непустой `text`) идёт как текст, аудио не распознаётся.
+
+**dev: `POST /api/dev/simulate-message`** — голосовое за новичка, только на подделке MAX:
+- JSON `{"newcomer_id":"uuid","audio_path":"/абсолютный/путь/voice.ogg"}` — файл на машине API;
+- или multipart: поля `newcomer_id` и файл `audio` (`curl -F newcomer_id=… -F audio=@voice.m4a`).
+
+Файл кладётся в подделку (`Fake.PutFile` → `fake://file/N`), бот скачивает его через
+`Download` и распознаёт тем же путём, что голосовое из MAX. В ленте демо-чата — входящее
+`{"from":"newcomer","kind":"voice","text":"🎙 Голосовое"}` и ответы бота. Ошибки: 422 — нужно
+ровно одно из `text`/`payload`/голосовое, нет файла по `audio_path`, пустой или > 20 МБ; 409 —
+бот не на подделке MAX или новичок не подключён.
+

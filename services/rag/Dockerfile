@@ -1,4 +1,4 @@
-# RAG-сервис Корсика. Веса bge-m3 и bge-reranker-v2-m3 на сборке НЕ скачиваются: они
+# RAG-сервис Корсика. Модель распознавания T-one (.cache/t-one) тоже лежит в томе. Веса bge-m3 и bge-reranker-v2-m3 на сборке НЕ скачиваются: они
 # лежат в кэше Hugging Face (HF_HOME=/app/.cache), который монтируется томом
 # (services/rag/.cache с хоста). Без тома и без RAG_RETRIEVER/RAG_RERANKER сервис
 # работает на BM25 + экстрактивном ответе, как раньше.
@@ -9,9 +9,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# OCR сканов: tesseract + русский (английский идёт в пакете tesseract-ocr)
+# OCR сканов: tesseract + русский (английский идёт в пакете tesseract-ocr);
+# ffmpeg — декодирование голосовых (ogg/opus, m4a, mp3) для POST /transcribe
 RUN apt-get update \
- && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-rus \
+ && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-rus ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

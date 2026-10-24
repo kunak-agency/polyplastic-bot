@@ -23,6 +23,7 @@ const (
 	JournalKindText  = "text"
 	JournalKindPress = "press" // нажатая кнопка: Text — подпись, Payload — payload
 	JournalKindStart = "start" // «Начать» по ссылке-приглашению (bot_started)
+	JournalKindVoice = "voice" // голосовое: Text — подпись «🎙 Голосовое, N с»
 )
 
 // Типы кнопок — как type в inline_keyboard MAX.

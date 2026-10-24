@@ -1054,3 +1054,22 @@
 - Тесты: `tests/stepOrder.test.ts`, `tests/surveyTypes.test.ts`. 8 гейтов фронта зелёные.
 - Живая проверка: API :8106, база `polyplastic_polish`, Vite :5198. «Офис GrPP», блок D−3: перестановка → сохранение →
   перезагрузка держит порядок; опубликована v2; в «Демо-чате» новичок получил реплики D−3 в новом порядке, включая вставленную.
+
+### Голосовые новичков (24.10 ~06:30, без коммита)
+- Бот понимает голосовые. Он скачивает файл по `payload.url` MAX (с CA Минцифры, без токена бота),
+  отправляет в rag `POST /transcribe`, показывает «🎙 Распознал: …», а дальше текст идёт как
+  набранный: ввод r34, «свой вариант» и причина опроса, ответ опроса, детали, RAG. При неудаче
+  бот пишет «Не разобрал голосовое, напишите текстом, пожалуйста». Если MAX прислал
+  `transcription`, бот берёт её. Контракт — `system/api_contract.md`, «v4 — Голосовые».
+- Движок — T-one через sherpa-onnx на CPU, как в clinik. Замеры на M4: 30 с звука за 1,05 с;
+  whisper small — 4,4 с, medium — 13,5 с. Качество на 5 фразах у T-one и whisper small близкое.
+  T-one пишет строчными, без пунктуации, `confidence` = null. Таблица — `services/rag/README.md`, «Голос».
+- Модель (138 МБ) лежит в `services/rag/.cache/t-one`. В Dockerfile добавлен ffmpeg, в
+  requirements — `sherpa-onnx==2.0.0`.
+- Dev: `simulate-message` принимает `audio_path` или multipart `audio`, в ленте демо-чата
+  `kind:"voice"`.
+- Живая проверка: rag :8107, API :8108, база `polyplastic_test_voice`, сид. Ogg → ответ из ПВТР,
+  m4a → отказ с «Передать HR», тишина → «Не разобрал…».
+- Гейты зелёные: gofmt, build, vet, `go test -p 1 ./...` на `polyplastic_test_voice`; pytest rag — 252.
+- **[проверить] на телефоне:** отдаёт ли CDN MAX голосовое без `Authorization` и приходит ли
+  `transcription`.

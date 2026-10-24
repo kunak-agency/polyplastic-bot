@@ -22,3 +22,7 @@ transformers==5.20.2
 huggingface-hub==2.3.0
 tokenizers==0.23.3
 safetensors==0.8.0
+# голосовые (POST /transcribe, asr.py): T-one через sherpa-onnx на CPU; модель — в .cache/t-one,
+# звук декодирует ffmpeg (в Dockerfile — apt)
+sherpa-onnx==2.0.0
+sherpa-onnx-core==2.0.0

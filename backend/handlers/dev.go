@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/binary"
+	"os"
 	"strings"
 
 	"main/domain"
@@ -105,14 +106,37 @@ func invitePayload(link string) string {
 // нажатие кнопки от подключённого новичка уходит в обработчик бота, как из long polling. Ответ —
 // {"status":"ok"}; что ушло новичку, видно в логе подделки MAX. Нужен, чтобы показать обращения
 // без телефона.
+//
+// Голосовое: `audio_path` (файл на машине API) или multipart с полями newcomer_id и audio. Только
+// на подделке MAX: файл кладётся в неё, бот скачивает его по ссылке fake:// и распознаёт через
+// rag /transcribe — тем же путём, что голосовое из MAX.
 func (h *Handler) SimulateMessage(c *fiber.Ctx) error {
 	var body in.SimulateMessage
-	if err := bindBody(c, &body); err != nil {
+	var audio []byte
+	if strings.HasPrefix(string(c.Request().Header.ContentType()), fiber.MIMEMultipartForm) {
+		body = in.SimulateMessage{NewcomerID: c.FormValue("newcomer_id"), Text: c.FormValue("text"), Payload: c.FormValue("payload"), Flag: c.FormValue("flag")}
+		if fh, err := c.FormFile("audio"); err == nil {
+			if audio, err = readPart(fh, in.MaxSimulatedAudioBytes); err != nil {
+				return err
+			}
+			if len(audio) == 0 {
+				return errs.NewValidationError("Пустой файл audio")
+			}
+		}
+	} else if err := bindBody(c, &body); err != nil {
 		return err
 	}
-	input, err := body.Validate()
+	input, err := body.Validate(len(audio) > 0)
 	if err != nil {
 		return err
+	}
+	if input.AudioPath != "" {
+		if audio, err = readDevAudio(input.AudioPath); err != nil {
+			return err
+		}
+	}
+	if int64(len(audio)) > in.MaxSimulatedAudioBytes {
+		return errs.NewValidationError("Голосовое больше 20 МБ")
 	}
 	bot := h.services.Bot
 	if bot == nil {
@@ -140,7 +164,14 @@ func (h *Handler) SimulateMessage(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
 	}
 	u := max.Update{Type: max.UpdateMessageCreated, UserID: *e.MaxUserID, ChatID: chat, Text: input.Text}
-	if input.Payload != "" {
+	if len(audio) > 0 {
+		fake := h.services.FakeMax()
+		if fake == nil {
+			return errs.NewConflictError("Голосовое в dev — только на подделке MAX (без MAX_BOT_TOKEN)")
+		}
+		u.Audio = []max.Audio{{URL: fake.PutFile(audio)}}
+		h.devIncoming(chat, *e.MaxUserID, max.JournalKindVoice, "🎙 Голосовое")
+	} else if input.Payload != "" {
 		u = max.Update{Type: max.UpdateMessageCallback, UserID: *e.MaxUserID, ChatID: chat, Payload: input.Payload, CallbackID: h.devCallbackID(chat, *e.MaxUserID, input.Payload)}
 	} else {
 		h.devIncoming(chat, *e.MaxUserID, max.JournalKindText, input.Text)
@@ -148,4 +179,21 @@ func (h *Handler) SimulateMessage(c *fiber.Ctx) error {
 	bot.Handle(ctx, u)
 	bot.Wait()
 	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// readDevAudio — голосовое по audio_path (dev): обычный файл не больше 20 МБ.
+func readDevAudio(path string) ([]byte, error) {
+	st, err := os.Stat(path)
+	if err != nil || !st.Mode().IsRegular() {
+		return nil, errs.NewValidationError("audio_path: файла нет").
+			WithDetails(errs.FieldError{Field: "audio_path", Code: errs.CodeInvalidFormat, Message: "Нет такого файла"})
+	}
+	if st.Size() > in.MaxSimulatedAudioBytes {
+		return nil, errs.NewValidationError("Голосовое больше 20 МБ")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, errs.NewValidationError("audio_path: файл не читается").WithCause(err)
+	}
+	return data, nil
 }
