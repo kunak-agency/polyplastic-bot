@@ -6,7 +6,10 @@
 # Секреты из локальных .env в state не попадают: .env собирает скрипт прямо в .build/vm.
 
 locals {
-  repo      = abspath("${path.module}/../..")
+  repo = abspath("${path.module}/../..")
+  # Исходники для сборки: по умолчанию репозиторий, но можно указать чистый git worktree на нужном
+  # коммите (var.source_dir), чтобы незакоммиченные правки не уехали в прод. .env берутся из repo.
+  src       = var.source_dir != "" ? abspath(pathexpand(var.source_dir)) : local.repo
   build_dir = abspath("${path.module}/.build")
   vm_dir    = "${local.build_dir}/vm" # зеркало /opt/korsik на ВМ
   remote    = "/opt/korsik"
@@ -18,14 +21,14 @@ locals {
   cabinet_url = var.cabinet_url != "" ? trimsuffix(var.cabinet_url, "/") : "https://${var.web_domain}"
 
   backend_hash = sha1(join("", [
-    for f in sort(fileset("${local.repo}/backend", "**/*.{go,mod,sum}")) : filesha1("${local.repo}/backend/${f}")
+    for f in sort(fileset("${local.src}/backend", "**/*.{go,mod,sum}")) : filesha1("${local.src}/backend/${f}")
   ]))
   frontend_files = sort(setunion(
-    fileset("${local.repo}/frontend", "src/**"),
-    fileset("${local.repo}/frontend", "public/**"),
-    fileset("${local.repo}/frontend", "{package.json,pnpm-lock.yaml,index.html,vite.config.ts,tsconfig*.json}"),
+    fileset("${local.src}/frontend", "src/**"),
+    fileset("${local.src}/frontend", "public/**"),
+    fileset("${local.src}/frontend", "{package.json,pnpm-lock.yaml,index.html,vite.config.ts,tsconfig*.json}"),
   ))
-  frontend_hash = sha1(join("", [for f in local.frontend_files : filesha1("${local.repo}/frontend/${f}")]))
+  frontend_hash = sha1(join("", [for f in local.frontend_files : filesha1("${local.src}/frontend/${f}")]))
 
   # Хэши локальных .env — только чтобы повторный apply пересобрал .env для ВМ при их правке.
   env_files_hash = sha1(join("", [
@@ -73,7 +76,7 @@ resource "null_resource" "build" {
   provisioner "local-exec" {
     command = "${path.module}/scripts/build.sh"
     environment = {
-      REPO   = local.repo
+      REPO   = local.src
       VM_DIR = local.vm_dir
     }
   }

@@ -50,3 +50,9 @@ variable "acme_email" {
   type        = string
   default     = ""
 }
+
+variable "source_dir" {
+  description = "Каталог с исходниками для сборки бинарника и кабинета (чистый git worktree на нужном коммите). Пусто — сам репозиторий. Секреты .env всегда берутся из репозитория."
+  type        = string
+  default     = ""
+}
