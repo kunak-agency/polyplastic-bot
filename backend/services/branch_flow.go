@@ -450,6 +450,9 @@ func (s *SchedulerService) runEmployee(ctx context.Context, tx *repositories.Rep
 	if err != nil || e == nil {
 		return 0, err
 	}
+	if !reachable(e) { // не привязан к MAX: события ждут подключения, а не уходят в пустоту
+		return 0, nil
+	}
 	f, err := s.loadFlow(ctx, tx, e)
 	if err != nil {
 		return 0, err
@@ -719,6 +722,9 @@ func (s *SchedulerService) remindNoAnswer(ctx context.Context) (int, error) {
 			e, err := tx.Employees.ByID(ctx, ev.EmployeeID)
 			if err != nil || e == nil {
 				return err
+			}
+			if e.Connection != domain.ConnConnected || !reachable(e) { // отключил бота или не привязан
+				continue
 			}
 			f := &flow{e: e, versions: map[int]*domain.ScenarioVersion{}}
 			if ev.Snapshot == nil {

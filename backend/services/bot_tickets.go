@@ -126,11 +126,11 @@ func (b *BotService) ticketCallback(ctx context.Context, u max.Update, emp *doma
 			return err
 		}
 		if t == nil || t.EmployeeID != emp.ID {
-			note = "Эта кнопка больше не работает"
+			note = textButtonStale // обращение удалено или чужое
 			return nil
 		}
 		closed := t.Status == domain.TicketResolved
-		to := recipientOf(emp)
+		to := updateRecipient(u, emp) // кто нажал, а не чья запись
 		switch prefix {
 		case preTicketUp, preTicketDown:
 			t.Feedback, note = "up", "Спасибо! Записал"
@@ -216,7 +216,11 @@ func (b *BotService) accessReason(ctx context.Context, u max.Update, empID uuid.
 		if err != nil {
 			return err
 		}
-		if ev == nil || ev.Status != domain.EventSent {
+		if ev == nil {
+			reply = max.Answer{Notification: textButtonStale}
+			return nil
+		}
+		if ev.Status != domain.EventSent {
 			reply = max.Answer{Notification: "Уже записал"}
 			return nil
 		}

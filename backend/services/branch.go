@@ -237,7 +237,11 @@ func (b *BotService) stepButton(ctx context.Context, u max.Update, empID uuid.UU
 		if err != nil {
 			return err
 		}
-		if ev == nil || ev.Status != domain.EventSent || idx < 0 || idx >= len(step.Buttons) {
+		if ev == nil {
+			reply = max.Answer{Notification: textButtonStale} // шаг удалён или чужой
+			return nil
+		}
+		if ev.Status != domain.EventSent || idx < 0 || idx >= len(step.Buttons) {
 			reply = max.Answer{Notification: "Уже записал"}
 			return nil
 		}
@@ -342,8 +346,12 @@ func (b *BotService) terminalButton(ctx context.Context, u max.Update, empID uui
 		if err != nil {
 			return err
 		}
+		if ev == nil {
+			reply = max.Answer{Notification: textButtonStale}
+			return nil
+		}
 		br := resolveBranch(step, src)
-		if ev == nil || br == nil || m < 0 || m >= len(br.Messages) || j < 0 || j >= len(br.Messages[m].Buttons) {
+		if br == nil || m < 0 || m >= len(br.Messages) || j < 0 || j >= len(br.Messages[m].Buttons) {
 			reply = max.Answer{Notification: "Эта кнопка больше не работает"}
 			return nil
 		}
@@ -427,8 +435,12 @@ func (b *BotService) continuePress(ctx context.Context, u max.Update, empID uuid
 	release := false
 	err = b.repos.Transaction(ctx, func(tx *repositories.Repos) error {
 		ev, e, _, err := b.loadEvent(ctx, tx, evID, empID)
-		if err != nil || ev == nil {
+		if err != nil {
 			return err
+		}
+		if ev == nil {
+			reply = max.Answer{Notification: textButtonStale}
+			return nil
 		}
 		if ev.Waiting != domain.WaitContinue {
 			reply = max.Answer{Notification: "Уже дальше"}

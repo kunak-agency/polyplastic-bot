@@ -81,15 +81,18 @@ const (
 	textConsentDeclinedVy   = " Если передумаете, напишите HR-команде."
 	textConsentDeclinedTy   = " Если передумаешь, напиши HR-команде."
 	textInviteBroken        = "Ссылка не сработала. Напишите рекрутеру — он пришлёт новую."
-	btnCheckPhone           = "Проверить по телефону"
-	textHumanNoted          = "Записал: передам ваш запрос HR-команде, с вами свяжутся."
-	textWelcomeBack         = "С возвращением! Я на связи 🐾"
-	textContactNoted        = "Спасибо! Передам рекрутеру, он проверит и пришлёт новую ссылку."
-	textSurveyDone          = "✅ Спасибо! Ответы записаны."
-	textRemindLater         = "🕓 Хорошо, напомню завтра."
-	textRemindStopped       = "Хорошо, не буду напоминать. Если захотите вернуться к опросу — напишите HR-команде."
-	textWriteOwn            = "Напишите одним сообщением, что не так. Я привяжу ответ к этому вопросу."
-	testPrefix              = "[ТЕСТ] "
+	// textButtonStale — нажата кнопка старого сообщения: записи, на которую она ссылается (вопрос,
+	// шаг, обращение), больше нет или она чужая.
+	textButtonStale   = "Это сообщение устарело"
+	btnCheckPhone     = "Проверить по телефону"
+	textHumanNoted    = "Записал: передам ваш запрос HR-команде, с вами свяжутся."
+	textWelcomeBack   = "С возвращением! Я на связи 🐾"
+	textContactNoted  = "Спасибо! Передам рекрутеру, он проверит и пришлёт новую ссылку."
+	textSurveyDone    = "✅ Спасибо! Ответы записаны."
+	textRemindLater   = "🕓 Хорошо, напомню завтра."
+	textRemindStopped = "Хорошо, не буду напоминать. Если захотите вернуться к опросу — напишите HR-команде."
+	textWriteOwn      = "Напишите одним сообщением, что не так. Я привяжу ответ к этому вопросу."
+	testPrefix        = "[ТЕСТ] "
 )
 
 // maxReminders — «Напомнить завтра» не более двух раз (UX-спецификация п. 2.3).
@@ -248,6 +251,24 @@ func recipientOf(e *domain.Employee) recipient {
 		r.UserID = *e.MaxUserID
 	}
 	return r
+}
+
+// empty — адресата нет: MAX такое сообщение не примет («не указан ни ChatID, ни UserID»).
+func (r recipient) empty() bool { return r.ChatID == 0 && r.UserID == 0 }
+
+// reachable — новичку есть куда писать: карточка привязана к MAX (аккаунт или чат). Фоновые
+// отправки (такт планировщика, напоминания) карточки без привязки пропускают.
+func reachable(e *domain.Employee) bool {
+	return e != nil && !recipientOf(e).empty()
+}
+
+// updateRecipient — адресат ответа на событие: тот, кто нажал или написал (чат и аккаунт из
+// апдейта). В апдейте нет ни того, ни другого — из карточки.
+func updateRecipient(u max.Update, e *domain.Employee) recipient {
+	if to := (recipient{ChatID: u.ChatID, UserID: u.UserID}); !to.empty() || e == nil {
+		return to
+	}
+	return recipientOf(e)
 }
 
 // stepText — текст шага в выбранной форме обращения, с подстановкой имени и дня выхода. Пока

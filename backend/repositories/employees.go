@@ -80,6 +80,12 @@ func (r *EmployeeRepo) ByScenario(ctx context.Context, scenarioID uuid.UUID) ([]
 	return out, err
 }
 
+// SetChat — запомнить чат диалога с новичком (из нажатия, если bot_started его не принёс) —
+// точечно, без перезаписи карточки.
+func (r *EmployeeRepo) SetChat(ctx context.Context, id uuid.UUID, chatID int64) error {
+	return r.db.WithContext(ctx).Model(&domain.Employee{}).Where("id = ? AND chat_id IS NULL", id).Update("chat_id", chatID).Error
+}
+
 // UnbindMaxUser — снять связку аккаунта MAX со всех карточек, кроме keep. Нужна, когда один
 // тестовый аккаунт открывает приглашения разных синтетических новичков.
 func (r *EmployeeRepo) UnbindMaxUser(ctx context.Context, userID int64, keep uuid.UUID) error {

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,6 +58,15 @@ func (b *BotService) Handle(ctx context.Context, u max.Update) {
 		b.echo(ctx, u)
 		return
 	}
+	switch u.Type {
+	case max.UpdateBotStarted, max.UpdateMessageCallback, max.UpdateMessageCreated:
+		if u.UserID == 0 && u.ChatID == 0 {
+			// Отвечать некуда и некого искать: ByMaxUser(0) не найдёт карточку, а ответ «ссылка
+			// не сработала» ушёл бы в пустоту.
+			logger.Warn("бот: %s без user и chat пропущено (кнопка: %v)", u.Type, u.CallbackID != "")
+			return
+		}
+	}
 	var err error
 	switch u.Type {
 	case max.UpdateBotStarted:
@@ -89,9 +99,39 @@ func (b *BotService) echo(ctx context.Context, u max.Update) {
 }
 
 func (b *BotService) send(ctx context.Context, m max.OutMessage) {
+	if noRecipient(m, "сообщение") {
+		return
+	}
 	if _, err := b.max.Send(ctx, m); err != nil {
 		logger.Warn("бот: сообщение user=%d chat=%d не ушло: %v", m.UserID, m.ChatID, err)
 	}
+}
+
+// noRecipient — у сообщения нет адресата: в MAX его не шлём, а пишем в лог, кто его собрал
+// (функция и строка вызова), что за сообщение и сколько в нём кнопок. Текст в лог не идёт.
+func noRecipient(m max.OutMessage, what string) bool {
+	if m.ChatID != 0 || m.UserID != 0 {
+		return false
+	}
+	logger.Warn("бот: %s без получателя (нет ни chat, ни user) не отправлено: собрал %s, рядов кнопок %d, вложений %d",
+		what, callerOf(3), len(m.Buttons), len(m.Attachments))
+	return true
+}
+
+// callerOf — «services.(*BotService).questionCallback:412» для вызова skip уровней выше.
+func callerOf(skip int) string {
+	pc, _, line, ok := runtime.Caller(skip)
+	if !ok {
+		return "?"
+	}
+	name := "?"
+	if f := runtime.FuncForPC(pc); f != nil {
+		name = f.Name()
+		if i := strings.LastIndexByte(name, '/'); i >= 0 {
+			name = name[i+1:]
+		}
+	}
+	return name + ":" + strconv.Itoa(line)
 }
 
 func (b *BotService) answer(ctx context.Context, callbackID string, a max.Answer) {
@@ -212,6 +252,11 @@ func (b *BotService) callback(ctx context.Context, u max.Update) error {
 	if ok, err := b.managerCallback(ctx, u); ok { // кнопки push руководителю (manager_bot.go)
 		return err
 	}
+	if u.UserID == 0 { // кто нажал — неизвестно: карточку не найти, ответить некому
+		logger.Warn("бот: нажатие без user в chat=%d пропущено", u.ChatID)
+		b.answer(ctx, u.CallbackID, max.Answer{Notification: textButtonStale})
+		return nil
+	}
 	emp, err := b.repos.Employees.ByMaxUser(ctx, u.UserID)
 	if err != nil {
 		return err
@@ -219,6 +264,16 @@ func (b *BotService) callback(ctx context.Context, u max.Update) error {
 	if emp == nil {
 		b.answer(ctx, u.CallbackID, max.Answer{Notification: textInviteBroken})
 		return nil
+	}
+	// Отвечаем тому, кто нажал, в чат нажатия: карточка нашлась по аккаунту из апдейта, а чат,
+	// если в карточке его ещё нет, берём из апдейта же — по нему уходят и сообщения веток, и
+	// продолжения после нажатия.
+	if emp.ChatID == nil && u.ChatID != 0 {
+		if err := b.repos.Employees.SetChat(ctx, emp.ID, u.ChatID); err != nil {
+			return err
+		}
+		chat := u.ChatID
+		emp.ChatID = &chat
 	}
 	p := u.Payload
 	switch {
@@ -234,7 +289,7 @@ func (b *BotService) callback(ctx context.Context, u max.Update) error {
 		return b.consent(ctx, u, emp.ID, p == payConsentYes)
 	case p == payConsentMore:
 		b.answer(ctx, u.CallbackID, max.Answer{Notification: "Подробнее — ниже"})
-		b.send(ctx, recipientOf(emp).msg(textConsentMore, "", nil))
+		b.send(ctx, updateRecipient(u, emp).msg(textConsentMore, "", nil))
 		return nil
 	case p == payHuman || strings.HasPrefix(p, preHuman):
 		return b.human(ctx, u, emp, strings.TrimPrefix(p, preHuman))
@@ -270,10 +325,11 @@ func (b *BotService) chooseAddress(ctx context.Context, u max.Update, id uuid.UU
 	if err != nil || emp == nil {
 		return err
 	}
-	done := recipientOf(emp).msg(addressChosenText(form, emp.FullName), formatMarkdown, nil)
+	to := updateRecipient(u, emp)
+	done := to.msg(addressChosenText(form, emp.FullName), formatMarkdown, nil)
 	b.answer(ctx, u.CallbackID, max.Answer{Notification: "Записал", Message: &done})
 	if emp.Consent == nil {
-		b.send(ctx, consentMessage(recipientOf(emp)))
+		b.send(ctx, consentMessage(to))
 	}
 	return nil
 }
@@ -320,7 +376,7 @@ func (b *BotService) consent(ctx context.Context, u max.Update, id uuid.UUID, gi
 		return err
 	}
 	text := consentAnsweredText(emp, given, next, now)
-	done := recipientOf(emp).msg(text, "", nil)
+	done := updateRecipient(u, emp).msg(text, "", nil)
 	b.answer(ctx, u.CallbackID, max.Answer{Notification: "Записал", Message: &done})
 
 	// Пакет D−3 идёт с паузами 2–3 с — в фоне, чтобы не держать чтение апдейтов остальных.
@@ -462,6 +518,9 @@ func (b *BotService) surveyCallback(ctx context.Context, u max.Update, empID uui
 
 // resend — продолжение опроса новым сообщением (старое старше суток); id нового — в событие.
 func (b *BotService) resend(ctx context.Context, out surveyOutcome) {
+	if noRecipient(*out.msg, "продолжение опроса "+out.eventID.String()) {
+		return
+	}
 	mid, err := b.max.Send(ctx, *out.msg)
 	if err != nil {
 		logger.Warn("бот: продолжение опроса %s не ушло: %v", out.eventID, err)
@@ -489,7 +548,11 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 		if err != nil {
 			return err
 		}
-		if ev == nil || ev.Status != domain.EventSent || ev.Survey == nil || !isSurvey(step) {
+		if ev == nil {
+			out.notification = textButtonStale // события нет (удалено) или оно чужое
+			return nil
+		}
+		if ev.Status != domain.EventSent || ev.Survey == nil || !isSurvey(step) {
 			out.notification = "Этот опрос уже закрыт"
 			return nil
 		}

@@ -79,7 +79,9 @@ func (r *EventRepo) DueEmployees(ctx context.Context, f DueFilter) ([]uuid.UUID,
 func (r *EventRepo) dueQuery(ctx context.Context, f DueFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Table("scheduled_events AS e").
 		Joins("JOIN employees m ON m.id = e.employee_id").
-		Where("e.status = ? AND m.connection = ?", domain.EventScheduled, domain.ConnConnected)
+		Where("e.status = ? AND m.connection = ?", domain.EventScheduled, domain.ConnConnected).
+		// без привязки к MAX слать некуда: такие карточки такт не берёт
+		Where("(m.max_user_id IS NOT NULL OR m.chat_id IS NOT NULL)")
 	if f.MaxDay != nil {
 		q = q.Where("e.day_offset <= ?", *f.MaxDay).
 			Where("(m.consent IS NOT NULL OR e.kind <> ?)", domain.KindSurvey)

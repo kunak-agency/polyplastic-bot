@@ -75,7 +75,7 @@ func (b *BotService) managerCallback(ctx context.Context, u max.Update) (bool, e
 		return true, err
 	}
 	if n == nil || n.ManagerUserID != u.UserID {
-		b.answer(ctx, u.CallbackID, max.Answer{Notification: "Эта кнопка больше не работает"})
+		b.answer(ctx, u.CallbackID, max.Answer{Notification: textButtonStale})
 		return true, nil
 	}
 	now := b.now()

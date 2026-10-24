@@ -116,7 +116,7 @@ func (s *SchedulerService) remindSurveys(ctx context.Context) (int, error) {
 			if err != nil || e == nil {
 				return err
 			}
-			if e.Connection != domain.ConnConnected {
+			if e.Connection != domain.ConnConnected || !reachable(e) {
 				continue
 			}
 			rule := scenarioRule(ctx, tx, e, domain.RuleSurveyReminder)

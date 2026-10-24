@@ -15,6 +15,7 @@ import (
 type Fake struct {
 	mu      sync.Mutex
 	sent    []OutMessage
+	refused []OutMessage // Send без ChatID и UserID: настоящий MAX вернул бы errNoRecipient
 	edits   []FakeEdit
 	answers []FakeAnswer
 	uploads []string
@@ -66,11 +67,12 @@ func (f *Fake) Push(updates ...Update) { f.batches <- fakeBatch{updates: updates
 func (f *Fake) PushError(err error) { f.batches <- fakeBatch{err: err} }
 
 func (f *Fake) Send(_ context.Context, m OutMessage) (string, error) {
-	if m.ChatID == 0 && m.UserID == 0 {
-		return "", errNoRecipient
-	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if m.ChatID == 0 && m.UserID == 0 {
+		f.refused = append(f.refused, m)
+		return "", errNoRecipient
+	}
 	f.nextMid++
 	f.sent = append(f.sent, m)
 	mid := fmt.Sprintf("mid.fake.%d", f.nextMid)
@@ -132,7 +134,14 @@ func (f *Fake) GetUpdates(ctx context.Context, _ int64) ([]Update, int64, error)
 func (f *Fake) Reset() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sent, f.edits, f.answers, f.typing = nil, nil, nil, nil
+	f.sent, f.refused, f.edits, f.answers, f.typing = nil, nil, nil, nil, nil
+}
+
+// Refused — копия сообщений, которые не ушли: не указан ни ChatID, ни UserID.
+func (f *Fake) Refused() []OutMessage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]OutMessage(nil), f.refused...)
 }
 
 // Sent — копия отправленных сообщений.

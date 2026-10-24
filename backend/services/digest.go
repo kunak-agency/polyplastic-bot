@@ -535,6 +535,9 @@ func (s *DigestService) Send(ctx context.Context, week string) (*DigestSendResul
 		return res, nil
 	}
 	for _, uid := range s.opts.UserIDs {
+		if uid == 0 {
+			continue
+		}
 		_, err := s.max.Send(ctx, max.OutMessage{UserID: uid, Text: d.MaxText,
 			Buttons: [][]max.Button{{{Text: "Открыть аналитику", URL: d.Link}}}})
 		if err != nil {

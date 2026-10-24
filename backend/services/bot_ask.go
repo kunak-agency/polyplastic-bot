@@ -376,6 +376,9 @@ func (b *BotService) sendQuestion(ctx context.Context, to recipient, emp *domain
 			msg.Attachments = b.attach(ctx, emp, rule.Media)
 		}
 	}
+	if noRecipient(msg, "ответ на вопрос "+q.ID.String()) {
+		return
+	}
 	mid, err := b.max.Send(ctx, msg)
 	if err != nil {
 		logger.Warn("бот: ответ на вопрос %s не ушёл: %v", q.ID, err)
@@ -522,11 +525,11 @@ func (b *BotService) questionCallback(ctx context.Context, u max.Update, emp *do
 			return err
 		}
 		if q == nil || q.EmployeeID != emp.ID {
-			out.notification = "Эта кнопка больше не работает"
+			out.notification = textButtonStale // вопрос удалён или чужой
 			return nil
 		}
 		now := b.now()
-		to := recipientOf(emp)
+		to := updateRecipient(u, emp) // кто нажал, а не чья запись
 		// onMain — нажато в самом сообщении с ответом (а не в уточнении или «Передать HR?»).
 		onMain := u.MessageID == "" || u.MessageID == q.MessageID
 		final := func(line string) *max.OutMessage {
