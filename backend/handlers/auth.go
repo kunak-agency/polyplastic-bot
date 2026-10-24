@@ -196,7 +196,7 @@ func (h *Handler) recruiterPolicy(c *fiber.Ctx, u *domain.User, p, m string) err
 	read := m == fiber.MethodGet || m == fiber.MethodHead
 	switch {
 	case p == "/api/team" || strings.HasPrefix(p, "/api/users") || p == "/api/newcomers/reassign" ||
-		strings.HasPrefix(p, "/api/hrlead/"):
+		strings.HasPrefix(p, "/api/hrlead/") || p == "/api/dev/recruiter-morning":
 		return errForbidden()
 	case strings.HasPrefix(p, "/api/scenarios"):
 		if read || rePreviewPath.MatchString(p) || (isDev() && reSendTest.MatchString(p)) {

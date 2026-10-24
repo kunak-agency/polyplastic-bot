@@ -43,24 +43,24 @@ func TestConsentAnsweredText(t *testing.T) {
 	now := msk(2026, 10, 30, 22, 0)
 	soon, monday := now.Add(2*time.Minute), msk(2026, 11, 2, 10, 0)
 
-	if got := consentAnsweredText(eVy, true, &soon, now); got != textConsentGiven {
+	if got := consentAnsweredText(eVy, true, &soon, now, domain.SiteOf(eVy.Site)); got != textConsentGiven {
 		t.Errorf("шаг уходит сейчас: %q", got)
 	}
-	if got := consentAnsweredText(eVy, true, &monday, now); got != "✅ Спасибо, согласие записано. Первые материалы пришлю "+
+	if got := consentAnsweredText(eVy, true, &monday, now, domain.SiteOf(eVy.Site)); got != "✅ Спасибо, согласие записано. Первые материалы пришлю "+
 		"в понедельник в 10:00. А пока можете спросить меня о пропуске, графике или зарплате — отвечу по документам." {
 		t.Errorf("вы, понедельник: %q", got)
 	}
-	if got := consentAnsweredText(eTy, true, &monday, now); !strings.Contains(got, "пришлю в понедельник в 10:00. А пока можешь") {
+	if got := consentAnsweredText(eTy, true, &monday, now, domain.SiteOf(eTy.Site)); !strings.Contains(got, "пришлю в понедельник в 10:00. А пока можешь") {
 		t.Errorf("ты, понедельник: %q", got)
 	}
-	if got := consentAnsweredText(eTy, true, nil, now); got != textConsentGivenNoneTy {
+	if got := consentAnsweredText(eTy, true, nil, now, domain.SiteOf(eTy.Site)); got != textConsentGivenNoneTy {
 		t.Errorf("шагов нет: %q", got)
 	}
-	if got := consentAnsweredText(eVy, false, &monday, now); got != "Понял. Опросы присылать не буду — только напоминания и "+
+	if got := consentAnsweredText(eVy, false, &monday, now, domain.SiteOf(eVy.Site)); got != "Понял. Опросы присылать не буду — только напоминания и "+
 		"ответы на вопросы. Первое напоминание пришлю в понедельник в 10:00. Если передумаете, напишите HR-команде." {
 		t.Errorf("отказ, понедельник: %q", got)
 	}
-	if got := consentAnsweredText(eTy, false, &soon, now); strings.Contains(got, "пришлю") || !strings.HasSuffix(got, "напиши HR-команде.") {
+	if got := consentAnsweredText(eTy, false, &soon, now, domain.SiteOf(eTy.Site)); strings.Contains(got, "пришлю") || !strings.HasSuffix(got, "напиши HR-команде.") {
 		t.Errorf("отказ, сейчас: %q", got)
 	}
 }

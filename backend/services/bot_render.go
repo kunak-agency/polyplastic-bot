@@ -185,11 +185,11 @@ const soonWindow = 5 * time.Minute
 // события (nil — их нет), now — момент ответа. Если ближайший шаг уйдёт не в ближайшие минуты
 // (ночь, выходные — UX п. 0, правило 7), обещаем точное время по часам площадки, а не
 // «дальше — немного полезного».
-func consentAnsweredText(e *domain.Employee, given bool, next *time.Time, now time.Time) string {
+func consentAnsweredText(e *domain.Employee, given bool, next *time.Time, now time.Time, site domain.Site) string {
 	later := next != nil && next.Sub(now) > soonWindow
 	when := ""
 	if later {
-		when = sendWhenPhrase(*next, now, domain.SiteOf(e.Site))
+		when = sendWhenPhrase(*next, now, site)
 	}
 	if !given {
 		s := textConsentDeclinedHead
@@ -227,6 +227,9 @@ func sendWhenPhrase(at, now time.Time, site domain.Site) string {
 type recipient struct {
 	ChatID int64
 	UserID int64
+	// site — календарь новичка для времени в тексте ({start_day}): с FEATURE_TZ — SiteFor
+	// (пояс новичка); nil — пояс площадки (tz_texts.go).
+	site *domain.Site
 }
 
 func (r recipient) msg(text, format string, buttons [][]max.Button) max.OutMessage {
@@ -275,6 +278,11 @@ func updateRecipient(u max.Update, e *domain.Employee) recipient {
 // форма не выбрана — «вы». Пустой вариант берётся из другого. at — когда сообщение уходит (или
 // ушло): от него зависит, «завтра» ли день выхода.
 func stepText(s domain.ScenarioStep, e *domain.Employee, at time.Time) string {
+	return stepTextIn(s, e, at, domain.SiteOf(e.Site))
+}
+
+// stepTextIn — stepText с календарём новичка site ({start_day} — по его часам).
+func stepTextIn(s domain.ScenarioStep, e *domain.Employee, at time.Time, site domain.Site) string {
 	text := s.TextVy
 	if e.AddressForm != nil && *e.AddressForm == domain.AddressTy {
 		text = s.TextTy
@@ -288,7 +296,7 @@ func stepText(s domain.ScenarioStep, e *domain.Employee, at time.Time) string {
 		text = s.Title
 	}
 	name := FirstName(e.FullName)
-	day := StartDayPhrase(e.StartDate, at, domain.SiteOf(e.Site))
+	day := StartDayPhrase(e.StartDate, at, site)
 	return strings.NewReplacer("{Имя}", name, "{имя}", name, "{name}", name,
 		"{start_day}", day, "{Start_day}", capitalize(day)).Replace(text)
 }
@@ -338,7 +346,7 @@ func buttonURL(action string) string {
 // stepMessage — обычный шаг (не опрос): текст без формата, кнопки шага по две в ряд и
 // «Спросить человека» последним рядом. Без кнопок — без клавиатуры.
 func stepMessage(to recipient, s domain.ScenarioStep, e *domain.Employee, eventID uuid.UUID, test bool, at time.Time) max.OutMessage {
-	text := stepText(s, e, at)
+	text := stepTextIn(s, e, at, to.siteFor(e))
 	if test {
 		text = testPrefix + text
 	}
@@ -362,7 +370,12 @@ func stepMessage(to recipient, s domain.ScenarioStep, e *domain.Employee, eventI
 
 // stepAnsweredText — итог обычного шага после нажатия: исходный текст и отметка выбора.
 func stepAnsweredText(s domain.ScenarioStep, e *domain.Employee, label string, test bool, at time.Time) string {
-	text := stepText(s, e, at)
+	return stepAnsweredTextIn(s, e, label, test, at, domain.SiteOf(e.Site))
+}
+
+// stepAnsweredTextIn — stepAnsweredText с календарём новичка site.
+func stepAnsweredTextIn(s domain.ScenarioStep, e *domain.Employee, label string, test bool, at time.Time, site domain.Site) string {
+	text := stepTextIn(s, e, at, site)
 	if test {
 		text = testPrefix + text
 	}
@@ -426,7 +439,7 @@ func surveyMessage(to recipient, s domain.ScenarioStep, e *domain.Employee, ev *
 	done := st.Q >= len(sv.Questions)
 	if done {
 		b.WriteString(textSurveyDone)
-	} else if intro := strings.TrimSpace(stepText(s, e, at)); intro != "" {
+	} else if intro := strings.TrimSpace(stepTextIn(s, e, at, to.siteFor(e))); intro != "" {
 		b.WriteString(escapeMarkdown(intro))
 	}
 	for i, r := range st.Results {

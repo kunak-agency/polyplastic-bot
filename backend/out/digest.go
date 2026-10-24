@@ -252,6 +252,12 @@ func ManagerViewFrom(v *services.ManagerView) ManagerView {
 	return r
 }
 
+// RecruiterMorningSent — POST /api/dev/recruiter-morning: кому ушла утренняя сводка.
+type RecruiterMorningSent struct {
+	UserID uuid.UUID `json:"user_id"`
+	Text   string    `json:"text"`
+}
+
 // ManagerPush — POST /api/dev/manager/push.
 type ManagerPush struct {
 	NudgeID    uuid.UUID `json:"nudge_id"`

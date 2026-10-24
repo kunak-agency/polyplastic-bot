@@ -344,6 +344,8 @@ func (b *BotService) callback(ctx context.Context, u max.Update) error {
 		return b.terminalButton(ctx, u, emp.ID, strings.TrimPrefix(p, preTerminal))
 	case strings.HasPrefix(p, preContinue):
 		return b.continuePress(ctx, u, emp.ID, strings.TrimPrefix(p, preContinue))
+	case strings.HasPrefix(p, preNudgeSkip):
+		return b.nudgeSkip(ctx, u, emp.ID, strings.TrimPrefix(p, preNudgeSkip))
 	case isClarifyPayload(p):
 		return b.clarifyCallback(ctx, u, emp.ID)
 	case strings.HasPrefix(p, preReason), strings.HasPrefix(p, preWrite), strings.HasPrefix(p, preSkip),
@@ -422,7 +424,7 @@ func (b *BotService) consent(ctx context.Context, u max.Update, id uuid.UUID, gi
 	if err != nil || emp == nil {
 		return err
 	}
-	text := consentAnsweredText(emp, given, next, now)
+	text := consentAnsweredText(emp, given, next, now, b.siteFor(emp))
 	done := updateRecipient(u, emp).msg(text, "", nil)
 	b.answer(ctx, u.CallbackID, max.Answer{Notification: "Записал", Message: &done})
 
@@ -767,7 +769,7 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 				m := recipientOf(e).msg(textRemindStopped, "", nil)
 				out.msg = &m
 			} else {
-				site := domain.SiteOf(e.Site)
+				site := b.siteFor(e) // «Напомнить завтра» — по часам новичка (FEATURE_TZ)
 				ev.Status = domain.EventScheduled
 				ev.FireAt = NextWorkdayAt(now, step.Time, site, step.WorkHoursOnly)
 				m := recipientOf(e).msg(textRemindLater, "", nil)
@@ -796,7 +798,7 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 			out.outcomes = evalOutcomes(sv, st)
 		}
 		if out.msg == nil {
-			m := surveyMessage(recipientOf(e), step, e, ev, sentAt(ev, now))
+			m := surveyMessage(b.recipient(e), step, e, ev, sentAt(ev, now))
 			out.msg = &m
 			if out.branch != nil && ev.Status == domain.EventSent {
 				// ветка варианта: итоги без вопроса → сообщения ветки → вопрос новым сообщением
@@ -805,7 +807,7 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 				fs := *st
 				fs.Screen = screenFrozen
 				frozen.Survey = &fs
-				f := surveyMessage(recipientOf(e), step, e, &frozen, sentAt(ev, now))
+				f := surveyMessage(b.recipient(e), step, e, &frozen, sentAt(ev, now))
 				out.msg = &f
 			}
 		}

@@ -241,8 +241,8 @@ type runOpts struct {
 func holderOf(evs []*domain.ScheduledEvent, now time.Time) *domain.ScheduledEvent {
 	var h *domain.ScheduledEvent
 	for _, ev := range evs {
-		if ev.Waiting == "" {
-			continue
+		if ev.Waiting == "" || heldOut(ev) {
+			continue // вопрос без ответа 48 ч остаётся открытым, но поток уже не держит
 		}
 		if ev.Status == domain.EventScheduled && !ev.FireAt.After(now) {
 			continue // созревший повтор опроса — сам уйдёт следующей репликой
@@ -336,7 +336,7 @@ func (s *SchedulerService) sendRun(ctx context.Context, tx *repositories.Repos, 
 		if found && sendable(f.e, step) {
 			switch {
 			case prevAuto:
-				s.typingPause(ctx, f.e, stepText(step, f.e, s.now()))
+				s.typingPause(ctx, f.e, stepTextIn(step, f.e, s.now(), s.recipient(f.e).siteFor(f.e)))
 			case !o.test && o.paused != nil && *o.paused && s.packGap > 0:
 				if err := s.sleep(ctx, s.packGap); err != nil {
 					return res, err
@@ -408,7 +408,7 @@ func (s *SchedulerService) flushMissed(ctx context.Context, tx *repositories.Rep
 		step, ok := f.step(locked)
 		// Опрос в сводку не кладём (его заголовок — не сообщение): он пропущен, как необязательный.
 		if ok && step.Required && sendable(f.e, step) && !isSurvey(step) {
-			t := strings.TrimSpace(stepText(step, f.e, s.now()))
+			t := strings.TrimSpace(stepTextIn(step, f.e, s.now(), s.recipient(f.e).siteFor(f.e)))
 			var a []max.AttachmentRef
 			if media && len(step.Media) > 0 {
 				a, _ = s.attachFor(ctx, f.e, step.Media, step.Title)
@@ -826,7 +826,7 @@ func (s *SchedulerService) remindNoAnswer(ctx context.Context) (int, error) {
 			if now.Before(ev.SentAt.Add(time.Duration(rule.RemindAfterH[ev.Reminded])*time.Hour)) || !InWorkHours(now, site) {
 				continue
 			}
-			msg := stepMessage(recipientOf(e), st, e, ev.ID, ev.IsTest, now)
+			msg := stepMessage(s.recipient(e), st, e, ev.ID, ev.IsTest, now)
 			msg.Text = textRemindHead + "\n" + msg.Text
 			mid, err := s.max.Send(ctx, msg)
 			if err != nil {

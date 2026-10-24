@@ -284,7 +284,7 @@ func (b *BotService) stepButton(ctx context.Context, u max.Update, empID uuid.UU
 		if err := tx.Employees.Save(ctx, e); err != nil {
 			return err
 		}
-		done := recipientOf(e).msg(stepAnsweredText(step, e, btn.Label, ev.IsTest, sentAt(ev, now)), "", nil)
+		done := b.recipient(e).msg(stepAnsweredTextIn(step, e, btn.Label, ev.IsTest, sentAt(ev, now), b.siteFor(e)), "", nil)
 		reply = max.Answer{Notification: "Записал", Message: &done}
 		p.emp, p.ev, p.edit = e, *ev, &done
 		plan = p
@@ -363,13 +363,14 @@ func (b *BotService) terminalButton(ctx context.Context, u max.Update, empID uui
 				pressed += fmt.Sprintf(" (вопрос %d)", qn+1)
 			}
 		}
-		if ev.Answer != nil && strings.Contains(*ev.Answer, pressed) {
+		prevAns := answerBefore(ev)
+		if prevAns != nil && strings.Contains(*prevAns, pressed) {
 			reply = max.Answer{Notification: "Уже записал"}
 			return nil
 		}
 		ans := pressed
-		if ev.Answer != nil {
-			ans = *ev.Answer + " " + pressed
+		if prevAns != nil {
+			ans = *prevAns + " " + pressed
 		}
 		ev.Answer = &ans
 		wasWaiting := ev.Waiting == domain.WaitBranch && !strings.HasPrefix(src, "q") && !strings.HasPrefix(src, "o")
@@ -618,7 +619,7 @@ func (b *BotService) resumeSurvey(ctx context.Context, empID, evID uuid.UUID) {
 	if !ok || !isSurvey(step) || ev.Survey.Q >= len(step.Survey.Questions) {
 		return
 	}
-	msg := surveyMessage(recipientOf(e), step, e, ev, b.now())
+	msg := surveyMessage(b.recipient(e), step, e, ev, b.now())
 	b.resend(ctx, surveyOutcome{msg: &msg, eventID: evID})
 }
 
@@ -838,8 +839,8 @@ func (b *BotService) freeText(ctx context.Context, emp *domain.Employee, text, m
 		}
 		ev, step = x, st
 		ans := w.Label + ": свой ответ"
-		if x.Answer != nil && *x.Answer != w.Label {
-			ans = *x.Answer + " (свой ответ)"
+		if prev := answerBefore(x); prev != nil && *prev != w.Label {
+			ans = *prev + " (свой ответ)"
 		}
 		x.Answer = &ans
 		if x.Waiting == domain.WaitFreeText {

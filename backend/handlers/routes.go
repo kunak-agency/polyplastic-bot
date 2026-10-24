@@ -119,6 +119,7 @@ func RegisterRoutes(app *fiber.App, h *Handler) {
 	dev.Post("/chat/:id/press", h.DevChatPress)
 	dev.Post("/digest/send", h.DevDigestSend)
 	dev.Post("/manager/push", h.DevManagerPush)
+	dev.Post("/recruiter-morning", h.DevRecruiterMorning) // за сессией hr_lead (policy)
 	dev.Post("/manager/start", h.DevManagerStart)
 	dev.Post("/manager/press", h.DevManagerPress)
 	dev.Get("/manager/chat", h.DevManagerChat)

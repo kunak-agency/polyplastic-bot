@@ -57,7 +57,9 @@ type DigestService struct {
 	max   max.Client
 	llm   DigestLLM
 	opts  DigestOptions
-	now   func() time.Time
+	// risk — режим зон риска, как у обзора (FEATURE_RISK_V2): цифры дайджеста и обзора совпадают.
+	risk OverviewOptions
+	now  func() time.Time
 }
 
 // digestTextCache — текст LLM по хэшу агрегатов: кабинет не ждёт модель на каждом открытии.
@@ -66,7 +68,7 @@ var digestTextCache sync.Map
 // Digest — сервис дайджеста (по образцу Overview: без поля в Services).
 func (s *Services) Digest() *DigestService {
 	o := s.Overview()
-	d := &DigestService{repos: s.repos, tax: o.tax, now: o.now, opts: s.digestOpts}
+	d := &DigestService{repos: s.repos, tax: o.tax, now: o.now, opts: s.digestOpts, risk: o.opts}
 	if s.ext != nil {
 		d.max = s.ext.Max
 	}
@@ -198,7 +200,7 @@ func (s *DigestService) Get(ctx context.Context, week, site string) (*Digest, er
 	if err != nil {
 		return nil, err
 	}
-	d := BuildDigest(rows, texts, site, from, now, s.tax)
+	d := BuildDigest(rows, texts, site, from, now, s.tax, s.risk)
 	d.Done = BuildDigestDone(done, s.tax)
 	d.Link = s.link(week, site)
 	d.Text = s.text(ctx, d.Aggregates)
@@ -237,8 +239,8 @@ func (s *DigestService) text(ctx context.Context, agg DigestAggregates) DigestTe
 }
 
 // BuildDigest — все цифры дайджеста из строк. Чистая функция (тесты без базы); текст LLM
-// подставляет Get, здесь — шаблон.
-func BuildDigest(rows *repositories.OverviewRows, texts []repositories.DigestText, site string, from, now time.Time, tax *taxonomy.Taxonomy) *Digest {
+// подставляет Get, здесь — шаблон. opts — режим зон риска, как у обзора (без него — прежние правила).
+func BuildDigest(rows *repositories.OverviewRows, texts []repositories.DigestText, site string, from, now time.Time, tax *taxonomy.Taxonomy, opts ...OverviewOptions) *Digest {
 	if rows == nil {
 		rows = &repositories.OverviewRows{}
 	}
@@ -290,7 +292,7 @@ func BuildDigest(rows *repositories.OverviewRows, texts []repositories.DigestTex
 	if !d.Partial {
 		at = to.Add(-time.Second)
 	}
-	o := BuildOverview(rows, site, at, tax)
+	o := BuildOverview(rows, site, at, tax, opts...)
 	for _, r := range o.Risks {
 		if r.Zone == domain.RiskRed {
 			d.Risks.Red++

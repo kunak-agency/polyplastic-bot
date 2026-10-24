@@ -245,7 +245,18 @@ func (s *SchedulerService) nudgeEmployee(ctx context.Context, tx *repositories.R
 	cands := s.candidates(ctx, tx, f)
 	var release []domain.ScheduledEvent
 	var due []nudgeCand
+	closed, held := 0, false
 	for _, c := range cands {
+		if c.kind != ruleStep && !c.ev.Catchup && !heldOut(c.ev) && !now.Before(c.ev.SentAt.Add(questionHoldMax)) {
+			// 48 ч без ответа: поток блока идёт дальше, вопрос остаётся открытым (наджи и ручное
+			// «Напомнить» — по нему же, в карточке «не отвечен»), рекрутеру — «не отвечает»
+			c.ev.Answer = strPtr(answerHeldOut)
+			if err := tx.Events.Save(ctx, c.ev); err != nil {
+				return 0, nil, err
+			}
+			release = append(release, *c.ev)
+			held = true
+		}
 		if c.kind == ruleStep && c.ev.Reminded >= c.limit {
 			// после последнего напоминания — ещё сутки, затем «не отвечен» (как remindNoAnswer)
 			last := c.hours[c.limit-1] + 24
@@ -257,29 +268,43 @@ func (s *SchedulerService) nudgeEmployee(ctx context.Context, tx *repositories.R
 				return 0, nil, err
 			}
 			release = append(release, *c.ev)
+			closed++
 			continue
 		}
 		if c.due(now) {
 			due = append(due, c)
 		}
 	}
+	// вопрос 48 ч без ответа — «не отвечает» (строка и «Связаться» у рекрутера); ставится после
+	// попытки наджа, чтобы созревшее напоминание по нему всё же ушло
+	markHeld := func() error {
+		if !held || e.UnresponsiveSince != nil {
+			return nil
+		}
+		e.UnresponsiveSince = &now
+		logger.Info("планировщик: новичок %s — «не отвечает»: вопрос без ответа 48 ч", e.ID)
+		return tx.Employees.SetUnresponsive(ctx, e.ID, &now)
+	}
 	if len(due) == 0 || e.UnresponsiveSince != nil {
-		return 0, release, nil
+		return 0, release, markHeld()
 	}
 	site := s.SiteFor(e)
 	if !InWorkHours(now, site) {
-		return 0, release, nil
+		return 0, release, markHeld()
 	}
 	if ok, err := s.budgetLeft(ctx, tx, e, site, now, false); err != nil || !ok {
+		if err == nil {
+			err = markHeld()
+		}
 		return 0, release, err
 	}
-	openCount := len(cands) - len(release)
+	openCount := len(cands) - closed
 	target := due[0]
 	msg := s.nudgeMessage(ctx, e, target, openCount, now)
 	mid, err := s.sendNudge(ctx, msg, target.ev)
 	if err != nil {
 		logger.Warn("планировщик: автонапоминание новичку %s не ушло: %v", e.ID, err)
-		return 0, release, nil
+		return 0, release, markHeld()
 	}
 	// все созревшие вопросы упомянуты общим напоминанием — каждый тратит свой срок
 	for _, c := range due {
@@ -305,9 +330,10 @@ func (s *SchedulerService) nudgeEmployee(ctx context.Context, tx *repositories.R
 		if err := tx.Employees.SetUnresponsive(ctx, e.ID, &now); err != nil {
 			return 0, nil, err
 		}
+		e.UnresponsiveSince = &now
 		logger.Info("планировщик: новичок %s — «не отвечает» после %d напоминаний", e.ID, n)
 	}
-	return 1, release, nil
+	return 1, release, markHeld()
 }
 
 // budgetLeft — можно ли сегодня ещё одно проактивное сообщение новичку: надж (не больше одного
@@ -330,13 +356,12 @@ func (s *SchedulerService) budgetLeft(ctx context.Context, tx *repositories.Repo
 
 // nudgeMessage — надж: мягкая первая строка и сам вопрос с теми же кнопками. Опрос — текущий
 // экран живого опроса (на необязательном вопросе там уже есть «Пропустить»); правило r70 — его
-// текст. TODO(B): «Пропустить» у шага-вопроса без своей кнопки skip — нужен обработчик payload
-// в боте; пока кнопки шага как есть.
+// текст. Необязательный шаг-вопрос без своей кнопки skip получает «Пропустить» (nudge_skip.go).
 func (s *SchedulerService) nudgeMessage(ctx context.Context, e *domain.Employee, c nudgeCand, open int, now time.Time) max.OutMessage {
-	to := recipientOf(e)
+	to := s.recipient(e)
 	head := nudgeHead(e, open)
 	if c.kind == ruleSurvey && c.rule != nil {
-		text := stepText(domain.ScenarioStep{TextTy: c.rule.TextTy, TextVy: c.rule.TextVy}, e, now)
+		text := stepTextIn(domain.ScenarioStep{TextTy: c.rule.TextTy, TextVy: c.rule.TextVy}, e, now, to.siteFor(e))
 		if c.ev.Title != "" {
 			text += "\n\n" + fmt.Sprintf(textSurveyReminderTail, c.ev.Title)
 		}
@@ -364,6 +389,9 @@ func (s *SchedulerService) nudgeMessage(ctx context.Context, e *domain.Employee,
 	}
 	msg := stepMessage(to, c.step, e, c.ev.ID, c.ev.IsTest, sentAt(c.ev, now))
 	msg.Text = head + "\n\n" + msg.Text
+	if nudgeSkippable(c.step) {
+		msg = withNudgeSkip(msg, c.ev.ID) // необязательный вопрос без своей кнопки skip (nudge_skip.go)
+	}
 	return msg
 }
 

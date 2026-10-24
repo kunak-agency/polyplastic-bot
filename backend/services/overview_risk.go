@@ -84,6 +84,7 @@ func RiskZonesV2(rows *repositories.OverviewRows, now time.Time, tax *taxonomy.T
 			events[ev.EmployeeID] = append(events[ev.EmployeeID], ev)
 		}
 	}
+	texts := toneTexts(rows)
 	tickets := map[uuid.UUID][]repositories.OverviewTicket{}
 	for _, t := range rows.Tickets {
 		if !t.IsTest {
@@ -100,6 +101,11 @@ func RiskZonesV2(rows *repositories.OverviewRows, now time.Time, tax *taxonomy.T
 			continue
 		}
 		r := riskOfV2(e, day, site, pulses[e.ID], events[e.ID], tickets[e.ID], now, tax)
+		if r.zone == "" {
+			if reason := earlySignal(pulses[e.ID], texts[e.ID], now); reason != "" {
+				r.zone, r.reason = domain.RiskYellow, reason
+			}
+		}
 		if r.zone == "" {
 			continue
 		}

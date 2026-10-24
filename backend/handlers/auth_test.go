@@ -259,6 +259,8 @@ func TestAuthRecruiterSeesOnlyOwn(t *testing.T) {
 	a.do("POST", "/api/newcomers/"+other.ID.String()+"/contacted", sid, nil, 404)
 	a.do("GET", "/api/overview", sid, nil, 200)
 	a.do("GET", "/api/hrlead/dashboard", sid, nil, 403)
+	t.Setenv("APP_ENV", "development")
+	a.do("POST", "/api/dev/recruiter-morning", sid, nil, 403) // утренняя сводка — только hr_lead
 }
 
 func TestAuthManagerForbidden(t *testing.T) {
@@ -332,6 +334,12 @@ func TestAuthDeactivateAndUsers(t *testing.T) {
 		t.Fatalf("load — активные рекрутеры: %v", hd["load"])
 	}
 	a.do("GET", "/api/newcomers/"+n.ID.String()+"/files", hrSID, nil, 200)
+	t.Setenv("APP_ENV", "development")
+	if m, _ := a.do("POST", "/api/dev/recruiter-morning", hrSID, nil, 200); m["total"] == nil {
+		t.Fatalf("recruiter-morning: %v", m)
+	}
+	t.Setenv("APP_ENV", "production")
+	a.do("POST", "/api/dev/recruiter-morning", hrSID, nil, 404)
 
 	a.do("PATCH", "/api/users/"+hr.ID.String(), hrSID, map[string]any{"active": false}, 409)
 	a.do("PATCH", "/api/users/"+id, hrSID, map[string]any{"active": false}, 200)

@@ -374,7 +374,7 @@ func (s *DigestService) Numbers(ctx context.Context, week, site string) (*Digest
 	if err != nil {
 		return nil, err
 	}
-	d := BuildDigest(rows, texts, site, from, s.now(), s.tax)
+	d := BuildDigest(rows, texts, site, from, s.now(), s.tax, s.risk)
 	d.Link = s.link(week, site)
 	return d, nil
 }

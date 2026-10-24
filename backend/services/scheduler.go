@@ -253,7 +253,7 @@ func (s *SchedulerService) sendEvent(ctx context.Context, tx *repositories.Repos
 	if test {
 		ev.IsTest = true
 	}
-	to := recipientOf(e)
+	to := s.recipient(e)
 	var msg max.OutMessage
 	if isSurvey(step) {
 		if ev.Survey == nil {

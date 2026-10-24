@@ -60,8 +60,10 @@ type OverviewAnswer struct {
 type OverviewQuestion struct {
 	EmployeeID uuid.UUID
 	Sentiment  *string
-	IsTest     bool
-	CreatedAt  time.Time
+	// Flags — коды regex-триггеров вопроса (ранний сигнал зон v2: тон + флаг).
+	Flags     domain.StringList
+	IsTest    bool
+	CreatedAt time.Time
 }
 
 // OverviewTicket — обращение без сводки, цитаты и переписки.
@@ -122,7 +124,7 @@ func (r *OverviewRepo) Load(ctx context.Context, site string, since time.Time) (
 		return nil, err
 	}
 	if err := db.Model(&domain.BotQuestion{}).
-		Select("employee_id, sentiment, is_test, created_at").
+		Select("employee_id, sentiment, flags, is_test, created_at").
 		Where("employee_id IN ? AND created_at >= ? AND sentiment IS NOT NULL", ids, since).Order("created_at").
 		Scan(&out.Questions).Error; err != nil {
 		return nil, err

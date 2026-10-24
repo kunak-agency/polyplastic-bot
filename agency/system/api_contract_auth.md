@@ -11,14 +11,17 @@
   `GET /api/auth/me` отвечает **404**. Кабинет по этому 404 понимает, что входа нет, и работает
   как раньше: без экрана входа, все разделы, кроме «Сегодня».
 - `FEATURE_AUTH=true`: все `/api/*` кабинета без сессии → **401** `UNAUTHENTICATED`. Исключения:
-  `/api/health`, `/api/auth/login`, бот и внутренние маршруты (вне middleware). Роль не подходит →
-  **403** `FORBIDDEN`.
+  `/api/health`, `/api/auth/login`, `/api/auth/logout`, `/api/dev/*` и send-test в development, бот
+  (long polling, не HTTP). Роль не подходит → **403** `PERMISSION_DENIED` (общий код ошибок API).
 - Фронт при любом 401 (кроме ответа на сам `login`) уводит на `/login?next=<путь>`.
 
 ## Сессия
 
-- Cookie сессии `HttpOnly; Secure; SameSite=Lax; Path=/`, 12 ч. Имя cookie выбирает бэкенд,
-  фронт его не читает.
+- Cookie сессии `korsik_session`: `HttpOnly; Secure; SameSite=Lax; Path=/`, 12 ч (без продления).
+  `Secure` не ставится только при `APP_ENV=development` по http. Фронт cookie не читает.
+- Сессии — строки `sessions` в Postgres; пароли — bcrypt cost 12. Лимит — 5 неудач в минуту с IP
+  (в памяти процесса; за Caddy IP — последний элемент `X-Forwarded-For`).
+- CORS: `AllowCredentials: true` при явном `ORIGINS` (по умолчанию `http://localhost:5173`).
 - Прод: кабинет и API на одном домене (`/api`), cookie уходит сама.
 - Dev: `VITE_API_BASE_URL=http://localhost:8081/api` — это другой origin. Варианты:
   1. `VITE_API_BASE_URL=/api` и прокси Vite (`vite.config.ts` уже проксирует `/api` на :8081) —
@@ -49,11 +52,16 @@
 | Маршрут | hr_lead | recruiter | manager |
 |---|---|---|---|
 | `/api/newcomers*`, `/api/tickets*`, `/api/overview`, сценарии, база знаний | всё | только свои (`employees.recruiter_id = me`); сценарии — чтение | 403 |
-| `/api/recruiter/dashboard` | да (свои, если есть) | да | 403 |
+| `/api/recruiter/dashboard` | все новички или `?recruiter_id=<uuid>\|none` | свои | 403 |
 | `/api/hrlead/dashboard`, `/api/team`, `/api/users*`, `/api/newcomers/reassign` | да | 403 | 403 |
-| `/api/manager/newcomers`, `/api/manager/tasks/{id}` | любой `name` | любой `name` | `name` игнорируется: подчинённые по `users.manager_name` |
+| `/api/manager/newcomers`, `/api/manager/tasks/{id}` | любой `name` | любой `name` | `name` игнорируется: подчинённые по `users.manager_name`; чужая задача → 404 |
 | `/api/manager/managers` | да | да | 403 |
 | тексты ответов (`timeline.answer`/`text`), обращения | да | свои | 403 |
+
+Уточнения бэкенда: чужой новичок или обращение рекрутеру → **404** (не 403); рекрутеру сценарии —
+GET и `POST /scenarios/{id}/publish/preview`, база знаний и медиатека — GET и `POST /documents/ask`,
+остальные записи → 403. `/api/digest` и `/api/manager/managers` рекрутеру открыты (агрегаты).
+Матрица — `handlers/auth.go` (`policy`), фильтры «только свои» — в хендлерах списков и `Overview.Get`.
 
 Меню кабинета: manager — только «Мои новички»; recruiter — всё, кроме «Настроек» (пользователи);
 hr_lead — всё. Стартовая: recruiter и hr_lead → «Сегодня» (`/dashboard`, по роли свой экран),
@@ -149,10 +157,12 @@ manager → «Мои новички». Старый «Обзор» (`/`) наз�
   отдаётся, только медиана по команде. Рейтингов нет.
 
 ### Действия
-- `POST /api/newcomers/{id}/contacted` `{"note"?}` → 204. Строка `silent` уходит из «Сегодня» и
-  возвращается через 2 рабочих дня, если ответа нет (`employees.contacted_at`).
-- `POST /api/newcomers/{id}/remind` → 204 — ручное напоминание реплаем на открытый вопрос, в
-  дневном лимите. Не подключён к боту → 409. **Маршрут предложен фронтом**, бэкенда ещё нет.
+- `POST /api/newcomers/{id}/contacted` `{"note"?}` → 204 (note не хранится). Пишет строку
+  `nudges` с `kind=contacted` (без `message_id`: в бюджет наджей не входит; колонки
+  `employees.contacted_at` нет). Все строки «Сегодня» этого новичка, кроме `sla` и `f7_consent`,
+  скрыты 2 рабочих дня; время отметки — `items[].contacted_at`.
+- `POST /api/newcomers/{id}/remind` — алиас `POST /api/newcomers/{id}/nudge` (агент A, ответ и
+  ошибки — как у него).
 
 ## Пользователи (hr_lead, в «Настройках»)
 
@@ -178,16 +188,54 @@ manager → «Мои новички». Старый «Обзор» (`/`) наз�
   Ответ как в v4 — **без** текстов ответов, обращений и категорий. Пульс фронт показывает только
   уровнем 🙂/😐/☹.
 - `POST /api/manager/tasks/{id}` `{"status":"done|planned"}` → 204 — «Встретился» / «Запланировал»
-  из кабинета, то же, что кнопки `mg:met`/`mg:plan` в MAX. **Маршрут предложен фронтом.**
+  из кабинета, то же, что кнопки `mg:met`/`mg:plan` в MAX (`manager_nudges.status` = met|planned).
+  `id` — `meetings[].id` из `GET /api/manager/newcomers`. Нет задачи / чужая → 404, иной статус → 422.
 - «Приложить план» и «Решение по ИС» — заготовки в кабинете (кнопки неактивны), API позже.
 
 ## Личный файл: адаптационный план
 
 Кнопка «Загрузить адаптационный план» в карточке → `POST /api/newcomers/{id}/files` (v4, уже есть:
-multipart `file`, `name=adaptation_plan`, ≤ 20 МБ). `GET` списка файлов нет — кабинет показывает
-только загруженный в этот заход файл. Нужен `GET /api/newcomers/{id}/files` → `{"items":[…]}`.
+multipart `file`, `name=adaptation_plan`, ≤ 20 МБ). `GET /api/newcomers/{id}/files` →
+`{"items":[{"name","filename","mime","size","updated_at"}],"total"}` (без содержимого).
 
 ## Демо-аккаунты моков (фронт)
 
 `hr` / `maria` / `anna` / `smirnov`, пароль у всех `demo` (только `VITE_USE_MOCKS=true`).
 `VITE_MOCK_AUTH=false` — мок отвечает 404 на `/auth/me`, кабинет работает без входа.
+
+## Бэкенд (агент C): фактические формы дашбордов
+
+Сверено с формой выше; отличия и дополнения:
+- `tiles.<id>` = `{"value", "secondary"?, "red", "ids"}`. `secondary` есть только у парных плиток
+  (`sla`: value — истекает сегодня, secondary — просрочено, считаются обращения; `starting`: value —
+  сегодня, secondary — на неделе вместе с сегодня; `pulse_response`: value — ответили, secondary —
+  отправлено). Ключи рекрутера: `not_answering, sla, starting, ip_decisions, low_pulse, catching_up`;
+  hr_lead: `unassigned_tickets, sla_overdue, no_recruiter, red_zone, pulse_response, ip_week`.
+- `today[]` = `{"id","kind","zone","reason","newcomer_id","newcomer_name","site","ticket_id",
+  "recruiter_name","theme","due_at","day","actions"}`; агрегатная строка `no_recruiter` —
+  `newcomer_id: null`, `count`, `newcomer_ids`. `today_total` — строк до обрезки до 10.
+  `actions` рекрутера: `contact, remind, take, open`; hr_lead: `assign, reassign, pin, owner, open`.
+- Рекрутер: `pulse_week` = `{"sent","answered","low","enough","tone"}` (новичков, не опросов;
+  `enough` — answered ≥ 5; `tone` = `{"positive","neutral","negative","n"}` или `null` при n < 5);
+  `items[]` дополнительно `low_pulse`, `contacted_at`; `zone` — зона риска обзора как есть.
+  `next_event` = `{"title","at","newcomer_name"}`, `newcomers_led` — новичков в адаптации.
+- hr_lead: `load[]` — активные рекрутеры; `unassigned`; `median_first_response_min` (`null` при
+  меньше 5 обращений с ответом за 30 дней), `median_n`; `digest` = `{"week","lines":[3 строки],
+  "facts":[{"key","text","value","prev","delta","n","enough"}],"link"}` (без LLM); `bot_did`.
+- `bot_did` = `{"nudges","summaries"}` за 24 ч: ушедшие авто-напоминания (`nudges.kind=auto`) и
+  собранные догоняющие очереди (`employees.catchup_started_at`).
+- Строки «Сегодня»: решение по ИС — только без `employees.ip_decision`; `no_plan` — D0 и нет
+  `manager_nudges` со статусом planned/met; `catchup_behind` — очередь «1 блок в день» отстала на
+  ≥ 2; `silent` — `unresponsive_since` (после 2 наджей) или вопрос без ответа > 3 дней, красная от
+  5 рабочих дней.
+- `GET /api/team` — для «Настроек»: все рекрутеры (и hr_lead с новичками), включая неактивных,
+  поле `role`, плюс `team_median_first_response_min`, `team_median_n`, `team_median_enough`.
+
+## Демо-аккаунты бэкенда
+
+`cd backend && go run ./cmd/seed -users` (база из `DATABASE_URL`): `hr` (hr_lead «Анна Кадрова»),
+`recruiter1`, `recruiter2` (имена — два самых частых `recruiter_name` в карточках), `manager`
+(`manager_name` — самый частый руководитель в карточках). Пароли — `DEMO_PASSWORD_HR`,
+`DEMO_PASSWORD_RECRUITER1`, `DEMO_PASSWORD_RECRUITER2`, `DEMO_PASSWORD_MANAGER`; без них новому
+аккаунту пароль генерируется и печатается один раз, у существующего не меняется. Затем новичкам
+без рекрутера проставляется `recruiter_id` по совпадению `recruiter_name` с `full_name`.
