@@ -7,11 +7,14 @@ POST /documents (multipart: file, doc?) -> {doc_id, chunks, clauses, low_confide
 GET  /documents -> {"items": [...], "total": N}
 POST /transcribe (multipart: audio) -> {text, lang, duration_s, confidence} (asr.py, README «Голос»)
 
+RAG_API_KEY задан — всё, кроме GET /health, требует «Authorization: Bearer <ключ>», иначе 401.
+
 Контракт /ask и /flags: agency/system/api_contract.md. /documents описан в README сервиса.
 """
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -19,7 +22,8 @@ from typing import Literal
 
 import threading
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
 import asr
@@ -83,6 +87,29 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="rag", lifespan=lifespan)
+
+
+# --- общий ключ ---
+
+# Без ключа открыт только /health: по нему backend и оркестратор смотрят живость сервиса.
+OPEN_PATHS = {("GET", "/health"), ("HEAD", "/health")}
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    """RAG_API_KEY задан — каждый запрос, кроме /health, несёт «Authorization: Bearer <ключ>».
+
+    Middleware, а не dependency маршрута: новый эндпоинт не проскочит мимо проверки. Ключ читается
+    на каждый запрос, пустой или не заданный — сервис открыт, как при локальном запуске и в тестах.
+    """
+    key = os.getenv("RAG_API_KEY", "").strip()
+    if not key or (request.method, request.url.path) in OPEN_PATHS:
+        return await call_next(request)
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(token.strip().encode(), key.encode()):
+        return JSONResponse(status_code=401, content={"detail": "unauthorized"},
+                            headers={"WWW-Authenticate": "Bearer"})
+    return await call_next(request)
 
 
 # --- /ask ---

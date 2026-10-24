@@ -787,6 +787,7 @@ curl -s localhost:8093/documents
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
 | `RAG_HOST` / `RAG_PORT` | `127.0.0.1` / `8093` | только для `run.sh`; в образе `0.0.0.0:8093` |
+| `RAG_API_KEY` | — (сервис открыт) | общий ключ: задан — каждый запрос, кроме `GET /health`, требует `Authorization: Bearer <ключ>`, иначе `401 {"detail": "unauthorized"}`. Обязателен, когда rag на публичном адресе (под RunPod): корпус — коммерческая тайна. Тот же ключ — в `RAG_API_KEY` backend |
 | `RAG_CORPUS_DIR` | `testdata/corpus` (в образе `/app/testdata/corpus`) | каталог(и) корпуса через запятую: txt/md, pdf, pptx, xlsx |
 | `RAG_RETRIEVER` | `bm25` | `bm25` или `hybrid` (BM25 + bge-m3, RRF k=60) |
 | `RAG_RERANKER` | `none` | `none` или `bge` (bge-reranker-v2-m3) |

@@ -21,12 +21,43 @@ type Client struct {
 // DefaultAskTimeout — срок POST /ask, если RAG_ASK_TIMEOUT не задан.
 const DefaultAskTimeout = 12 * time.Second
 
+// Option — необязательная настройка клиента в New.
+type Option func(*options)
+
+type options struct{ apiKey string }
+
+// WithAPIKey — общий ключ rag (RAG_API_KEY): непустой уходит в каждом запросе заголовком
+// «Authorization: Bearer <ключ>». Пустой — заголовка нет, как у локального rag без ключа.
+func WithAPIKey(key string) Option { return func(o *options) { o.apiKey = key } }
+
 // New — клиент. Срок health передаёт вызывающий, срок /ask — askTimeout (≤ 0 — по умолчанию).
-func New(baseURL string, askTimeout time.Duration) *Client {
+func New(baseURL string, askTimeout time.Duration, opts ...Option) *Client {
 	if askTimeout <= 0 {
 		askTimeout = DefaultAskTimeout
 	}
-	return &Client{baseURL: baseURL, http: &http.Client{}, askTimeout: askTimeout}
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	hc := &http.Client{}
+	if o.apiKey != "" {
+		// Ключ ставит транспорт, а не каждый метод: новый запрос к rag не уйдёт без него.
+		hc.Transport = &bearerTransport{key: o.apiKey, next: http.DefaultTransport}
+	}
+	return &Client{baseURL: baseURL, http: hc, askTimeout: askTimeout}
+}
+
+// bearerTransport — RoundTripper, дописывающий «Authorization: Bearer <ключ>» к запросу.
+type bearerTransport struct {
+	key  string
+	next http.RoundTripper
+}
+
+func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// RoundTripper не должен менять чужой запрос: заголовок ставим на копию.
+	r := req.Clone(req.Context())
+	r.Header.Set("Authorization", "Bearer "+t.key)
+	return t.next.RoundTrip(r)
 }
 
 // Error — rag ответил не 2xx. Реализует errs.External: статус нашего ответа выбирает ErrorHandler.

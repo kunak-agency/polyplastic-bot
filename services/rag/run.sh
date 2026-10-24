@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Локальный запуск RAG-сервиса без Docker: ./run.sh
 # Оценка на golden set:                    ./run.sh eval [--real] [--configs bm25,final] [--sweep] [--rerank-top 8] [--top-k 3] [-v]
-# env: RAG_HOST, RAG_PORT, RAG_CORPUS_DIR, RAG_RETRIEVER, RAG_RERANKER, RAG_GATE_THRESHOLD,
+# env: RAG_HOST, RAG_PORT, RAG_API_KEY (общий ключ Bearer; пусто — без ключа),
+#      RAG_CORPUS_DIR, RAG_RETRIEVER, RAG_RERANKER, RAG_GATE_THRESHOLD,
 #      RAG_DEVICE (auto: mps на Mac-хосте), RAG_RERANK_TOP, RAG_TORCH_THREADS, RAG_WARMUP,
 #      HF_HOME (по умолчанию services/rag/.cache), LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_TIMEOUT (см. README.md)
 # Порт открывается после прогрева моделей и LLM: /health отвечает, когда сервис готов.

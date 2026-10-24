@@ -115,6 +115,10 @@ type RAG struct {
 	// AskTimeout — POST /ask (RAG_ASK_TIMEOUT, 12 с). Дольше бот не ждёт молча: пишет новичку
 	// «ищу дольше обычного» и досылает поздний ответ (services/bot_ask.go, lateAskWindow).
 	AskTimeout time.Duration
+	// APIKey — общий ключ rag (RAG_API_KEY), уходит заголовком «Authorization: Bearer» в каждом
+	// запросе к rag. Пусто — без заголовка: локальный rag открыт. На публичном адресе (под RunPod)
+	// задавать обязательно, и тем же значением, что RAG_API_KEY у services/rag.
+	APIKey string
 }
 
 // Docs — база знаний (api_contract.md, «v3 — база знаний»): загрузка документов HR через backend в rag.
@@ -172,6 +176,7 @@ func Load() (Config, error) {
 			BaseURL:       strings.TrimRight(env("RAG_BASE_URL", "http://localhost:8093"), "/"),
 			HealthTimeout: duration("RAG_HEALTH_TIMEOUT", 2*time.Second),
 			AskTimeout:    duration("RAG_ASK_TIMEOUT", 12*time.Second),
+			APIKey:        strings.TrimSpace(os.Getenv("RAG_API_KEY")),
 		},
 		Docs: Docs{
 			MaxUploadMB:   int(integer("KB_MAX_UPLOAD_MB")),
@@ -236,7 +241,7 @@ func (c Config) Summary() []string {
 		fmt.Sprintf("ссылки-приглашения: бот %s, формат %s; подделка MAX вместо бота: %v", botName(c.Bot.Username), c.Bot.InviteLinkFormat, c.Bot.Fake),
 		fmt.Sprintf("обращения: HR-чат %s, чат СБ %s, таксономия %s", chat(c.Max.HRChatID), chat(c.Max.SBChatID), orNone(c.TaxonomyPath)),
 		fmt.Sprintf("планировщик: такт %v, пауза в пакете %v", c.Scheduler.Interval, c.Scheduler.PackGap),
-		fmt.Sprintf("rag: %s, срок /ask %v", c.RAG.BaseURL, c.RAG.AskTimeout),
+		fmt.Sprintf("rag: %s, срок /ask %v, ключ %s", c.RAG.BaseURL, c.RAG.AskTimeout, set(c.RAG.APIKey)),
 		fmt.Sprintf("база знаний: файл до %d МБ, срок загрузки %v, токен оператора %s", c.Docs.MaxUploadMB, c.Docs.UploadTimeout, set(c.Docs.OperatorToken)),
 		fmt.Sprintf("LLM: модель %s, адрес %s, ключ %s, temperature %.2f, presence_penalty %.2f",
 			c.LLM.Model, orNone(c.LLM.BaseURL), set(c.LLM.APIKey), c.LLM.Temperature, c.LLM.PresencePenalty),

@@ -17,6 +17,10 @@
 
 ## backend → services/rag
 
+Общий ключ `RAG_API_KEY` (одно значение у rag и backend). Задан — каждый запрос, кроме `GET /health`,
+несёт `Authorization: Bearer <ключ>`, иначе 401 `{"detail":"unauthorized"}`; backend ставит заголовок
+во все вызовы (`rag.WithAPIKey`). Пусто — без ключа, как локально. На публичном адресе (под RunPod) обязателен.
+
 `GET /health` → `{"status":"ok"}`
 
 `POST /ask`
@@ -61,7 +65,7 @@ LLM не задан, не ответил или дважды ответил не
 413 размер. `GET /documents` → `{"items":[{"doc_id","doc","filename","kind","source",
 "chunks","clauses","low_confidence_pages","uploaded_at"}],"total":N}`. Подробности —
 `services/rag/README.md`.
-⚠ У rag-сервиса нет авторизации: он слушает только loopback. Право HR загружать документы
+⚠ У rag-сервиса нет ролей, только общий ключ `RAG_API_KEY` (выше). Право HR загружать документы
 проверяет backend, кабинет напрямую в rag не ходит. Документы пока живут в памяти процесса и
 после рестарта пропадают.
 
@@ -469,7 +473,7 @@ production-сборке её нет, а сервер с `APP_ENV=production` о�
 
 ### v3 — база знаний (итерация 4)
 
-Кабинет ходит в rag **только через backend**: у rag нет авторизации, права HR проверяет backend.
+Кабинет ходит в rag **только через backend**: у rag только общий ключ сервиса, права HR проверяет backend.
 
 ⚠ Ограничение (ролей пока нет): все маршруты раздела пускают только при `APP_ENV=development`
 или с заголовком `X-Operator-Token: <KB_OPERATOR_TOKEN>`; иначе 403 `PERMISSION_DENIED`. Пустой

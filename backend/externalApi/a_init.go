@@ -18,7 +18,7 @@ type ExternalAPI struct {
 // доступов. Ошибка — только от явно заданного и негодного MAX_CA_FILE: без него бот всё равно не
 // достучится до MAX, и лучше узнать об этом на старте.
 func New(cfg config.Config) (*ExternalAPI, error) {
-	ext := &ExternalAPI{RAG: rag.New(cfg.RAG.BaseURL, cfg.RAG.AskTimeout)}
+	ext := &ExternalAPI{RAG: rag.New(cfg.RAG.BaseURL, cfg.RAG.AskTimeout, rag.WithAPIKey(cfg.RAG.APIKey))}
 	if !cfg.Max.Enabled() {
 		if cfg.Bot.Fake {
 			// development без токена: бот работает на подделке — машина времени и сид видны в

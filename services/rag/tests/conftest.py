@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CORPUS = ROOT / "testdata" / "corpus"
 
 # Тесты не ходят в настоящий LLM, даже если он задан в окружении разработчика.
-for var in ("LLM_BASE_URL", "LLM_API_KEY", "RAG_GATE_THRESHOLD", "RAG_RETRIEVER", "RAG_RERANKER"):
+for var in ("LLM_BASE_URL", "LLM_API_KEY", "RAG_GATE_THRESHOLD", "RAG_RETRIEVER", "RAG_RERANKER", "RAG_API_KEY"):
     os.environ.pop(var, None)
 os.environ["RAG_CORPUS_DIR"] = str(CORPUS)
 
