@@ -110,10 +110,11 @@ class GoogleTTS:
     def enabled(self) -> bool:
         return bool(self.key)
 
-    def synth(self, text: str, rate: int = SAMPLE_RATE) -> bytes:
+    def synth(self, text: str, rate: int = SAMPLE_RATE, voice: str | None = None) -> bytes:
+        voice = voice or self.voice
         body = json.dumps({
             "input": {"text": text},
-            "voice": {"languageCode": self.voice[:5], "name": self.voice},
+            "voice": {"languageCode": voice[:5], "name": voice},
             "audioConfig": {"audioEncoding": "LINEAR16", "sampleRateHertz": rate,
                             "effectsProfileId": ["headphone-class-device"]},
         }).encode()
@@ -165,7 +166,8 @@ class TTSRequest(BaseModel):
     text: str = Field(max_length=MAX_TEXT_CHARS)
     speaker: str | None = Field(default=None, max_length=32)
     sample_rate: int = SAMPLE_RATE
-    engine: str | None = Field(default=None, pattern="^(google|silero)$")  # None — Google, если есть ключ
+    engine: str | None = Field(default=None, pattern="^(google|silero)$")
+    voice: str | None = Field(default=None, pattern=r"^[a-z]{2}-[A-Z]{2}-[A-Za-z0-9-]{1,40}$")  # голос Google  # None — Google, если есть ключ
 
 
 @router.post("/tts")
@@ -190,7 +192,7 @@ def tts(req: TTSRequest):
     use_google = google.enabled and req.engine != "silero"
     if not use_google and not engine.ready:
         raise HTTPException(status_code=503, detail="silero model is not ready")
-    futures = [google.pool.submit(google.synth, c, rate) for c in chunks] if use_google else None
+    futures = [google.pool.submit(google.synth, c, rate, req.voice) for c in chunks] if use_google else None
 
     def one(i: int, chunk: str) -> bytes:
         if futures is not None:

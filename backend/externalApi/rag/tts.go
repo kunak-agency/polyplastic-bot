@@ -28,6 +28,10 @@ func (c *Client) Synthesize(ctx context.Context, text string) (io.ReadCloser, er
 	if sp := os.Getenv("CALL_TTS_SPEAKER"); sp != "" {
 		req["speaker"] = sp
 	}
+	// Голос Google: CALL_TTS_VOICE (например ru-RU-Chirp3-HD-Orus); пусто — голос пода.
+	if vo := os.Getenv("CALL_TTS_VOICE"); vo != "" {
+		req["voice"] = vo
+	}
 	// Движок синтеза: CALL_TTS_ENGINE (google | silero); пусто — ttsEngineDefault.
 	if en := os.Getenv("CALL_TTS_ENGINE"); en != "" {
 		req["engine"] = en
