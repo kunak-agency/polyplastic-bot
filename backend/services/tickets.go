@@ -223,6 +223,9 @@ func (s *TicketService) sendOpen(ctx context.Context, e *domain.Employee, t *dom
 		return
 	}
 	cat := s.category(t.Category, t.Route)
+	if t.Route != "" && !cat.SecurityChat && !cat.PartnerOnly {
+		cat.Route = t.Route // «Описать проблему» рекрутеру с флагом F2: «Передал рекрутеру», не «HR»
+	}
 	off := !InWorkHours(s.now(), domain.SiteOf(e.Site))
 	m := recipientOf(e).msg(ticketOpenText(e, t, cat, off, lead), formatMarkdown, ticketOpenButtons(t))
 	s.sendStatus(ctx, e, t, m, false)

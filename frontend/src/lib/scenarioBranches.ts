@@ -376,6 +376,9 @@ export function reorderOptions(
   if (!q) return survey
   const keyed = optionsAreKeys(q, survey.scale)
   const next: SurveyQuestion = { ...q, options }
+  // The formal (vy) labels follow their options (new index → old index; a new option gets none).
+  if (q.options_vy)
+    next.options_vy = order.map((old) => (old >= 0 ? (q.options_vy?.[old] ?? '') : ''))
   if (!keyed) return { ...survey, questions: survey.questions.map((x, j) => (j === qi ? next : x)) }
 
   // Old option number (from 1) → new one; removed options are absent.

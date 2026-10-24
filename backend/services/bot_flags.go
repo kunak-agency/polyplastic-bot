@@ -50,6 +50,8 @@ type flagInput struct {
 	questionNo     int        // номер вопроса опроса, с единицы
 	where          string     // «в сообщении новичка», «в ответе на опрос»
 	via            string     // откуда сигнал; пусто — LLM-разметка
+	// quiet — обращение без сообщения новичку (с ним говорит ветка варианта): только карточка людям.
+	quiet bool
 }
 
 // Что код делает с LLM-флагом.
@@ -180,12 +182,23 @@ func (b *BotService) applyFlagDecisions(ctx context.Context, empID uuid.UUID, in
 		}
 		emp = e
 		var risk []string
+		level := domain.RiskYellow
 		for _, d := range ds {
 			if d.act == flagActRisk {
 				risk = append(risk, riskLabel(d))
+				if in.via == flagViaOption && d.severity >= 3 {
+					level = domain.RiskRed // «задумываюсь об уходе»: красная зона без обращения
+				}
 			}
 		}
-		if len(risk) > 0 {
+		switch {
+		case len(risk) > 0 && in.via == flagViaOption:
+			// сигнал варианта ответа: обращение — по кнопке или тексту новичка в ветке
+			markRisk(e, level, fmt.Sprintf("сигнал %s %s (%s)", strings.Join(risk, ", "), in.where, flagViaOption))
+			if err := tx.Employees.Save(ctx, e); err != nil {
+				return err
+			}
+		case len(risk) > 0:
 			markRisk(e, domain.RiskYellow, fmt.Sprintf("возможный сигнал %s %s (%s, на ручной просмотр HR)", strings.Join(risk, ", "), in.where, orDefault(in.via, "LLM-разметка")))
 			if err := tx.Employees.Save(ctx, e); err != nil {
 				return err
@@ -249,6 +262,7 @@ func riskLabel(d flagDecision) string {
 func (b *BotService) flagTicket(ctx context.Context, emp *domain.Employee, in flagInput, d flagDecision) error {
 	var res handoffResult
 	var e *domain.Employee
+	var merged int64
 	err := b.repos.Transaction(ctx, func(tx *repositories.Repos) error {
 		var err error
 		if e, err = tx.Employees.ByIDForUpdate(ctx, emp.ID); err != nil || e == nil {
@@ -259,6 +273,18 @@ func (b *BotService) flagTicket(ctx context.Context, emp *domain.Employee, in fl
 		markRisk(e, domain.RiskRed, fmt.Sprintf("сигнал %s «%s» %s (%s)", d.code, d.cat.Name, in.where, orDefault(in.via, "LLM-разметка")))
 		if err := tx.Employees.Save(ctx, e); err != nil {
 			return err
+		}
+		// Ответ на опрос (свой вариант, комментарий) при открытом обращении той же категории: текст
+		// принадлежит опросу — в обращение он не дописывается, «уже передано» новичку не пишем.
+		if in.eventID != nil {
+			cur, err := tx.Tickets.Active(ctx, e.ID, d.cat.Code)
+			if err != nil {
+				return err
+			}
+			if cur != nil {
+				merged = cur.Number
+				return nil
+			}
 		}
 		h := domain.HumanRequest{EmployeeID: e.ID, EventID: in.eventID, Source: domain.HumanFromFreeText, Flags: domain.StringList{d.code}, Target: categoryTarget(d.cat)}
 		if err := tx.Employees.AddHumanRequest(ctx, &h); err != nil {
@@ -281,7 +307,17 @@ func (b *BotService) flagTicket(ctx context.Context, emp *domain.Employee, in fl
 	if err != nil || e == nil {
 		return err
 	}
+	if merged > 0 {
+		logger.Info("бот: флаг %s новичка %s в ответе опроса — уже открыто обращение #%d, только риск", d.code, emp.ID, merged)
+		return nil
+	}
 	logger.Info("бот: LLM-флаг %s новичка %s → обращение #%d", d.code, emp.ID, res.ticket.Number)
+	if in.quiet {
+		if res.created {
+			b.tickets.notify(ctx, res.ticket, e)
+		}
+		return nil
+	}
 	b.afterHandoff(ctx, e, &res)
 	return nil
 }

@@ -57,9 +57,12 @@ type ClearedWarning struct {
 type RewriteReport struct {
 	Updated int
 	Failed  int
-	Items   []RewriteItem
-	Cleared []ClearedWarning
-	Detail  *ScenarioDetail
+	// FailedVy, FailedNeutral — Failed по режимам.
+	FailedVy      int
+	FailedNeutral int
+	Items         []RewriteItem
+	Cleared       []ClearedWarning
+	Detail        *ScenarioDetail
 }
 
 // textSlot — пара текстов «ты»/«вы» где-то в шаге или сценарии.
@@ -67,7 +70,16 @@ type textSlot struct {
 	stepIdx int    // −1 — сценарий
 	path    string // префикс поля: "", "buttons[0].branch.messages[1]." …
 	ty, vy  *string
+	// tyName, vyName — имена полей в отчёте; пусто — text_ty / text_vy. Вопросы опроса: text /
+	// text_vy, подписи вариантов: options[i] / options_vy[i].
+	tyName, vyName string
+	// onlyNeeded — переписывать, только если в тексте есть обращение на «ты» (вопросы и подписи
+	// вариантов опроса: «Оцените…» уже на «вы», модель не зовём).
+	onlyNeeded bool
 }
+
+func (sl textSlot) tyField() string { return orDefault(sl.tyName, "text_ty") }
+func (sl textSlot) vyField() string { return orDefault(sl.vyName, "text_vy") }
 
 type rewriteKey struct{ mode, text string }
 
@@ -123,11 +135,12 @@ func (s *Services) RewriteVyScenario(ctx context.Context, id uuid.UUID, o Rewrit
 					switch {
 					case r.err != nil:
 						rep.Failed++
+						rep.FailedVy++
 					case r.res.Source != "" && r.res.Text != *sl.vy:
-						rep.Items = append(rep.Items, RewriteItem{StepID: stepIDOf(steps, sl.stepIdx), Field: sl.path + "text_vy",
+						rep.Items = append(rep.Items, RewriteItem{StepID: stepIDOf(steps, sl.stepIdx), Field: sl.path + sl.vyField(),
 							Before: *sl.vy, After: r.res.Text, Source: r.res.Source})
 						*sl.vy = r.res.Text
-						markRewrite(steps, sl, "text_vy", r.res.Source, now)
+						markRewrite(steps, sl, sl.vyField(), r.res.Source, now)
 						changedSteps[sl.stepIdx], changedScenario = true, changedScenario || sl.stepIdx < 0
 						clearedVy[sl.stepIdx] = true
 					}
@@ -138,11 +151,12 @@ func (s *Services) RewriteVyScenario(ctx context.Context, id uuid.UUID, o Rewrit
 					switch {
 					case r.err != nil || r.res.Text == srcTy:
 						rep.Failed++
+						rep.FailedNeutral++
 					default:
-						rep.Items = append(rep.Items, RewriteItem{StepID: stepIDOf(steps, sl.stepIdx), Field: sl.path + "text_ty",
+						rep.Items = append(rep.Items, RewriteItem{StepID: stepIDOf(steps, sl.stepIdx), Field: sl.path + sl.tyField(),
 							Before: srcTy, After: r.res.Text, Source: r.res.Source})
 						*sl.ty = r.res.Text
-						markRewrite(steps, sl, "text_ty", r.res.Source, now)
+						markRewrite(steps, sl, sl.tyField(), r.res.Source, now)
 						changedSteps[sl.stepIdx], changedScenario = true, changedScenario || sl.stepIdx < 0
 						if sl.stepIdx >= 0 && sl.path == "" {
 							clearedGender[sl.stepIdx] = true
@@ -236,6 +250,9 @@ func wantVy(sl textSlot, o RewriteOptions) bool {
 	if ty == "" {
 		return false
 	}
+	if sl.onlyNeeded && !NeedsVy(ty) {
+		return false
+	}
 	vy := strings.TrimSpace(*sl.vy)
 	return !o.OnlyCopied || vy == "" || vy == ty
 }
@@ -311,6 +328,16 @@ func walkRewriteSlots(scen *domain.Scenario, steps []domain.ScenarioStep, o Rewr
 			continue
 		}
 		for q := range st.Survey.Questions {
+			sq := &st.Survey.Questions[q]
+			qp := fmt.Sprintf("survey.questions[%d].", q)
+			fn(textSlot{stepIdx: i, path: qp, ty: &sq.Text, vy: &sq.TextVy, tyName: "text", onlyNeeded: true})
+			if len(sq.OptionsVy) != len(sq.Options) {
+				sq.OptionsVy = slices.Clone(sq.Options) // копия: перепишутся только подписи на «ты»
+			}
+			for j := range sq.Options {
+				fn(textSlot{stepIdx: i, path: qp, ty: &sq.Options[j], vy: &sq.OptionsVy[j],
+					tyName: fmt.Sprintf("options[%d]", j), vyName: fmt.Sprintf("options_vy[%d]", j), onlyNeeded: true})
+			}
 			br := st.Survey.Questions[q].Branches
 			keys := make([]string, 0, len(br))
 			for k := range br {

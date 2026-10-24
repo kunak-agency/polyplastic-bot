@@ -238,6 +238,11 @@ export interface OptionFlag {
 export interface SurveyQuestion {
   text: string
   options: string[]
+  // The question and option labels for a newcomer on formal (vy) (text/options are
+  // informal (ty), as in the customer's file). Empty — the informal (ty) text goes; options_vy
+  // counts only when its length matches options, an empty label falls back.
+  text_vy?: string
+  options_vy?: string[]
   type?: QuestionType
   scale?: '1-10' | '1-5'
   threshold?: number | null
@@ -334,6 +339,9 @@ export interface RewriteVyItem {
 export interface RewriteVyResponse {
   updated: number
   failed: number
+  // failed by mode: the scenario-wide address_form_copied goes once failed_vy = 0
+  failed_vy?: number
+  failed_neutral?: number
   items: RewriteVyItem[]
   cleared_warnings: { step_id: string; code: string }[]
   scenario: ScenarioDetail

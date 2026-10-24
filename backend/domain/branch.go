@@ -68,9 +68,12 @@ type FreeTextWait struct {
 	Category      string    `json:"category,omitempty"`
 	Route         string    `json:"route,omitempty"`
 	NotifyManager bool      `json:"notify_manager,omitempty"`
-	Input         bool      `json:"input,omitempty"` // ответ на шаг kind=input
-	Then          string    `json:"then,omitempty"`  // then ветки — после текста
-	Goto          string    `json:"goto,omitempty"`
+	// Severity — серьёзность сигнала варианта опроса (option_flags), чья ветка ждёт текст: обращение
+	// получает категорию флага (Category) и пометку серьёзности в сводке.
+	Severity string `json:"severity,omitempty"`
+	Input    bool   `json:"input,omitempty"` // ответ на шаг kind=input
+	Then     string `json:"then,omitempty"`  // then ветки — после текста
+	Goto     string `json:"goto,omitempty"`
 }
 
 func (w *FreeTextWait) Value() (driver.Value, error) {

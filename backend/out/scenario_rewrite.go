@@ -4,8 +4,12 @@ import "main/services"
 
 // ScenarioRewrite — ответ POST /api/scenarios/{id}/rewrite-vy (api_contract.md, v4).
 type ScenarioRewrite struct {
-	Updated         int              `json:"updated"`
-	Failed          int              `json:"failed"`
+	Updated int `json:"updated"`
+	Failed  int `json:"failed"`
+	// FailedVy, FailedNeutral — failed по режимам: общее address_form_copied кабинет снимает при
+	// failed_vy = 0 (нейтральный род без модели может не выйти, к форме обращения это не относится).
+	FailedVy        int              `json:"failed_vy"`
+	FailedNeutral   int              `json:"failed_neutral"`
 	Items           []RewriteItem    `json:"items"`
 	ClearedWarnings []ClearedWarning `json:"cleared_warnings"`
 	Scenario        ScenarioDetail   `json:"scenario"`
@@ -37,6 +41,6 @@ func ScenarioRewriteFrom(r services.RewriteReport) ScenarioRewrite {
 	for i, c := range r.Cleared {
 		cleared[i] = ClearedWarning{StepID: c.StepID, Code: c.Code}
 	}
-	return ScenarioRewrite{Updated: r.Updated, Failed: r.Failed, Items: items, ClearedWarnings: cleared,
+	return ScenarioRewrite{Updated: r.Updated, Failed: r.Failed, FailedVy: r.FailedVy, FailedNeutral: r.FailedNeutral, Items: items, ClearedWarnings: cleared,
 		Scenario: ScenarioDetailFrom(*r.Detail)}
 }

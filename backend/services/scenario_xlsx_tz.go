@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -561,6 +562,23 @@ func surveyQuestionsOf(pc parsedCell) []domain.SurveyQuestion {
 	return []domain.SurveyQuestion{q}
 }
 
+// copyQuestionVy — вторая форма вопроса (address_form_copied): text_vy — копия текста ТЗ,
+// options_vy — копия подписей, если в них есть обращение на «ты». rewrite-vy перепишет копии.
+func copyQuestionVy(q *domain.SurveyQuestion) {
+	if q.TextVy == "" {
+		q.TextVy = q.Text
+	}
+	if len(q.OptionsVy) > 0 {
+		return
+	}
+	for _, o := range q.Options {
+		if reTyWords.MatchString(o) {
+			q.OptionsVy = slices.Clone(q.Options)
+			return
+		}
+	}
+}
+
 // normalizeSurvey — шкала опроса по вопросам и флаги вариантов.
 func normalizeSurvey(sv *domain.Survey) {
 	allChoice := true
@@ -576,6 +594,7 @@ func normalizeSurvey(sv *domain.Survey) {
 			sv.Threshold = *q.Threshold
 		}
 		applyQuestionFlags(q)
+		copyQuestionVy(q)
 	}
 	if allChoice {
 		sv.Scale = domain.ScaleChoice

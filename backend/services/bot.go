@@ -346,7 +346,7 @@ func (b *BotService) loadEvent(ctx context.Context, tx *repositories.Repos, evID
 		return nil, e, step, err
 	}
 	if ev.Snapshot != nil { // «Отправить себе»: шаг черновика в самом событии
-		return ev, e, domain.ScenarioStep(*ev.Snapshot), nil
+		return ev, e, surveyFor(domain.ScenarioStep(*ev.Snapshot), e), nil
 	}
 	v, err := tx.Scenarios.Version(ctx, e.ScenarioID, ev.ScenarioVersion)
 	if err != nil || v == nil {
@@ -356,7 +356,7 @@ func (b *BotService) loadEvent(ctx context.Context, tx *repositories.Repos, evID
 	if !ok {
 		return nil, e, step, nil
 	}
-	return ev, e, step, nil
+	return ev, e, surveyFor(step, e), nil
 }
 
 // --- живой опрос ---
@@ -425,6 +425,11 @@ type surveyOutcome struct {
 	next      *max.OutMessage // экран опроса после сообщений ветки — новым сообщением
 	optFlags  []domain.OptionFlag
 	optLabel  string
+	// optBranch — у выбранного варианта своя ветка ТЗ: она и говорит с новичком (общий диалог
+	// сигнала и «Передал…» не нужны). optEsc — в ветке есть эскалация (escalate, handoff,
+	// open_free_text): обращение — по нажатию или тексту новичка, с флагом варианта.
+	optBranch bool
+	optEsc    bool
 	flagQ     int
 	outcomes  []int
 	emp       *domain.Employee
@@ -542,11 +547,17 @@ func (b *BotService) applySurvey(ctx context.Context, empID, evID uuid.UUID, act
 				advance(st)
 			}
 			// ветка и сигнал варианта (06 §1.1, §1.3)
+			f, hasFlag := q.OptionFlags[strconv.Itoa(v)]
+			hasFlag = hasFlag && f.Code != ""
 			if br := optionBranch(q, v); br != nil {
 				out.branch, out.branchSrc = br, branchSrcOption(qi, v)
 				out.flagged, out.freeText = applySilent(e, br.Actions, ev.ID, valueLabel(sv, q, v), nil)
+				out.optBranch, out.optEsc = len(br.Messages) > 0 || branchEscalates(br), branchEscalates(br)
+				if hasFlag {
+					withOptionFlag(e.AwaitFreeText, ev.ID, f) // текст после ветки — обращение с флагом варианта
+				}
 			}
-			if f, ok := q.OptionFlags[strconv.Itoa(v)]; ok && f.Code != "" {
+			if hasFlag {
 				out.optFlags, out.flagQ = append(out.optFlags, f), qi+1
 				out.optLabel = valueLabel(sv, q, v)
 			}

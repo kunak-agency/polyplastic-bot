@@ -152,6 +152,10 @@ func (s *AddressFormService) Rewrite(ctx context.Context, mode, text string) (Re
 		}
 	}
 	if mode != domain.RewriteVy {
+		// Нейтральный род: словаря нет, кроме обращения «Дорогой {Имя}» → «Здравствуйте, {Имя}!».
+		if out := neutralGreeting(text); out != text && !isGendered(unquoted(out)) {
+			return RewriteResult{Text: out, Source: domain.RewriteSourceRule, Rejected: rejected}, nil
+		}
 		return RewriteResult{Text: text, Rejected: rejected}, ErrRewriteFailed
 	}
 	out := RuleRewriteVy(text)
@@ -280,6 +284,9 @@ func CheckRewrite(mode, in, out string) []string {
 			w, r := firstRuleChange(plain)
 			problems = append(problems, fmt.Sprintf("осталась форма на «ты»: «%s» → «%s»", w, r))
 		}
+		if p := vySingularProblem(plain); p != "" {
+			problems = append(problems, p)
+		}
 	} else if len(reVyWords.FindAllString(out, -1)) > len(reVyWords.FindAllString(in, -1)) {
 		problems = append(problems, "обращение сменилось на «вы»")
 	}
@@ -294,6 +301,9 @@ func CheckRewrite(mode, in, out string) []string {
 
 // genderedHint — «: «ты вышел»» — что именно в роде (для ретрая, address-vy.md B2).
 func genderedHint(s string) string {
+	if m := reDearName.FindStringSubmatch(s); m != nil {
+		return ": «" + m[2] + " " + m[3] + "» → «Здравствуйте, " + m[3] + "!»"
+	}
 	for _, re := range []*regexp.Regexp{reGenderPast, reGenderWords, reRuleSlash} {
 		if m := re.FindString(s); m != "" {
 			return ": «" + strings.TrimFunc(m, func(r rune) bool { return !unicode.IsLetter(r) }) + "»"

@@ -19,6 +19,7 @@ var ruleVyWords = map[string]string{
 	"твоего": "вашего", "твоей": "вашей", "твоих": "ваших", "твоим": "вашим", "твоими": "вашими",
 	"твоему": "вашему", "твою": "вашу", "твоём": "вашем", "твоем": "вашем",
 	"привет": "здравствуйте", "хочешь": "хотите", "давай": "давайте", "держи": "держите",
+	"бойся": "бойтесь", "волнуйся": "волнуйтесь", "стесняйся": "стесняйтесь",
 }
 
 // ruleImperatives — повелительное наклонение «ты» → + «те» (расскажи → расскажите). Только
@@ -69,7 +70,9 @@ var (
 )
 
 // RuleRewriteVy — «ты» → «вы» словарём. Регистр первой буквы сохраняется.
-func RuleRewriteVy(s string) string { return ruleRewrite(s, true) }
+// Затем «Дорогой {Имя}» → «Здравствуйте, {Имя}!» и единственное число при «вы» → множественное
+// (address_form_number.go).
+func RuleRewriteVy(s string) string { return fixVySingular(neutralGreeting(ruleRewrite(s, true))) }
 
 // ruleRewrite — greet=false: «Привет» не трогать (NeedsVy: приветствие — не обращение на «ты»).
 func ruleRewrite(s string, greet bool) string {

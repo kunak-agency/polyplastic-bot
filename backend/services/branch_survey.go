@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"main/externalApi/max"
 	"main/externalApi/rag"
 	"main/pkg/logger"
+	"main/pkg/taxonomy"
 	"main/repositories"
 
 	"github.com/google/uuid"
@@ -46,6 +48,34 @@ const (
 	textTextAsk      = "Напишите ответ одним сообщением."
 	textComment      = "Напишите, пожалуйста, одним сообщением, что не так."
 )
+
+// surveyFor — шаг, у которого вопросы и подписи вариантов опроса в форме обращения новичка: на
+// «вы» (и пока форма не выбрана, как stepText) — text_vy и options_vy, где они заполнены.
+// Значения ответов от формы не зависят. Повторный вызов ничего не меняет.
+func surveyFor(s domain.ScenarioStep, e *domain.Employee) domain.ScenarioStep {
+	if s.Survey == nil || e == nil || (e.AddressForm != nil && *e.AddressForm == domain.AddressTy) {
+		return s
+	}
+	sv := *s.Survey
+	sv.Questions = slices.Clone(sv.Questions)
+	for i := range sv.Questions {
+		q := &sv.Questions[i]
+		if strings.TrimSpace(q.TextVy) != "" {
+			q.Text = q.TextVy
+		}
+		if len(q.Options) > 0 && len(q.OptionsVy) == len(q.Options) {
+			opts := slices.Clone(q.Options)
+			for j, o := range q.OptionsVy {
+				if strings.TrimSpace(o) != "" {
+					opts[j] = o
+				}
+			}
+			q.Options = opts
+		}
+	}
+	s.Survey = &sv
+	return s
+}
 
 func qType(q domain.SurveyQuestion) string { return strings.ToLower(strings.TrimSpace(q.Type)) }
 
@@ -226,18 +256,7 @@ func (b *BotService) afterSurvey(ctx context.Context, empID uuid.UUID, out surve
 		return
 	}
 	if len(out.optFlags) > 0 && b.tickets != nil {
-		var in []rag.Flag
-		for _, f := range out.optFlags {
-			in = append(in, rag.Flag{Code: f.Code, Severity: severityOf(f.Severity), Confidence: 1})
-		}
-		evID := out.ev.ID
-		fi := flagInput{eventID: &evID, questionNo: out.flagQ, via: flagViaOption,
-			where: "в ответе «" + out.optLabel + "» на опрос «" + out.step.Title + "»"}
-		if ds := decideFlags(b.tickets.tax, in, nil); len(ds) > 0 {
-			if err := b.applyFlagDecisions(ctx, empID, fi, ds); err != nil {
-				logger.Warn("бот: сигнал варианта новичка %s не обработан: %v", empID, err)
-			}
-		}
+		b.optionSignals(ctx, empID, out)
 	}
 	if out.branch != nil {
 		p := &pressPlan{emp: out.emp, ev: *out.ev, step: out.step, src: out.branchSrc, branch: out.branch,
@@ -277,4 +296,113 @@ func (b *BotService) afterSurvey(ctx context.Context, empID uuid.UUID, out surve
 			logger.Warn("бот: поток после опроса %s не продолжен: %v", out.eventID, err)
 		}
 	}
+}
+
+// optionSignals — сигналы вариантов ответа (option_flags) по правилам таксономии и ветке варианта:
+//   - конфиденциальные и экстренные коды (F0, F5, F9) — сразу по своему маршруту, как regex;
+//   - у варианта ветка с эскалацией (escalate, handoff, open_free_text) — только сигнал риска
+//     (карточка, зона риска, дайджест): обращение заведёт нажатие или текст новичка, с категорией
+//     и серьёзностью флага (optionFlagOf, withOptionFlag);
+//   - без ветки эскалации обращение сразу — только при серьёзности high или коде немедленной
+//     эскалации таксономии (escalate_if.any_of_codes: F7 — предложение рекрутера); medium и low —
+//     сигнал риска, HR увидит его в зоне риска;
+//   - у варианта своя ветка ТЗ без эскалации — говорит она: F7 — сигнал риска без общего диалога,
+//     остальное — обращение без сообщения новичку (карточка HR).
+func (b *BotService) optionSignals(ctx context.Context, empID uuid.UUID, out surveyOutcome) {
+	tax := b.tickets.tax
+	var in []rag.Flag
+	for _, f := range out.optFlags {
+		in = append(in, rag.Flag{Code: f.Code, Severity: severityOf(f.Severity), Confidence: 1})
+	}
+	ds := decideFlags(tax, in, nil)
+	quiet := false
+	for i := range ds {
+		d := &ds[i]
+		if d.act == flagActRisk || immediateCategory(d.cat) {
+			continue
+		}
+		switch {
+		case out.optEsc:
+			d.act = flagActRisk
+		case d.severity < 3 && !slices.Contains(tax.EscalateCodes, d.code):
+			d.act = flagActRisk
+		case out.optBranch && d.act == flagActOffer:
+			d.act = flagActRisk
+		case out.optBranch:
+			quiet = true
+		}
+	}
+	if len(ds) == 0 {
+		return
+	}
+	evID := out.ev.ID
+	fi := flagInput{eventID: &evID, questionNo: out.flagQ, via: flagViaOption, quiet: quiet,
+		where: "в ответе «" + out.optLabel + "» на опрос «" + out.step.Title + "»"}
+	for _, d := range ds {
+		logger.Info("бот: сигнал варианта %s sev %d → %s (ветка %v, эскалация в ветке %v, новичок %s)", d.code, d.severity, d.act, out.optBranch, out.optEsc, empID)
+	}
+	if err := b.applyFlagDecisions(ctx, empID, fi, ds); err != nil {
+		logger.Warn("бот: сигнал варианта новичка %s не обработан: %v", empID, err)
+	}
+}
+
+// immediateCategory — флаг, который уходит сразу при любой ветке: экстренный F0 и
+// конфиденциальные F5/F9 (HR-партнёру или СБ, мимо руководителя).
+func immediateCategory(cat taxonomy.Category) bool {
+	return cat.Code == "F0" || cat.Restricted || cat.SecurityChat
+}
+
+// branchEscalates — в ветке есть путь к человеку: escalate, handoff или open_free_text в действиях
+// ветки или терминальных кнопках («Описать проблему», «Чат с HR»).
+func branchEscalates(br *domain.Branch) bool {
+	if br == nil {
+		return false
+	}
+	esc := func(acts []domain.Action) bool {
+		for _, a := range acts {
+			switch a.Type {
+			case domain.ActionEscalate, domain.ActionHandoff, domain.ActionOpenFreeText:
+				return true
+			}
+		}
+		return false
+	}
+	if esc(br.Actions) {
+		return true
+	}
+	for _, m := range br.Messages {
+		for _, tb := range m.Buttons {
+			if _, ok := actionOf(tb.Action); ok || tb.OpensFreeText || (tb.Branch != nil && esc(tb.Branch.Actions)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// optionFlagOf — флаг варианта, чья ветка src («q<q>v<v>»); nil — не вариант или без флага.
+func optionFlagOf(s domain.ScenarioStep, src string) *domain.OptionFlag {
+	if s.Survey == nil || !strings.HasPrefix(src, "q") {
+		return nil
+	}
+	qs, vs, ok := strings.Cut(src[1:], "v")
+	q, err1 := strconv.Atoi(qs)
+	_, err2 := strconv.Atoi(vs)
+	if !ok || err1 != nil || err2 != nil || q < 0 || q >= len(s.Survey.Questions) {
+		return nil
+	}
+	f, ok := s.Survey.Questions[q].OptionFlags[vs]
+	if !ok || f.Code == "" {
+		return nil
+	}
+	return &f
+}
+
+// withOptionFlag — ожидание текста после ветки варианта получает категорию и серьёзность флага
+// (если ветка не задала категорию сама).
+func withOptionFlag(w *domain.FreeTextWait, evID uuid.UUID, f domain.OptionFlag) {
+	if w == nil || w.EventID != evID || f.Code == "" || w.Category != "" {
+		return
+	}
+	w.Category, w.Severity = f.Code, f.Severity
 }

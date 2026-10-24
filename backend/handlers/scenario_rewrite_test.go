@@ -35,7 +35,7 @@ func (f *rewriteFake) Complete(_ context.Context, m []services.LLMMessage) (stri
 	var out string
 	if strings.Contains(m[0].Content, "Пол сотрудника неизвестен") {
 		out = strings.NewReplacer("Готов/Готова", "Всё готово", "готов/готова", "всё готово",
-			"справился", "смог", "подготовленный", "без спешки").Replace(text)
+			"справился", "смог", "подготовленный", "без спешки", "Дорогой {Имя},", "Здравствуйте, {Имя}!").Replace(text)
 	} else {
 		out = services.RuleRewriteVy(text)
 	}
@@ -95,6 +95,17 @@ func TestRewriteVyAPI(t *testing.T) {
 		case sid == "":
 			ruleScoped = f
 		}
+	}
+	// Вопрос опроса на «ты» получает свой text_vy (e2e 24.10: «Как тебя встретили…» уходил на «вы»).
+	question := false
+	for _, it := range its {
+		m := it.(map[string]any)
+		if f := m["field"].(string); strings.HasPrefix(f, "survey.questions[") && strings.HasSuffix(f, "].text_vy") && m["after"] == "Останетесь с нами?" {
+			question = true
+		}
+	}
+	if !question {
+		t.Errorf("вопрос опроса не переписан на «вы»: %v", its)
 	}
 	if !fields["text_vy"] || !fields["text_ty"] || vyStep == "" {
 		t.Fatalf("поля: %v, шаг %q", fields, vyStep)

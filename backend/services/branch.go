@@ -215,6 +215,9 @@ type pressPlan struct {
 	thenOf   *domain.Branch // чей then применять, когда ветка закончится
 	thenGo   bool           // применить then (поток блока ждал это нажатие)
 	resume   bool           // ветка варианта опроса ждала текст или эту кнопку — дальше вопрос опроса
+	// sig — флаг варианта опроса, из ветки которого нажата кнопка: обращение получает его
+	// категорию и серьёзность (нажатие — согласие новичка передать).
+	sig *domain.OptionFlag
 }
 
 // stepButton — кнопка обычного шага: ответ записывается, сообщение правится в «✅ …», затем
@@ -346,6 +349,13 @@ func (b *BotService) terminalButton(ctx context.Context, u max.Update, empID uui
 		}
 		tb := br.Messages[m].Buttons[j]
 		pressed := "→ " + tb.Label
+		if qs, _, ok := strings.Cut(strings.TrimPrefix(src, "q"), "v"); ok && strings.HasPrefix(src, "q") {
+			// ветки разных вопросов опроса — одно событие: «Описать проблему» у вопроса 3 после
+			// той же кнопки у вопроса 1 — новое нажатие, а не «Уже записал»
+			if qn, err := strconv.Atoi(qs); err == nil {
+				pressed += fmt.Sprintf(" (вопрос %d)", qn+1)
+			}
+		}
 		if ev.Answer != nil && strings.Contains(*ev.Answer, pressed) {
 			reply = max.Answer{Notification: "Уже записал"}
 			return nil
@@ -361,7 +371,7 @@ func (b *BotService) terminalButton(ctx context.Context, u max.Update, empID uui
 		}
 		now := b.now()
 		e.LastActivityAt = &now
-		p := &pressPlan{step: step, src: src, label: tb.Label, thenOf: br, thenGo: wasWaiting}
+		p := &pressPlan{step: step, src: src, label: tb.Label, thenOf: br, thenGo: wasWaiting, sig: optionFlagOf(step, src)}
 		var acts []domain.Action
 		if tb.Branch != nil {
 			acts = tb.Branch.Actions
@@ -373,6 +383,9 @@ func (b *BotService) terminalButton(ctx context.Context, u max.Update, empID uui
 		if tb.OpensFreeText && !p.freeText {
 			p.freeText = true
 			e.AwaitFreeText = &domain.FreeTextWait{EventID: ev.ID, Label: tb.Label, Then: br.Then, Goto: br.Goto}
+		}
+		if p.sig != nil && p.freeText {
+			withOptionFlag(e.AwaitFreeText, ev.ID, *p.sig)
 		}
 		// Ветка варианта опроса ждала «ответ в чате или кнопку» (ТЗ r63): выбрана кнопка — текст
 		// больше не ждём, следующий вопрос опроса.
@@ -517,14 +530,16 @@ func (b *BotService) runPlan(ctx context.Context, p *pressPlan) {
 			if _, ok := hasAction(p.acts, domain.ActionOpenFreeText); ok {
 				continue // обращение — когда придёт текст
 			}
-			b.escalate(ctx, e, ev, p.step, a, p.label, "")
+			b.escalate(ctx, e, ev, p.step, a, p.label, "", p.sig)
 		case domain.ActionHandoff:
-			b.handoff(ctx, e, ev, p.step, a, p.label)
+			b.handoff(ctx, e, ev, p.step, a, p.label, p.sig)
 		case domain.ActionOpenFreeText:
 			freeAsk = orDefault(a.Prompt, byForm(e, textFreeTextAskTy, textFreeTextAsk))
 		}
 	}
-	if p.freeText {
+	// Ветка уже спросила своими сообщениями («Что на это повлияло?») — общую просьбу «Напишите
+	// одним сообщением» не добавляем, если у open_free_text нет своего prompt.
+	if p.freeText && (freeAsk != "" && freeAsk != byForm(e, textFreeTextAskTy, textFreeTextAsk) || !branchAsked(p)) {
 		b.send(ctx, recipientOf(e).msg(orDefault(freeAsk, byForm(e, textFreeTextAskTy, textFreeTextAsk)), "", nil))
 	}
 	if p.flagged {
@@ -538,6 +553,20 @@ func (b *BotService) runPlan(ctx context.Context, p *pressPlan) {
 	if p.resume {
 		b.resumeSurvey(ctx, e.ID, ev.ID)
 	}
+}
+
+// branchAsked — ветка варианта опроса отправила свои сообщения с текстом (ТЗ: «Что на это
+// повлияло?» — они и просят ответить).
+func branchAsked(p *pressPlan) bool {
+	if p.branch == nil || !p.messages || !strings.HasPrefix(p.src, "q") {
+		return false
+	}
+	for _, m := range p.branch.Messages {
+		if strings.TrimSpace(m.TextTy+m.TextVy) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // resumeSurvey — текущий вопрос опроса новым сообщением: ветка варианта с «ответь в чате или
@@ -616,11 +645,14 @@ func (b *BotService) sendFile(ctx context.Context, e *domain.Employee, a domain.
 
 // escalate — обращение v2: категория и маршрут из ветки, notify_manager. quote — текст новичка
 // (open_free_text).
-func (b *BotService) escalate(ctx context.Context, emp *domain.Employee, ev *domain.ScheduledEvent, step domain.ScenarioStep, a domain.Action, label, quote string) {
+func (b *BotService) escalate(ctx context.Context, emp *domain.Employee, ev *domain.ScheduledEvent, step domain.ScenarioStep, a domain.Action, label, quote string, sig *domain.OptionFlag) {
 	if b.tickets == nil {
 		return
 	}
 	code := a.Category
+	if code == "" && sig != nil {
+		code = sig.Code
+	}
 	if code == "" {
 		code = taxonomy.CategoryQuestion
 	}
@@ -632,7 +664,7 @@ func (b *BotService) escalate(ctx context.Context, emp *domain.Employee, ev *dom
 			return err
 		}
 		cat := b.tickets.category(code, routeOr(a.Route, taxonomy.RouteHR))
-		if a.Route != "" {
+		if a.Route != "" && !(sig != nil && immediateCategory(cat)) {
 			cat.Route = a.Route
 		}
 		if a.NotifyManager && !cat.ManagerHidden {
@@ -643,6 +675,7 @@ func (b *BotService) escalate(ctx context.Context, emp *domain.Employee, ev *dom
 		if quote != "" {
 			what = fmt.Sprintf("Новичок ответил своими словами после «%s» в шаге «%s».", label, step.Title)
 		}
+		what += signalNote(sig, code)
 		t, created, err := b.tickets.open(ctx, tx, e, ticketDraft{cat: cat, source: domain.TicketFromAnswer, what: what, quote: quote, eventID: evID})
 		res = handoffResult{ticket: t, created: created}
 		return err
@@ -655,6 +688,14 @@ func (b *BotService) escalate(ctx context.Context, emp *domain.Employee, ev *dom
 	}
 	logger.Info("бот: ветка «%s» → обращение #%d %s %s", step.Title, res.ticket.Number, res.ticket.Category, res.ticket.Route)
 	b.afterHandoff(ctx, e, &res)
+}
+
+// signalNote — пометка сводки: обращение несёт сигнал варианта ответа опроса.
+func signalNote(sig *domain.OptionFlag, code string) string {
+	if sig == nil || sig.Code != code {
+		return ""
+	}
+	return fmt.Sprintf(" Сигнал %s по варианту ответа опроса, серьёзность %d.", sig.Code, severityOf(sig.Severity))
 }
 
 // eventRef — id события для обращения; у команды события нет.
@@ -675,7 +716,7 @@ func routeOr(r, def string) string {
 
 // handoff — «Связаться с человеком»: обращение к recruiter|hr|security, сразу human_active —
 // переписка идёт через бота.
-func (b *BotService) handoff(ctx context.Context, emp *domain.Employee, ev *domain.ScheduledEvent, step domain.ScenarioStep, a domain.Action, label string) {
+func (b *BotService) handoff(ctx context.Context, emp *domain.Employee, ev *domain.ScheduledEvent, step domain.ScenarioStep, a domain.Action, label string, sig *domain.OptionFlag) {
 	if b.tickets == nil {
 		return
 	}
@@ -700,9 +741,20 @@ func (b *BotService) handoff(ctx context.Context, emp *domain.Employee, ev *doma
 			return err
 		}
 		cat := taxonomy.Question(to)
+		note := ""
+		if sig != nil { // ветка варианта с флагом: обращение категории флага, адресат — кнопки
+			if c, ok := b.tickets.tax.Get(sig.Code); ok {
+				cat = c
+				if !immediateCategory(c) {
+					cat.Route = to
+				}
+				h.Flags = domain.StringList{sig.Code}
+				note = signalNote(sig, sig.Code)
+			}
+		}
 		t, created, err := b.tickets.open(ctx, tx, e, ticketDraft{
 			cat: cat, source: domain.TicketFromAnswer, humanRequestID: &h.ID, eventID: evID, withContext: true,
-			what: fmt.Sprintf("Новичок нажал «%s» в шаге «%s» — просит связаться с человеком (%s).", label, step.Title, to),
+			what: fmt.Sprintf("Новичок нажал «%s» в шаге «%s» — просит связаться с человеком (%s).", label, step.Title, to) + note,
 		})
 		if err != nil {
 			return err
@@ -776,7 +828,11 @@ func (b *BotService) freeText(ctx context.Context, emp *domain.Employee, text st
 	if codes != nil {
 		a.Category, a.Route = b.flagCategory(codes).Code, ""
 	}
-	b.escalate(ctx, e, ev, step, a, w.Label, text)
+	var sig *domain.OptionFlag
+	if w.Severity != "" && w.Category != "" {
+		sig = &domain.OptionFlag{Code: w.Category, Severity: w.Severity}
+	}
+	b.escalate(ctx, e, ev, step, a, w.Label, text, sig)
 	if codes == nil {
 		b.classifyAsync(ctx, e, flagInput{text: text, where: "в ответе «свой вариант» на «" + step.Title + "»"})
 	}

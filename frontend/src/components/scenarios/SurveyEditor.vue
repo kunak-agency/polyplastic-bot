@@ -106,6 +106,12 @@ function setOptionText(qi: number, oi: number, text: string): void {
   const q = props.survey.questions[qi]
   setQ(qi, { options: q.options.map((o, j) => (j === oi ? text : o)) })
 }
+// The formal (vy) label of an option: kept as long as the options list (empty — the informal (ty) label goes).
+function setOptionVy(qi: number, oi: number, text: string): void {
+  const q = props.survey.questions[qi]
+  const vy = q.options.map((_, j) => (j === oi ? text : (q.options_vy?.[j] ?? '')))
+  setQ(qi, { options_vy: vy.some((x) => x.trim() !== '') ? vy : undefined })
+}
 function applyOrder(qi: number, options: string[], order: number[]): void {
   const keyed = optionsAreKeys(props.survey.questions[qi], props.survey.scale)
   if (keyed && picked.value?.q === qi) {
@@ -204,6 +210,16 @@ function effType(q: SurveyQuestion): QuestionType {
             <X :size="14" />
           </Button>
         </div>
+        <div class="row row--vy">
+          <span class="q__n q__n--vy txt-sm muted">{{ t('scenarios.survey.vyShort') }}</span>
+          <input
+            class="input"
+            :aria-label="t('scenarios.survey.questionVy', { n: i + 1 })"
+            :placeholder="t('scenarios.survey.questionVyHint')"
+            :value="q.text_vy ?? ''"
+            @input="setQ(i, { text_vy: ($event.target as HTMLInputElement).value || undefined })"
+          />
+        </div>
         <div class="q__grid">
           <label class="q__f">
             <span>{{ t('scenarios.survey.type') }}</span>
@@ -279,6 +295,13 @@ function effType(q: SurveyQuestion): QuestionType {
               :placeholder="t('scenarios.survey.optionN', { n: oi + 1 })"
               :value="o"
               @input="setOptionText(i, oi, ($event.target as HTMLInputElement).value)"
+            />
+            <input
+              class="input input--vy"
+              :aria-label="t('scenarios.survey.optionVyN', { n: oi + 1 })"
+              :placeholder="t('scenarios.survey.optionVyHint')"
+              :value="q.options_vy?.[oi] ?? ''"
+              @input="setOptionVy(i, oi, ($event.target as HTMLInputElement).value)"
             />
             <Button
               variant="ghost"
@@ -480,6 +503,13 @@ function effType(q: SurveyQuestion): QuestionType {
   display: flex;
   gap: 6px;
   align-items: center;
+}
+.row--vy {
+  padding-right: 34px; /* under the question, not under its remove button */
+}
+.row--vy .input {
+  flex: 1;
+  min-width: 0;
 }
 .q__n {
   width: 16px;

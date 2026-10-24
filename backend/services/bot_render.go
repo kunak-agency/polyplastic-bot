@@ -395,6 +395,7 @@ func shortQuestion(s string) string {
 // surveyMessage — текущий экран живого опроса. Готовый опрос (state.Q за последним вопросом)
 // — итог без клавиатуры.
 func surveyMessage(to recipient, s domain.ScenarioStep, e *domain.Employee, ev *domain.ScheduledEvent, at time.Time) max.OutMessage {
+	s = surveyFor(s, e)
 	sv := s.Survey
 	st := ev.Survey
 	var b strings.Builder

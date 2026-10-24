@@ -40,11 +40,13 @@ async function run(): Promise<void> {
   total.value = ids.length
   let updated = 0
   let failed = 0
+  let failedVy = 0
   const acc: { last: ScenarioDetail | null } = { last: null }
   const cleared: RewriteVyResponse['cleared_warnings'] = []
   const take = (r: RewriteVyResponse): void => {
     updated += r.updated
     failed += r.failed
+    failedVy += r.failed_vy ?? r.failed
     cleared.push(...r.cleared_warnings)
     acc.last = r.scenario
   }
@@ -66,7 +68,7 @@ async function run(): Promise<void> {
         neutralize: true,
       }),
     )
-    dropImportWarnings(props.scenarioId, cleared, failed === 0)
+    dropImportWarnings(props.scenarioId, cleared, failedVy === 0)
     if (updated === 0 && failed === 0) toast.info(t('rewrite.nothing'))
     else if (failed === 0) toast.success(t('rewrite.done', { n: updated }))
     else toast.warning(t('rewrite.doneFailed', { n: updated, failed }))

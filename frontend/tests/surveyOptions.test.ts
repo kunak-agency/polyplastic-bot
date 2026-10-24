@@ -91,3 +91,10 @@ test('scale reasons are not keys: reordering them leaves score branches alone', 
   assert.deepEqual(Object.keys(r.questions[0].branches ?? {}), ['1'])
   assert.deepEqual(r.outcomes?.[1].if[0].in, [1, 2])
 })
+
+test('"вы" labels follow their options; a new option gets an empty one', () => {
+  const s = survey()
+  s.questions[1].options_vy = ['Пропуск, бейдж', 'Столовая — вам', '']
+  const r = reorderOptions(s, 1, ['Столовая', 'Пропуск, бейдж', 'Новое'], [1, 0, -1])
+  assert.deepEqual(r.questions[1].options_vy, ['Столовая — вам', 'Пропуск, бейдж', ''])
+})

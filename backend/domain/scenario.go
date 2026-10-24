@@ -299,8 +299,13 @@ type OptionFlag struct {
 // своя шкала и порог, подписи краёв, comment below|on_no — когда просить комментарий, other —
 // «свой вариант».
 type SurveyQuestion struct {
-	Text      string   `json:"text"`
-	Options   []string `json:"options"`
+	Text    string   `json:"text"`
+	Options []string `json:"options"`
+	// TextVy, OptionsVy — вопрос и подписи вариантов на «вы» (Text и Options — на «ты», как в ТЗ).
+	// Пусто — новичку на «вы» уходит Text; OptionsVy берётся, только если длина совпадает с Options,
+	// пустая подпись — из Options. Значения ответов (номера вариантов) общие.
+	TextVy    string   `json:"text_vy,omitempty"`
+	OptionsVy []string `json:"options_vy,omitempty"`
 	Type      string   `json:"type,omitempty"`
 	Scale     string   `json:"scale,omitempty"`
 	Threshold *int     `json:"threshold,omitempty"`

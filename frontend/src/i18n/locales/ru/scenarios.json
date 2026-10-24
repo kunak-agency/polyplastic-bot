@@ -309,6 +309,11 @@
     "firstDay": "выход"
   },
   "survey": {
+    "vyShort": "вы",
+    "questionVy": "Вопрос {n} на «вы»",
+    "questionVyHint": "На «вы» — пусто, если как на «ты»",
+    "optionVyN": "Вариант {n} на «вы»",
+    "optionVyHint": "на «вы»",
     "scaleHint": "Шкала по умолчанию; у вопроса можно задать свою",
     "type": "Тип вопроса",
     "typeInherit": "как у опроса",
@@ -454,7 +459,13 @@
       "time_order_fixed": "Порядок времени",
       "branch_unmatched": "Ветка без вопроса",
       "unknown_branch": "Ветка без варианта",
-      "command_unmapped": "Команда без действия"
+      "command_unmapped": "Команда без действия",
+      "label_long": "Длинная подпись кнопки",
+      "covered_by_onboarding": "Уже спрошено при знакомстве",
+      "start_day_placeholder": "«Завтра» → день выхода",
+      "duplicate_greeting": "Два приветствия подряд",
+      "survey_missing": "Опрос не найден",
+      "text_from_help": "Текст из /help"
     }
   },
   "rules": {

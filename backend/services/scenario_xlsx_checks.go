@@ -21,7 +21,8 @@ var (
 	reCredentials = regexp.MustCompile(`(?i)(логин|парол)`)
 )
 
-// isGendered — текст в мужском/женском роде для новичка: «Готов/Готова», «ты справился», «способна».
+// isGendered — текст в мужском/женском роде для новичка: «Готов/Готова», «ты справился», «способна»,
+// «Дорогой {Имя}».
 func isGendered(s string) bool {
 	for _, m := range reGenderSlash.FindAllStringSubmatch(s, -1) {
 		a, b := strings.ToLower(m[1]), strings.ToLower(m[2])
@@ -29,7 +30,7 @@ func isGendered(s string) bool {
 			return true
 		}
 	}
-	return reGenderPast.MatchString(s) || reGenderWords.MatchString(s)
+	return reGenderPast.MatchString(s) || reGenderWords.MatchString(s) || reDearName.MatchString(s)
 }
 
 // isMixedForm — в одном сообщении и «ты», и «вы».
