@@ -39,6 +39,7 @@ type voiceOpts struct {
 	audio   bool // голос: распознавание и синтез; false — только текст (микрофона нет)
 	bargeIn bool // CALL_BARGE_IN
 	greet   bool // CALL_SPOKEN_GREETING: приветствие голосом
+	mute    bool // CALL_MUTE_WHILE_BOT: микрофон глушится, пока Корсик думает и говорит
 	site    string
 	callID  string
 }
@@ -173,6 +174,11 @@ func (v *voiceCall) pump() {
 			if v.speech == nil {
 				continue
 			}
+			if v.opts.mute && v.botActive() {
+				// CALL_MUTE_WHILE_BOT: пока Корсик думает и говорит, микрофон — тишина, чтобы шум
+				// и голос не перебили ответ (запись демо). Тишина, а не пропуск: VAD видит паузу.
+				f = make([]byte, len(f))
+			}
 			if err := v.speech.SendAudio(f); err != nil && v.ctx.Err() == nil {
 				logger.Warn("звонок %s: звук в распознавание не отправлен: %v", v.opts.callID, err)
 			}
@@ -230,6 +236,13 @@ func (v *voiceCall) readSpeech(s *rag.Stream) {
 			v.push(userInput{kind: inputUser, text: text, speechEnd: end, asrMs: ev.AsrMs, at: time.Now()})
 		}
 	}
+}
+
+// botActive — Корсик думает над ходом или говорит.
+func (v *voiceCall) botActive() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.queued > 0 || v.busy > 0 || v.playing != 0 || v.audioTurn != 0
 }
 
 func (v *voiceCall) push(in userInput) {
