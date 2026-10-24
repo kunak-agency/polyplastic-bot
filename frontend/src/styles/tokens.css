@@ -218,7 +218,7 @@ body {
   font-feature-settings: 'cv11', 'ss01', 'ss03';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  min-width: 1320px;
+  min-width: 1100px;
 }
 button {
   font: inherit;
