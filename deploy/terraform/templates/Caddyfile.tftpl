@@ -5,12 +5,14 @@
 }
 %{ endif ~}
 
-# Весь сайт за basic auth: кабинет без своего логина, в базе конфиденциальный сценарий.
-# Кабинет ходит в API тем же источником (/api), поэтому XHR идут с уже введёнными учётными данными.
+# basic_auth_enabled: весь сайт за basic auth (до входа по ролям). С FEATURE_AUTH кабинет и API
+# закрыты собственным входом, basic auth выключается переменной.
 (protected) {
+%{ if basic_auth_enabled ~}
 	basic_auth {
 		${user} ${hash}
 	}
+%{ endif ~}
 	encode zstd gzip
 	header {
 		X-Frame-Options DENY

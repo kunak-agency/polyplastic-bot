@@ -116,11 +116,12 @@ resource "local_file" "compose" {
 resource "local_file" "caddyfile" {
   filename = "${local.vm_dir}/caddy/Caddyfile"
   content = templatefile("${path.module}/templates/Caddyfile.tftpl", {
-    web_domains = local.web_domains
-    api_domain  = var.api_domain
-    acme_email  = var.acme_email
-    user        = "jury"
-    hash        = random_password.basic_auth.bcrypt_hash
+    web_domains        = local.web_domains
+    api_domain         = var.api_domain
+    acme_email         = var.acme_email
+    user               = "jury"
+    hash               = random_password.basic_auth.bcrypt_hash
+    basic_auth_enabled = var.basic_auth_enabled
   })
   file_permission      = "0644"
   directory_permission = "0755"

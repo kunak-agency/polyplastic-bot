@@ -56,3 +56,9 @@ variable "source_dir" {
   type        = string
   default     = ""
 }
+
+variable "basic_auth_enabled" {
+  description = "Basic auth Caddy на весь сайт. Выключать, когда в API включён вход по ролям (FEATURE_AUTH)."
+  type        = bool
+  default     = true
+}
