@@ -23,13 +23,13 @@ variable "api_domain" {
 }
 
 variable "fallback_domain" {
-  description = "Домен, который работает сразу, без настройки DNS (sslip.io). На нём тоже кабинет + /api."
+  description = "Запасной домен без настройки DNS (например, <ip-через-дефисы>.sslip.io): кабинет + /api. Пусто — не обслуживать."
   type        = string
-  default     = "72-56-247-146.sslip.io"
+  default     = ""
 }
 
 variable "cabinet_url" {
-  description = "Адрес кабинета для кнопок-ссылок бота в MAX (CABINET_URL). Пусто — https://<fallback_domain>; после настройки DNS — https://lk.plexet.ru."
+  description = "Адрес кабинета для кнопок-ссылок бота в MAX (CABINET_URL). Пусто — https://<web_domain>."
   type        = string
   default     = ""
 }

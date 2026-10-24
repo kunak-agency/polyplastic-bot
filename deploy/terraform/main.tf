@@ -12,10 +12,10 @@ locals {
   remote    = "/opt/korsik"
   ssh_key   = pathexpand(var.ssh_key)
 
-  # Кабинет (статика + /api) обслуживается на домене кабинета и на sslip.io; api_domain — только API.
+  # Кабинет (статика + /api) обслуживается на домене кабинета (и на fallback_domain, если задан); api_domain — только API.
   web_domains = compact([var.web_domain, var.fallback_domain])
   origins     = join(",", [for d in local.web_domains : "https://${d}"])
-  cabinet_url = var.cabinet_url != "" ? trimsuffix(var.cabinet_url, "/") : "https://${var.fallback_domain}"
+  cabinet_url = var.cabinet_url != "" ? trimsuffix(var.cabinet_url, "/") : "https://${var.web_domain}"
 
   backend_hash = sha1(join("", [
     for f in sort(fileset("${local.repo}/backend", "**/*.{go,mod,sum}")) : filesha1("${local.repo}/backend/${f}")

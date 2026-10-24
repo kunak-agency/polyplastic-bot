@@ -43,7 +43,6 @@ api ──► MAX (long polling, CA Минцифры)    api ──► RAG на 
 
 | Домен | Что обслуживает | Когда заработает |
 |---|---|---|
-| `72-56-247-146.sslip.io` (`fallback_domain`) | кабинет и `/api` | сразу |
 | `lk.plexet.ru` (`web_domain`) | кабинет и `/api` | после A-записи |
 | `api-mosprom.plexet.ru` (`api_domain`) | только API, весь путь | после A-записи |
 
@@ -54,14 +53,14 @@ lk            A   72.56.247.146
 api-mosprom   A   72.56.247.146
 ```
 
-Пока записей нет, работает только адрес sslip.io. Caddy пробует получить сертификаты на домены
+Пока записей нет, кабинет недоступен (запасной домен можно включить переменной `fallback_domain`,
+например `72-56-247-146.sslip.io`). Caddy пробует получить сертификаты на домены
 plexet.ru и повторяет попытки с нарастающей паузой. Когда записи появятся, сертификаты выпустятся
 сами, apply для этого не нужен. Ускорить можно перезапуском Caddy:
 `ssh root@72.56.247.146 'cd /opt/korsik && docker compose restart caddy'`.
 
-После того как `lk.plexet.ru` заработает, ссылки бота в MAX («Открыть аналитику») стоит перевести на
-этот домен: `terraform apply -var rag_base_url=... -var cabinet_url=https://lk.plexet.ru`. Пока
-`cabinet_url` пуст, ссылки ведут на sslip.io.
+Ссылки бота в MAX («Открыть аналитику») ведут на `https://<web_domain>`; другой адрес задаётся
+переменной `cabinet_url`.
 
 Кабинет обращается к API по тому же адресу (`/api` на домене кабинета). Браузер уже прошёл
 basic auth на этом домене и отправляет те же учётные данные с каждым XHR, поэтому CORS не нужен. На
@@ -83,7 +82,7 @@ Basic auth не мешает ни одному маршруту:
 - бот MAX работает через long polling, то есть сам ходит в MAX, и входящих вебхуков нет;
 - dev-хуки (`/api/dev/*`) вызывает кабинет из браузера, который уже залогинен;
 - `/health` наружу не проброшен, а `/api/health` доступен только с паролем. Для проверки:
-  `curl -u jury:<пароль> https://72-56-247-146.sslip.io/api/health`.
+  `curl -u jury:<пароль> https://lk.plexet.ru/api/health`.
 
 Сменить пароль: `terraform apply -replace=random_password.basic_auth -var rag_base_url=...`.
 
@@ -114,8 +113,8 @@ Basic auth не мешает ни одному маршруту:
 | `ssh_key` | `~/.ssh/korsik_deploy` | ключ для root |
 | `web_domain` | `lk.plexet.ru` | домен кабинета |
 | `api_domain` | `api-mosprom.plexet.ru` | домен, который целиком проксируется в API |
-| `fallback_domain` | `72-56-247-146.sslip.io` | домен, который работает без DNS |
-| `cabinet_url` | пусто, то есть `https://<fallback_domain>` | `CABINET_URL` для ссылок бота |
+| `fallback_domain` | пусто | запасной домен без DNS (`<ip-через-дефисы>.sslip.io`), если понадобится |
+| `cabinet_url` | пусто, то есть `https://<web_domain>` | `CABINET_URL` для ссылок бота |
 | `api_enabled` | `true` | `false`: подняты только Postgres и Caddy, API и бот остановлены |
 | `acme_email` | пусто | e-mail для Let's Encrypt |
 
@@ -150,7 +149,7 @@ terraform apply -var api_enabled=false
 terraform apply
 
 # 5. Проверить.
-curl -fsS -u "jury:$(terraform output -raw basic_auth_password)" https://72-56-247-146.sslip.io/api/health  # gitleaks:allow
+curl -fsS -u "jury:$(terraform output -raw basic_auth_password)" https://lk.plexet.ru/api/health  # gitleaks:allow
 ssh -i ~/.ssh/korsik_deploy root@72.56.247.146 'cd /opt/korsik && docker compose logs --tail 50 api'
 ```
 
