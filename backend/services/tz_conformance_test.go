@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -286,7 +287,8 @@ func (c *conformRun) run(t *testing.T) {
 
 // day — день адаптации по календарю (как D в ТЗ).
 func (c *conformRun) day() int {
-	return int(c.clock.Sub(time.Date(c.start.Year(), c.start.Month(), c.start.Day(), 0, 0, 0, 0, c.clock.Location())).Hours()) / 24
+	h := c.clock.Sub(time.Date(c.start.Year(), c.start.Month(), c.start.Day(), 0, 0, 0, 0, c.clock.Location())).Hours()
+	return int(math.Floor(h / 24))
 }
 
 // recruiter — отмашка рекрутера (r34, r36): утром D+1 у «основного» и «проблемного».
@@ -303,9 +305,18 @@ func (c *conformRun) recruiter(p *cPersona) {
 	p.notes = append(p.notes, c.clock.Format("02.01 15:04")+" рекрутер включил recruiter_enabled")
 }
 
-// initiative — «проблемный» сам пишет: /food, свободный вопрос (r69), /hr.
+// initiative — «проблемный» сам пишет: /food, свободный вопрос (r69), /hr; «основной» —
+// свободный вопрос на D+4 (у него нет открытой переписки с HR, отвечает правило r69).
 func (c *conformRun) initiative(p *cPersona) {
-	if p.mode != "problem" || c.clock.Hour() != 16 || c.clock.Minute() != 0 {
+	if p.mode == "silent" || c.clock.Hour() != 16 || c.clock.Minute() != 0 {
+		return
+	}
+	if p.mode == "main" {
+		if c.day() == 4 && !p.said["free"] {
+			p.said["free"] = true
+			c.say(p, "Можно ли приносить на работу свою кофемашину?", 0)
+			c.react(p)
+		}
 		return
 	}
 	d := c.day()
@@ -392,12 +403,16 @@ func (c *conformRun) react(p *cPersona) {
 			continue
 		}
 		ss := c.screens(p)
-		if len(ss) == 0 || p.acted[ss[0].key] {
-			return
+		pay := ""
+		// свежие экраны по очереди: сообщение об обращении (флаг варианта) может прийти после
+		// вопроса опроса — новичок отвечает на вопрос, а не застревает на нём
+		for i := 0; i < len(ss) && i < 4 && pay == ""; i++ {
+			if p.acted[ss[i].key] {
+				continue
+			}
+			p.acted[ss[i].key] = true
+			pay = c.choose(p, ss[i])
 		}
-		s := ss[0]
-		p.acted[s.key] = true
-		pay := c.choose(p, s)
 		if pay == "" {
 			return
 		}
@@ -508,6 +523,11 @@ func (c *conformRun) choose(p *cPersona, s screen) string {
 	}
 	// экраны вне сценария (ответ RAG, обращения): «проблемный» передаёт рекрутеру
 	if problem {
+		for _, b := range bs {
+			if strings.HasPrefix(b.Payload, preQRecruiter) {
+				return b.Payload // r69: «передать через Корсика» — вопрос уходит рекрутеру
+			}
+		}
 		if pay, ok := byLabel(bs, btnToRecruiter); ok {
 			return pay
 		}

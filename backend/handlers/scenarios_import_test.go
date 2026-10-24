@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 )
@@ -43,5 +44,34 @@ func TestImportTZReportAPI(t *testing.T) {
 	again := a.upload("/api/scenarios/"+id+"/import", "tz.xlsx", b, "", 200)
 	if r, _ := again["import_report"].(map[string]any); r == nil || r["blocks"] != float64(16) {
 		t.Fatalf("импорт в сценарий: %v", again["import_report"])
+	}
+}
+
+// Всё, что создаёт импорт, проходит валидацию PUT без изменений: импорт → GET → PUT тем же телом
+// → 200, и шаги после PUT не меняются. Синтетика и (если задан TZ_XLSX) настоящий файл заказчика.
+func TestImportedStepsRoundTrip(t *testing.T) {
+	files := map[string]string{"синтетика": "../services/testdata/tz_synthetic.xlsx"}
+	if p := os.Getenv("TZ_XLSX"); p != "" {
+		files["ТЗ заказчика"] = p
+	}
+	for name, path := range files {
+		t.Run(name, func(t *testing.T) {
+			a := newAPI(t)
+			b, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			imp := a.upload("/api/scenarios/import", "tz.xlsx", b, "ТЗ (сверка)", 201)
+			id := imp["id"].(string)
+			got := a.json("GET", "/api/scenarios/"+id, nil, 200)
+			steps := got["steps"]
+			put := a.json("PUT", "/api/scenarios/"+id+"/steps", map[string]any{"steps": steps}, 200)
+			before, _ := json.Marshal(steps)
+			after, _ := json.Marshal(put["steps"])
+			if string(before) != string(after) {
+				t.Errorf("шаги изменились после PUT тем же телом")
+			}
+			a.json("PATCH", "/api/scenarios/"+id, map[string]any{"commands": got["commands"], "rules": got["rules"]}, 200)
+		})
 	}
 }

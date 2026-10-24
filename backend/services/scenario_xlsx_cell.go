@@ -624,6 +624,16 @@ func parseBranchBody(body []string) (*domain.Branch, bool, []cellWarn) {
 	if msg == "" && len(buttons) == 0 && len(actions) == 0 {
 		return nil, pending, warns
 	}
+	// «Ответить в чате с ботом либо нажать кнопку … рекрутеру» (r63): текст уходит тому же адресату,
+	// что и кнопка, — escalate с её маршрутом перед open_free_text.
+	if len(actions) > 0 && actions[0].Type == domain.ActionOpenFreeText {
+		for _, b := range buttons {
+			if b.Branch != nil && len(b.Branch.Actions) > 0 && b.Branch.Actions[0].Type == domain.ActionHandoff {
+				actions = append([]domain.Action{{Type: domain.ActionEscalate, Route: b.Branch.Actions[0].To}}, actions...)
+				break
+			}
+		}
+	}
 	br := &domain.Branch{Actions: actions, Then: "continue"}
 	if br.Actions == nil {
 		br.Actions = []domain.Action{}

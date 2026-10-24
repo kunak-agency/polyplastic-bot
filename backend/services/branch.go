@@ -29,9 +29,10 @@ const (
 
 // Тексты действий.
 const (
-	textFreeTextAsk = "Напишите одним сообщением — я передам."
-	textFileMissing = "Файл пока не загружен — HR пришлёт его отдельно."
-	textPlanMissing = "Плана ещё нет — я напомнил HR, он пришлёт его сюда."
+	textFreeTextAsk   = "Напишите одним сообщением — я передам."
+	textFreeTextAskTy = "Напиши одним сообщением — я передам."
+	textFileMissing   = "Файл пока не загружен — HR пришлёт его отдельно."
+	textPlanMissing   = "Плана ещё нет — я напомнил HR, он пришлёт его сюда."
 )
 
 // branchSrc — откуда ветка: кнопка шага i («3») или вариант v вопроса q опроса («q1v2»),
@@ -213,6 +214,7 @@ type pressPlan struct {
 	edit     *max.OutMessage
 	thenOf   *domain.Branch // чей then применять, когда ветка закончится
 	thenGo   bool           // применить then (поток блока ждал это нажатие)
+	resume   bool           // ветка варианта опроса ждала текст или эту кнопку — дальше вопрос опроса
 }
 
 // stepButton — кнопка обычного шага: ответ записывается, сообщение правится в «✅ …», затем
@@ -372,6 +374,11 @@ func (b *BotService) terminalButton(ctx context.Context, u max.Update, empID uui
 			p.freeText = true
 			e.AwaitFreeText = &domain.FreeTextWait{EventID: ev.ID, Label: tb.Label, Then: br.Then, Goto: br.Goto}
 		}
+		// Ветка варианта опроса ждала «ответ в чате или кнопку» (ТЗ r63): выбрана кнопка — текст
+		// больше не ждём, следующий вопрос опроса.
+		if strings.HasPrefix(src, "q") && !p.freeText && e.AwaitFreeText != nil && e.AwaitFreeText.EventID == ev.ID {
+			e.AwaitFreeText, p.resume = nil, true
+		}
 		if p.freeText && wasWaiting {
 			ev.Waiting = domain.WaitFreeText // then — после текста
 			p.thenGo = false
@@ -514,11 +521,11 @@ func (b *BotService) runPlan(ctx context.Context, p *pressPlan) {
 		case domain.ActionHandoff:
 			b.handoff(ctx, e, ev, p.step, a, p.label)
 		case domain.ActionOpenFreeText:
-			freeAsk = orDefault(a.Prompt, textFreeTextAsk)
+			freeAsk = orDefault(a.Prompt, byForm(e, textFreeTextAskTy, textFreeTextAsk))
 		}
 	}
 	if p.freeText {
-		b.send(ctx, recipientOf(e).msg(orDefault(freeAsk, textFreeTextAsk), "", nil))
+		b.send(ctx, recipientOf(e).msg(orDefault(freeAsk, byForm(e, textFreeTextAskTy, textFreeTextAsk)), "", nil))
 	}
 	if p.flagged {
 		if err := b.scheduler.FlagChanged(ctx, e.ID); err != nil {
@@ -528,6 +535,35 @@ func (b *BotService) runPlan(ctx context.Context, p *pressPlan) {
 	if p.thenGo && p.ev.Waiting == "" {
 		b.applyThen(ctx, e.ID, ev.ID, p.thenOf)
 	}
+	if p.resume {
+		b.resumeSurvey(ctx, e.ID, ev.ID)
+	}
+}
+
+// resumeSurvey — текущий вопрос опроса новым сообщением: ветка варианта с «ответь в чате или
+// нажми кнопку» (open_free_text, ТЗ r63 Б/В) держала следующий вопрос, пока новичок не ответит, —
+// иначе причина ушла бы ответом на следующий вопрос.
+func (b *BotService) resumeSurvey(ctx context.Context, empID, evID uuid.UUID) {
+	ev, err := b.repos.Events.ByIDForUpdate(ctx, evID) // вне транзакции — просто чтение
+	if err != nil || ev == nil || ev.Status != domain.EventSent || ev.Survey == nil {
+		return
+	}
+	e, err := b.repos.Employees.ByID(ctx, empID)
+	if err != nil || e == nil {
+		return
+	}
+	var step domain.ScenarioStep
+	var ok bool
+	if ev.Snapshot != nil {
+		step, ok = domain.ScenarioStep(*ev.Snapshot), true
+	} else if v, err := b.repos.Scenarios.Version(ctx, e.ScenarioID, ev.ScenarioVersion); err == nil && v != nil {
+		step, ok = v.Step(ev.StepID)
+	}
+	if !ok || !isSurvey(step) || ev.Survey.Q >= len(step.Survey.Questions) {
+		return
+	}
+	msg := surveyMessage(recipientOf(e), step, e, ev, b.now())
+	b.resend(ctx, surveyOutcome{msg: &msg, eventID: evID})
 }
 
 // applyThen — continue (по умолчанию) | end_block | goto_block.
@@ -743,6 +779,9 @@ func (b *BotService) freeText(ctx context.Context, emp *domain.Employee, text st
 	b.escalate(ctx, e, ev, step, a, w.Label, text)
 	if codes == nil {
 		b.classifyAsync(ctx, e, flagInput{text: text, where: "в ответе «свой вариант» на «" + step.Title + "»"})
+	}
+	if isSurvey(step) {
+		b.resumeSurvey(ctx, e.ID, w.EventID) // ветка варианта опроса ждала этот текст
 	}
 	if release {
 		b.applyThen(ctx, e.ID, w.EventID, &domain.Branch{Then: w.Then, Goto: w.Goto})

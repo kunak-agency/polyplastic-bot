@@ -243,7 +243,11 @@ func (b *BotService) afterSurvey(ctx context.Context, empID uuid.UUID, out surve
 		p := &pressPlan{emp: out.emp, ev: *out.ev, step: out.step, src: out.branchSrc, branch: out.branch,
 			messages: true, acts: out.branch.Actions, flagged: out.flagged, freeText: out.freeText}
 		b.runPlan(ctx, p)
-		if out.next != nil {
+		switch {
+		case out.next != nil && out.freeText:
+			// «ответь в чате или нажми кнопку» (ТЗ r63): следующий вопрос — после текста или кнопки
+			// (resumeSurvey в freeText и terminalButton), иначе причина ушла бы ответом на него
+		case out.next != nil:
 			n := out
 			n.msg, n.stale = out.next, true
 			b.resend(ctx, n)

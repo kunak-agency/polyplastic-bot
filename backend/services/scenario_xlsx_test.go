@@ -450,7 +450,8 @@ func TestImportTZSurveys(t *testing.T) {
 		t.Errorf("вопрос 1 итогового: %+v", fq[0])
 	}
 	b2 := fq[1].Branches["2"]
-	if b2 == nil || len(b2.Actions) != 1 || b2.Actions[0].Type != domain.ActionOpenFreeText ||
+	if b2 == nil || len(b2.Actions) != 2 || b2.Actions[0].Type != domain.ActionEscalate || b2.Actions[0].Route != "recruiter" ||
+		b2.Actions[1].Type != domain.ActionOpenFreeText ||
 		b2.Messages[0].Buttons[0].Label != "Готов рассказать причину лично рекрутеру" || fq[1].Branches["1"].Messages[0].TextTy != "Ура!" {
 		t.Errorf("ветки вопроса 2: %+v", fq[1].Branches)
 	}

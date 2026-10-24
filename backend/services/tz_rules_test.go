@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"main/domain"
+	"main/externalApi/max"
 	"main/externalApi/rag"
 )
 
@@ -304,5 +305,48 @@ func TestRuleSurveyReminderCollapses(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("напоминаний %d, ждём одно", n)
+	}
+}
+
+// r63 Б/В: «ответь в чате с ботом либо нажми кнопку … рекрутеру. Далее — вопрос 3». Следующий
+// вопрос ждёт текст или кнопку: иначе причина ушла бы ответом на него.
+func TestSurveyBranchWaitsForTextOrButton(t *testing.T) {
+	for _, viaButton := range []bool{false, true} {
+		e := newEnv(t, flowNow)
+		why := &domain.Branch{Actions: []domain.Action{{Type: domain.ActionEscalate, Route: "recruiter"}, {Type: domain.ActionOpenFreeText}}, Messages: []domain.BranchMessage{{
+			TextVy: "Что повлияло?", TextTy: "Что повлияло?", Buttons: []domain.StepButton{handoffButton("Готов озвучить причину рекрутеру лично", "recruiter")}}}}
+		sv := &domain.Survey{Questions: []domain.SurveyQuestion{
+			{Text: "Останетесь?", Type: "choice", Options: []string{"Да", "Не уверен"}, Branches: map[string]*domain.Branch{"2": why}},
+			{Text: "Что улучшить?", Type: "yesno"},
+		}}
+		c, _ := e.launchSteps(t, flowStart, []domain.ScenarioStep{{DayOffset: 0, Time: "10:00", Kind: domain.KindSurvey, Title: "Итоги", TextVy: "Опрос", Survey: sv}})
+		e.connect(t, c, domain.AddressVy, true)
+		ev := eventByTitle(t, e.events(t, c.Employee.ID), "Итоги")
+		e.press(preAnswer + ev.ID.String() + ":0:2")
+		e.svc.Bot.Wait()
+		if hasText(e.fake, "Что улучшить?") {
+			t.Fatalf("следующий вопрос до текста/кнопки: %q", sentTexts(e.fake))
+		}
+		if viaButton {
+			var branchMsg max.OutMessage
+			for _, m := range e.fake.Sent() {
+				if strings.HasPrefix(m.Text, "Что повлияло?") {
+					branchMsg = m
+				}
+			}
+			e.press(findPayload(branchMsg, "Готов озвучить причину рекрутеру лично"))
+		} else {
+			e.say("сомневаюсь из-за графика")
+		}
+		e.svc.Bot.Wait()
+		if !strings.Contains(lastSent(t, e.fake).Text, "Что улучшить?") {
+			t.Fatalf("вопрос 2 после %v: %q", viaButton, sentTexts(e.fake))
+		}
+		if emp := e.employee(t, c.Employee.ID); emp.AwaitFreeText != nil {
+			t.Fatalf("текст всё ещё ждём: %+v", emp.AwaitFreeText)
+		}
+		if tks := e.tickets(t, c.Employee.ID); len(tks) == 0 || tks[0].Route != "recruiter" {
+			t.Fatalf("обращение рекрутеру: %+v", tks)
+		}
 	}
 }
